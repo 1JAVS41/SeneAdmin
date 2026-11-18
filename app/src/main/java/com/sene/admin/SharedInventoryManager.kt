@@ -250,6 +250,51 @@ object SharedInventoryManager {
         return null
     }
 
+    /** Extrae el inventario incluido en un reporte de inicio o cierre de turno. */
+    fun inventoryFromReport(report: SeneReport): Snapshot? {
+        val lines = report.body.replace("\r", "").lines()
+        val pipeMarker = maxOf(
+            lines.indexOfLast { it.trim().equals("INVENTARIO_SENE_V1", true) },
+            lines.indexOfLast { it.trim().equals("INVENTARIO AL FINALIZAR TURNO", true) }
+        )
+        if (pipeMarker >= 0) {
+            val section = lines.drop(pipeMarker + 1).takeWhile { line ->
+                val value = line.trim()
+                value.isNotBlank() && !value.startsWith("ETIQUETA:", true) &&
+                    !value.startsWith("Guarde este reporte", true) &&
+                    !value.startsWith("DESGLOSE PARA NÓMINA", true)
+            }
+            val items = parse(section.joinToString("\n"))
+            if (items.isNotEmpty()) return Snapshot("INVENTARIO_SENE", report.id, report.date + " " + report.time, items, false)
+        }
+        val label = lines.indexOfLast { it.trim().equals("ETIQUETA: EXISTENCIAS ACTUALES", true) }
+        if (label < 0) return null
+        val normalized = mutableListOf<String>()
+        var product = ""
+        var aisle = ""
+        var shelf = ""
+        for (line in lines.drop(label + 1)) {
+            val value = line.trim()
+            if (value.startsWith("ETIQUETA:", true) || value.startsWith("DESGLOSE PARA NÓMINA", true)) break
+            if (value.startsWith("PRODUCTO:", true)) {
+                product = value.substringAfter(":").trim()
+                aisle = ""; shelf = ""
+            } else if (value.startsWith("CÓDIGO:", true) || value.startsWith("CODIGO:", true)) {
+                val parts = value.substringAfter(":").split("|").map { it.trim() }
+                val code = parts.firstOrNull().orEmpty()
+                val price = parts.firstOrNull { it.startsWith("PRECIO:", true) }?.substringAfter(":")?.trim().orEmpty()
+                val stock = parts.firstOrNull { it.startsWith("STOCK:", true) }?.substringAfter(":")?.trim().orEmpty()
+                if (product.isNotBlank() && code.isNotBlank() && price.isNotBlank() && stock.isNotBlank())
+                    normalized.add("$code | $product | $price | $stock | $aisle | $shelf")
+            } else if (value.startsWith("PASILLO:", true)) {
+                aisle = value.substringAfter(":").substringBefore("|").trim()
+                shelf = value.substringAfter("ESTANTE:", "").trim()
+            }
+        }
+        val items = parse(normalized.joinToString("\n"))
+        return if (items.isEmpty()) null else Snapshot("INVENTARIO_SENE", report.id, report.date + " " + report.time, items, false)
+    }
+
     /** Solo un reporte más reciente puede sustituir el inventario maestro; mensajes atrasados no revierten stock. */
     fun updateMasterFromReport(c: Context, ownerKey: String, reportBody: String, reportUpdated: String): String? {
         val incoming = normalizeUpdated(reportUpdated) ?: return null
