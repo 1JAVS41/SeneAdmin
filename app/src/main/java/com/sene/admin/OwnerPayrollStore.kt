@@ -62,9 +62,22 @@ object OwnerPayrollStore {
         val a=array(c,PAYROLLS);return (0 until a.length()).mapNotNull{i->try{val o=a.getJSONObject(i);if(o.getString("profileId")!=profileId)null else Payroll(o.getString("id"),profileId,o.getString("period"),o.optLong("gross"),o.optLong("absence"),o.optLong("loan"),o.optLong("consumption"),o.optLong("net"),o.optString("status"),o.optString("createdAt"),o.optString("paidAt"),o.optLong("delivered"))}catch(_:Exception){null}}
     }
     fun createOrGetPayroll(c:Context,profileId:String):Payroll{
-        val week=Calendar.getInstance().apply{firstDayOfWeek=Calendar.MONDAY;set(Calendar.DAY_OF_WEEK,Calendar.MONDAY)}.let{SimpleDateFormat("yyyy-MM-dd",Locale.US).format(it.time)}
-        payrolls(c,profileId).firstOrNull{it.period==week}?.let{return it}
         val p=profile(c,profileId)?:throw IllegalStateException("Perfil no encontrado")
+        val payDay = when (p.payDay.trim().lowercase(Locale("es","MX"))) {
+            "domingo" -> Calendar.SUNDAY
+            "lunes" -> Calendar.MONDAY
+            "martes" -> Calendar.TUESDAY
+            "miércoles", "miercoles" -> Calendar.WEDNESDAY
+            "jueves" -> Calendar.THURSDAY
+            "viernes" -> Calendar.FRIDAY
+            "sábado", "sabado" -> Calendar.SATURDAY
+            else -> Calendar.MONDAY
+        }
+        val week=Calendar.getInstance().apply {
+            val delta=(get(Calendar.DAY_OF_WEEK)-payDay+7)%7
+            add(Calendar.DAY_OF_YEAR,-delta)
+        }.let{SimpleDateFormat("yyyy-MM-dd",Locale.US).format(it.time)}
+        payrolls(c,profileId).firstOrNull{it.period==week}?.let{return it}
         val id=UUID.randomUUID().toString()
         val pending=entries(c,profileId).filter{it.payrollId.isBlank()}
         val absence=pending.filter{it.type=="FALTA"}.sumOf{it.amountCents}
@@ -117,5 +130,5 @@ object OwnerPayrollStore {
         val today=SimpleDateFormat("EEEE",Locale("es","MX")).format(Date())
         return p.payDay.isNotBlank()&&today.equals(p.payDay,true)
     }
-    fun money(cents:Long)="$${String.format(Locale.US,"%,.2f",cents/100.0)}"
+    fun money(cents:Long)="$" + String.format(Locale.US,"%,.2f",cents/100.0)
 }
