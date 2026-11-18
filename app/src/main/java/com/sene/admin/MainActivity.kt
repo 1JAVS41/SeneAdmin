@@ -5,57 +5,163 @@ import android.app.AlertDialog
 import android.content.Intent
 import android.graphics.Typeface
 import android.os.Bundle
+import android.text.InputType
 import android.view.ViewGroup
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
+import java.util.Locale
 
 class MainActivity : Activity() {
     private lateinit var root: LinearLayout
+
     override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState); showHome()
+        super.onCreate(savedInstanceState)
+        showHome()
         if (!OwnerKeyStore.hasKey(this)) askOwnerKey() else handleIncoming(intent)
     }
-    override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); setIntent(intent); handleIncoming(intent) }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleIncoming(intent)
+    }
+
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
         if (requestCode == SharedInventoryManager.REQUEST_TREE && resultCode == RESULT_OK) {
             val uri = data?.data ?: return
-            try { SharedInventoryManager.acceptFolder(this, uri); Toast.makeText(this, "Carpeta INVENTARIO SENE vinculada", Toast.LENGTH_LONG).show(); showHome() }
-            catch (e: Exception) { info("NO SE PUDO VINCULAR", e.message ?: "Android no concedió acceso a la carpeta.") }
+            try {
+                SharedInventoryManager.acceptFolder(this, uri)
+                Toast.makeText(this, "Carpeta INVENTARIO SENE vinculada", Toast.LENGTH_LONG).show()
+                showHome()
+            } catch (e: Exception) {
+                info("NO SE PUDO VINCULAR", e.message ?: "Android no concedió acceso a la carpeta.")
+            }
         }
     }
-    private fun handleIncoming(intent: Intent?) {
-        if (intent?.action == Intent.ACTION_SEND && intent.type == "text/plain")
-            intent.getStringExtra(Intent.EXTRA_TEXT)?.takeIf { it.isNotBlank() }?.let { importReport(it) }
+
+    private fun handleIncoming(incoming: Intent?) {
+        if (incoming?.action == Intent.ACTION_SEND && incoming.type == "text/plain") {
+            incoming.getStringExtra(Intent.EXTRA_TEXT)?.takeIf { it.isNotBlank() }?.let { importReports(it) }
+        }
     }
+
     private fun showHome() {
-        root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(24, 28, 24, 24); setBackgroundColor(0xFFF4F7FB.toInt()) }
-        root.addView(TextView(this).apply { text = "SENE ADMIN"; textSize = 26f; typeface = Typeface.DEFAULT_BOLD; setTextColor(0xFF123B68.toInt()) })
-        root.addView(TextView(this).apply { text = "Panel del propietario"; textSize = 15f; setTextColor(0xFF526579.toInt()); setPadding(0, 4, 0, 20) })
-        addAction("INVENTARIO MAESTRO", "Existencias generales actualizadas por reportes") { showInventory("INVENTARIO_MAESTRO") }
-        addAction("INVENTARIO SENE", "Carpeta compartida con SENE VENTAS") {
-            if (SharedInventoryManager.savedTree(this) == null) SharedInventoryManager.chooseFolder(this) else showInventory("INVENTARIO_SENE")
+        root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(22, 24, 22, 24)
+            setBackgroundColor(0xFFF4F7FB.toInt())
         }
-        addAction("VINCULAR / CAMBIAR CARPETA", "Seleccionar la carpeta INVENTARIO SENE") { SharedInventoryManager.chooseFolder(this) }
-        addAction("REPORTES DE TRABAJADORES", "Historial ordenado por trabajador, fecha y número") { showReports() }
-        addAction("PERSONAL Y NÓMINA", "Perfiles, días de pago, faltas, sueldos y movimientos") {
-            startActivity(Intent(this, PayrollActivity::class.java))
+        val header = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        header.addView(TextView(this).apply {
+            text = "SENE ADMIN"; textSize = 25f
+            typeface = Typeface.DEFAULT_BOLD; setTextColor(0xFF123B68.toInt())
+        }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        header.addView(TextView(this).apply {
+            text = "⚙"; textSize = 25f; setTextColor(0xFF526579.toInt())
+            setPadding(14, 0, 8, 8); setOnClickListener { showSettings() }
+        })
+        root.addView(header)
+        root.addView(TextView(this).apply {
+            text = "Pega los reportes recibidos por WhatsApp. SENE ADMIN organizará todo automáticamente."
+            textSize = 14f; setTextColor(0xFF526579.toInt()); setPadding(0, 6, 0, 20)
+        })
+        val paste = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL; gravity = android.view.Gravity.CENTER
+            setPadding(18, 24, 18, 24); setBackgroundColor(0xFF1769AA.toInt()); elevation = 4f
         }
-        addAction("CLAVE DEL PROPIETARIO", "La misma clave que utiliza SENE VENTAS") { askOwnerKey() }
+        paste.addView(TextView(this).apply {
+            text = "PEGA AQUÍ TUS REPORTES DE WHATSAPP"; textSize = 18f
+            typeface = Typeface.DEFAULT_BOLD; gravity = android.view.Gravity.CENTER; setTextColor(-1)
+        })
+        paste.addView(TextView(this).apply {
+            text = "Puedes pegar uno o varios reportes juntos"; textSize = 13f
+            gravity = android.view.Gravity.CENTER; setTextColor(0xFFE7F2FF.toInt()); setPadding(0, 8, 0, 0)
+        })
+        val pasteLp = LinearLayout.LayoutParams(-1, ViewGroup.LayoutParams.WRAP_CONTENT)
+        pasteLp.bottomMargin = 22
+        root.addView(paste, pasteLp)
+        paste.setOnClickListener { showPasteDialog() }
+        root.addView(TextView(this).apply {
+            text = "TRABAJADORES"; textSize = 14f; typeface = Typeface.DEFAULT_BOLD
+            setTextColor(0xFF526579.toInt()); setPadding(2, 0, 0, 10)
+        })
+        val profiles = OwnerPayrollStore.profiles(this).sortedBy { it.name.lowercase(Locale.ROOT) }
+        if (profiles.isEmpty()) {
+            root.addView(TextView(this).apply {
+                text = "Aquí aparecerá automáticamente cada trabajador cuando pegues su primer reporte."
+                textSize = 14f; setTextColor(0xFF718096.toInt()); setPadding(4, 8, 4, 16)
+            })
+        } else profiles.forEach { p ->
+            val card = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL; gravity = android.view.Gravity.CENTER_VERTICAL
+                setPadding(16, 15, 16, 15); setBackgroundColor(-1); elevation = 2f
+            }
+            card.addView(TextView(this).apply {
+                text = p.name.ifBlank { "Trabajador " + p.id }; textSize = 17f
+                typeface = Typeface.DEFAULT_BOLD; setTextColor(0xFF173C67.toInt())
+            }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            card.addView(TextView(this).apply { text = "›"; textSize = 26f; setTextColor(0xFF6B8299.toInt()) })
+            val lp = LinearLayout.LayoutParams(-1, ViewGroup.LayoutParams.WRAP_CONTENT)
+            lp.bottomMargin = 9
+            root.addView(card, lp)
+            card.setOnClickListener {
+                startActivity(Intent(this, PayrollActivity::class.java).putExtra("profile_id", p.id))
+            }
+        }
         setContentView(ScrollView(this).apply { addView(root) })
     }
-    private fun addAction(title: String, subtitle: String, action: () -> Unit) {
-        val card = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(18, 16, 18, 16); setBackgroundColor(-1); elevation = 3f }
-        card.addView(TextView(this).apply { text = title; textSize = 17f; typeface = Typeface.DEFAULT_BOLD; setTextColor(0xFF123B68.toInt()) })
-        card.addView(TextView(this).apply { text = subtitle; textSize = 13f; setTextColor(0xFF64748B.toInt()); setPadding(0, 5, 0, 0) })
-        val lp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT); lp.bottomMargin = 12
-        root.addView(card, lp); card.setOnClickListener { action() }
+
+    private fun showPasteDialog() {
+        val input = EditText(this).apply {
+            hint = "Mantén presionado aquí y selecciona PEGAR"
+            minLines = 8; maxLines = 16; gravity = android.view.Gravity.TOP
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE
+            setTextIsSelectable(true)
+        }
+        val box = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL; setPadding(20, 8, 20, 4)
+            addView(TextView(this@MainActivity).apply {
+                text = "Pega aquí el texto completo de WhatsApp. Puedes incluir varios reportes uno después de otro."
+                textSize = 13f; setTextColor(0xFF526579.toInt()); setPadding(0, 0, 0, 10)
+            })
+            addView(input)
+        }
+        val dialog = AlertDialog.Builder(this).setTitle("IMPORTAR REPORTES")
+            .setView(box).setPositiveButton("PROCESAR", null).setNegativeButton("CANCELAR", null).create()
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val raw = input.text.toString().trim()
+                if (raw.isBlank()) { input.error = "Pega al menos un reporte"; return@setOnClickListener }
+                dialog.dismiss()
+                importReports(raw)
+            }
+        }
+        dialog.show()
     }
+
+    private fun showSettings() {
+        val options = arrayOf("Vincular / cambiar carpeta compartida", "Clave del propietario",
+            "Ver inventario maestro", "Ver inventario SENE", "Ver todos los reportes")
+        AlertDialog.Builder(this).setTitle("AJUSTES").setItems(options) { _, which ->
+            when (which) {
+                0 -> SharedInventoryManager.chooseFolder(this)
+                1 -> askOwnerKey()
+                2 -> showInventory("INVENTARIO_MAESTRO")
+                3 -> showInventory("INVENTARIO_SENE")
+                4 -> showReports()
+            }
+        }.setNegativeButton("CERRAR", null).show()
+    }
+
     private fun askOwnerKey() {
-        val input = EditText(this).apply { hint = "Clave del propietario (mínimo 8 caracteres)"; setSingleLine(true); inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD }
+        val input = EditText(this).apply {
+            hint = "Clave del propietario (mínimo 8 caracteres)"; setSingleLine(true)
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+        }
         val dlg = AlertDialog.Builder(this).setTitle("CLAVE DEL PROPIETARIO")
             .setMessage("Introduce la misma clave que utilizas en SENE VENTAS. Si eres cliente nuevo, crea aquí tu clave y consérvala.")
             .setView(input).setPositiveButton("GUARDAR", null).setNegativeButton("CANCELAR", null).create()
@@ -63,12 +169,19 @@ class MainActivity : Activity() {
             dlg.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
                 val value = input.text.toString().trim()
                 if (value.length < 8) { input.error = "Mínimo 8 caracteres"; return@setOnClickListener }
-                if (!OwnerKeyStore.save(this, value)) { input.error = if (OwnerKeyStore.hasKey(this)) "La clave no coincide con la ya registrada" else "No se pudo guardar"; return@setOnClickListener }
-                dlg.dismiss(); Toast.makeText(this, "Clave del propietario guardada", Toast.LENGTH_LONG).show(); handleIncoming(intent)
+                if (!OwnerKeyStore.save(this, value)) {
+                    input.error = if (OwnerKeyStore.hasKey(this)) "La clave no coincide con la ya registrada" else "No se pudo guardar"
+                    return@setOnClickListener
+                }
+                dlg.dismiss()
+                Toast.makeText(this, "Clave del propietario guardada", Toast.LENGTH_LONG).show()
+                showHome()
+                handleIncoming(intent)
             }
         }
         dlg.show()
     }
+
     private fun showInventory(category: String) {
         val key = OwnerKeyStore.read(this)
         if (key == null) { askOwnerKey(); return }
@@ -84,7 +197,10 @@ class MainActivity : Activity() {
             }
             val latest = snapshots.firstOrNull()
             val title = if (category == "INVENTARIO_MAESTRO") "INVENTARIO MAESTRO" else "INVENTARIO SENE"
-            if (latest == null) { info(title, "No hay archivos de esta categoría. Los TXT anteriores se pueden leer sin modificarlos; los nuevos respaldos se guardarán cifrados."); return }
+            if (latest == null) {
+                info(title, "No hay archivos de esta categoría. Los TXT anteriores se pueden leer sin modificarlos; los nuevos respaldos se guardarán cifrados.")
+                return
+            }
             val detail = buildString {
                 append("Archivo: ").append(latest.fileName).append("\nActualizado: ").append(latest.updated)
                 append("\nProductos: ").append(latest.items.size)
@@ -99,41 +215,63 @@ class MainActivity : Activity() {
                 append("\nRespaldos encontrados: ").append(snapshots.size)
             }
             AlertDialog.Builder(this).setTitle(title).setMessage(detail).setPositiveButton("CERRAR", null).show()
-        } catch (e: Exception) { info("NO SE PUDO ABRIR EL INVENTARIO", e.message ?: "Verifica la clave y los permisos. El archivo original permanece intacto.") }
+        } catch (e: Exception) {
+            info("NO SE PUDO ABRIR EL INVENTARIO", e.message ?: "Verifica la clave y los permisos. El archivo original permanece intacto.")
+        }
     }
-    private fun importReport(message: String) {
+
+    private fun importReports(raw: String) {
         val key = OwnerKeyStore.read(this)
-        if (key == null) { info("CONFIGURA TU CLAVE", "Primero introduce la clave del propietario para leer este reporte."); askOwnerKey(); return }
-        try {
-            val report = SeneReportReader.read(message, key)
-            if (SeneAdminStore.reports(this).any { it.id == report.id }) {
-                Toast.makeText(this, "Este reporte ya fue recibido. No se volvió a procesar.", Toast.LENGTH_LONG).show(); return
+        if (key == null) {
+            info("CONFIGURA TU CLAVE", "Primero introduce la clave del propietario para leer estos reportes.")
+            askOwnerKey()
+            return
+        }
+        val chunks = raw.split(Regex("(?m)(?=^SENE-ADMIN-REPORT\\|1\\s*$)"))
+            .map { it.trim() }.filter { it.isNotBlank() }
+        var imported = 0
+        var duplicates = 0
+        val errors = mutableListOf<String>()
+        chunks.forEachIndexed { index, message ->
+            try {
+                val report = SeneReportReader.read(message, key)
+                if (SeneAdminStore.reports(this).any { it.id == report.id }) duplicates++
+                else { processReport(report, message, key); imported++ }
+            } catch (e: Exception) {
+                errors.add("Reporte " + (index + 1) + ": " + (e.message ?: "formato no válido"))
             }
-            if (!SeneAdminStore.saveReport(this, report)) throw IllegalStateException("No se pudo guardar el reporte.")
-            var reportBackupNote = ""
-            if (SharedInventoryManager.savedTree(this) != null) {
-                try {
-                    val archive = SharedInventoryManager.saveReport(this, report, message, key)
-                    reportBackupNote = "\\nRespaldo compartido: $archive"
-                } catch (e: Exception) {
-                    reportBackupNote = "\\nEl reporte quedó guardado en SENE ADMIN, pero no se pudo copiar a la carpeta compartida: " + (e.message ?: "error")
-                }
+        }
+        // Crear o actualizar la nómina solo después de procesar el lote completo.
+        OwnerPayrollStore.profiles(this).filter { it.weeklySalaryCents > 0L }.forEach { profile ->
+            try { OwnerPayrollStore.createOrGetPayroll(this, profile.id) } catch (_: Exception) { }
+        }
+        showHome()
+        val summary = buildString {
+            append("Nuevos reportes: ").append(imported)
+            append("\nDuplicados omitidos: ").append(duplicates)
+            if (errors.isNotEmpty()) {
+                append("\n\nNo se pudieron leer:")
+                errors.take(8).forEach { append("\n• ").append(it) }
+                if (errors.size > 8) append("\nY ").append(errors.size - 8).append(" más.")
             }
-            val isOrder = report.body.startsWith("SENE-ORDER|1")
-            if (isOrder) OwnerPayrollStore.importOrder(this, report) else OwnerPayrollStore.importProfile(this, report)
-            var note = ""
-            if (SharedInventoryManager.savedTree(this) != null) {
-                try {
-                    val saved = SharedInventoryManager.updateMasterFromReport(this, key, report.body, report.date + " " + report.time)
-                    if (saved != null) note = "\nInventario maestro actualizado: $saved"
-                } catch (e: Exception) { note = "\nEl reporte se guardó, pero no se actualizó el inventario maestro: " + (e.message ?: "error") }
-            } else note = "\nVincula la carpeta INVENTARIO SENE para actualizar el inventario maestro."
-            Toast.makeText(this, "Reporte recibido: ${report.type}", Toast.LENGTH_LONG).show()
-            AlertDialog.Builder(this).setTitle(if (isOrder) "ORDEN RECIBIDA" else "REPORTE RECIBIDO")
-                .setMessage("Trabajador: ${report.workerId}\nFecha: ${report.date} ${report.time}\nNúmero: ${report.number}$note$reportBackupNote")
-                .setPositiveButton("VER REPORTES") { _, _ -> showReports() }.setNegativeButton("CERRAR", null).show()
-        } catch (e: Exception) { info("NO SE PUDO IMPORTAR", e.message ?: "Reporte inválido. El mensaje original no se modificó.") }
+        }
+        AlertDialog.Builder(this).setTitle("IMPORTACIÓN TERMINADA").setMessage(summary)
+            .setPositiveButton("ACEPTAR", null).show()
     }
+
+    private fun processReport(report: SeneReport, message: String, key: String) {
+        if (!SeneAdminStore.saveReport(this, report)) throw IllegalStateException("No se pudo guardar el reporte.")
+        if (SharedInventoryManager.savedTree(this) != null) {
+            try { SharedInventoryManager.saveReport(this, report, message, key) } catch (_: Exception) { }
+        }
+        if (report.body.startsWith("SENE-ORDER|1")) OwnerPayrollStore.importOrder(this, report)
+        else OwnerPayrollStore.importProfile(this, report)
+        if (SharedInventoryManager.savedTree(this) != null) {
+            try { SharedInventoryManager.updateMasterFromReport(this, key, report.body, report.date + " " + report.time) }
+            catch (_: Exception) { }
+        }
+    }
+
     private fun showReports() {
         if (SeneAdminStore.reports(this).isEmpty()) {
             val key = OwnerKeyStore.read(this)
@@ -145,13 +283,16 @@ class MainActivity : Activity() {
             }
         }
         val lines = SeneAdminStore.reports(this).sortedWith(compareBy<SeneReport> { it.workerId }.thenBy { it.date }.thenBy { it.time }.thenBy { it.number })
-        val body = if (lines.isEmpty()) "Todavía no hay reportes importados. Comparte un mensaje hacia SENE ADMIN." else
+        val body = if (lines.isEmpty()) "Todavía no hay reportes importados." else
             lines.groupBy { it.workerId }.entries.joinToString("\n\n") { (worker, reports) ->
-                "TRABAJADOR: $worker\n" + reports.joinToString("\n\n") {
-                    "FECHA: ${it.date} ${it.time}\nNÚMERO: ${it.number}\nTIPO: ${it.type}\n\n${it.body}"
+                "TRABAJADOR: " + worker + "\n" + reports.joinToString("\n\n") {
+                    "FECHA: " + it.date + " " + it.time + "\nNÚMERO: " + it.number + "\nTIPO: " + it.type + "\n\n" + it.body
                 }
             }
         AlertDialog.Builder(this).setTitle("REPORTES RECIBIDOS").setMessage(body).setPositiveButton("CERRAR", null).show()
     }
-    private fun info(title: String, message: String) { AlertDialog.Builder(this).setTitle(title).setMessage(message).setPositiveButton("ACEPTAR", null).show() }
+
+    private fun info(title: String, message: String) {
+        AlertDialog.Builder(this).setTitle(title).setMessage(message).setPositiveButton("ACEPTAR", null).show()
+    }
 }
