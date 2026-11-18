@@ -176,6 +176,19 @@ object SharedInventoryManager {
         return name
     }
 
+    /** Recupera reportes cifrados desde la carpeta compartida sin modificar los archivos originales. */
+    fun archivedReports(c: Context, ownerKey: String): List<SeneReport> {
+        val tree = savedTree(c) ?: return emptyList()
+        val dir = folder(c, tree, "REPORTES", false) ?: return emptyList()
+        return children(c, tree, dir).filter { it.first.endsWith(".sene", true) || it.first.endsWith(".txt", true) }
+            .sortedByDescending { it.first }.mapNotNull { (_, _, uri) ->
+                try {
+                    val raw = c.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return@mapNotNull null
+                    SeneReportReader.read(String(raw, Charsets.UTF_8), ownerKey)
+                } catch (_: Exception) { null }
+            }
+    }
+
     /** Limpieza cada 30 días: conserva los 10 respaldos más recientes de cada categoría. */
     private fun cleanupIfDue(c: Context, tree: Uri, dirName: String) {
         val prefKey = "last_cleanup_" + dirName
