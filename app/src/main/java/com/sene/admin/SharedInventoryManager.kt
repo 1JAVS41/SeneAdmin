@@ -66,6 +66,14 @@ object SharedInventoryManager {
             DocumentsContract.Document.MIME_TYPE_DIR, name)
     }
 
+    private fun sortKey(name: String): String {
+        val timestamp = Regex("(?i)^inventario-(\\d{8}-\\d{6}-\\d{3})\\.sene$").matchEntire(name)?.groupValues?.get(1)
+        if (timestamp != null) return "2" + timestamp
+        val sequence = Regex("(?i)^inventario-(\\d+)\\.txt$").matchEntire(name)?.groupValues?.get(1)?.toLongOrNull()
+        if (sequence != null) return "1" + sequence.toString().padStart(20, '0')
+        return "0" + name
+    }
+
     private fun decode(c: Context, bytes: ByteArray, ownerKey: String, expectedCategory: String, name: String): Snapshot {
         if (SeneSharedFiles.isSharedFile(bytes)) {
             val doc = SeneSharedFiles.decode(bytes, ownerKey)
@@ -115,7 +123,7 @@ object SharedInventoryManager {
         val dirName = if (category == "INVENTARIO_MAESTRO") "INVENTARIO-MAESTRO" else "INVENTARIO-SENE"
         val dir = folder(c, tree, dirName, false) ?: return emptyList()
         return children(c, tree, dir).filter { it.first.endsWith(".sene", true) || it.first.endsWith(".txt", true) }
-            .sortedByDescending { it.first }.mapNotNull { (name, _, uri) ->
+            .sortedByDescending { sortKey(it.first) }.mapNotNull { (name, _, uri) ->
                 try {
                     val bytes = c.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return@mapNotNull null
                     decode(c, bytes, ownerKey, category, name)
@@ -164,7 +172,7 @@ object SharedInventoryManager {
             catch (_: Exception) { complete = false }
         }
         val local = java.io.File(c.filesDir, "SENE-ADMIN/$dirName")
-        local.listFiles()?.filter { it.isFile }?.sortedByDescending { it.name }?.drop(10)?.forEach {
+        local.listFiles()?.filter { it.isFile }?.sortedByDescending { sortKey(it.name) }?.drop(10)?.forEach {
             if (!it.delete()) complete = false
         }
         if (complete) prefs(c).edit().putLong(prefKey, now).apply()
