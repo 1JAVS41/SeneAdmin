@@ -158,7 +158,7 @@ object SharedInventoryManager {
     }
 
     /** Guarda el mensaje de reporte ya cifrado por SENE VENTAS en la carpeta compartida. */
-    fun saveReport(c: Context, report: SeneReport, encryptedMessage: String): String {
+    fun saveReport(c: Context, report: SeneReport, encryptedMessage: String, ownerKey: String): String {
         val tree = savedTree(c) ?: throw IllegalStateException("Carpeta compartida no seleccionada.")
         val dir = folder(c, tree, "REPORTES", true) ?: throw IllegalStateException("No se pudo crear REPORTES.")
         val datePart = report.date.replace("-", "")
