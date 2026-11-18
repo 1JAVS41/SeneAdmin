@@ -90,6 +90,9 @@ class MainActivity : Activity() {
         mainOption("NÓMINA", "Trabajadores, desglose semanal y pagos") {
             startActivity(Intent(this, PayrollActivity::class.java))
         }
+        mainOption("INVENTARIO SENE", "Inventario más reciente recibido por trabajador") {
+            showSeneInventory()
+        }
         mainOption("OTROS REPORTES", "Pegar reportes de WhatsApp y consultar información") {
             val options = arrayOf("Pegar reportes de WhatsApp", "Consultar reportes recibidos", "Ajustes")
             AlertDialog.Builder(this).setTitle("OTROS REPORTES").setItems(options) { _, which ->
@@ -101,6 +104,76 @@ class MainActivity : Activity() {
             }.setNegativeButton("CERRAR", null).show()
         }
         setContentView(ScrollView(this).apply { addView(root) })
+    }
+
+    private fun showSeneInventory() {
+        val reports = SeneAdminStore.reports(this)
+        val latest = reports.sortedWith(compareBy<SeneReport> { it.date }.thenBy { it.time }.thenBy { it.number })
+            .mapNotNull { report ->
+                val inventory = SharedInventoryManager.inventoryFromReport(report) ?: return@mapNotNull null
+                Triple(report, inventory, report.body.lines().firstOrNull { it.trim().startsWith("TRABAJADOR:", true) }
+                    ?.substringAfter(":")?.trim().orEmpty().ifBlank { OwnerPayrollStore.profile(this, report.workerId)?.name ?: report.workerId })
+            }
+            .groupBy { it.first.workerId }
+            .values.mapNotNull { rows -> rows.maxWithOrNull(compareBy<Triple<SeneReport, SharedInventoryManager.Snapshot, String>> { it.first.date }.thenBy { it.first.time }.thenBy { it.first.number }) }
+            .sortedBy { it.third.lowercase(Locale.ROOT) }
+
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(18, 10, 18, 10)
+        }
+        if (latest.isEmpty()) {
+            content.addView(TextView(this).apply {
+                text = "Todavía no se reciben reportes con inventario. Al recibir el primer reporte de inicio de turno aparecerá aquí."
+                textSize = 15f; setTextColor(0xFF526579.toInt()); setPadding(8, 18, 8, 18)
+            })
+        } else {
+            latest.sortedWith(compareByDescending<Triple<SeneReport, SharedInventoryManager.Snapshot, String>> { it.first.date + " " + it.first.time })
+                .forEach { (report, inventory, workerName) ->
+                    val card = LinearLayout(this).apply {
+                        orientation = LinearLayout.VERTICAL
+                        setPadding(16, 14, 16, 14)
+                        setBackgroundColor(0xFFFFFFFF.toInt())
+                        elevation = 3f
+                        isClickable = true
+                        isFocusable = true
+                    }
+                    card.addView(TextView(this).apply {
+                        text = workerName; textSize = 17f; typeface = Typeface.DEFAULT_BOLD
+                        setTextColor(0xFF173C7B.toInt())
+                    })
+                    card.addView(TextView(this).apply {
+                        text = "ÚLTIMO INVENTARIO · " + report.date + " " + report.time +
+                            "\nProductos registrados: " + inventory.items.size
+                        textSize = 13f; setTextColor(0xFF526579.toInt()); setPadding(0, 5, 0, 0)
+                    })
+                    card.setOnClickListener { showInventoryDetail(workerName, report, inventory) }
+                    val lp = LinearLayout.LayoutParams(-1, -2); lp.bottomMargin = 12
+                    content.addView(card, lp)
+                }
+        }
+        AlertDialog.Builder(this).setTitle("INVENTARIO SENE")
+            .setView(ScrollView(this).apply { addView(content) })
+            .setPositiveButton("CERRAR", null).show()
+    }
+
+    private fun showInventoryDetail(workerName: String, report: SeneReport, inventory: SharedInventoryManager.Snapshot) {
+        val body = buildString {
+            append("TRABAJADOR: ").append(workerName)
+            append("\nFECHA DEL REPORTE: ").append(report.date).append(" ").append(report.time)
+            append("\nPRODUCTOS: ").append(inventory.items.size)
+            append("\n\nINVENTARIO RECIBIDO")
+            inventory.items.forEach { item ->
+                append("\n\n").append(item.name)
+                append("\nCódigo: ").append(item.code)
+                append("\nPrecio: ").append(OwnerPayrollStore.money((item.price * 100.0).toLong()))
+                append("\nExistencia: ").append(item.stock)
+                if (item.aisle.isNotBlank()) append("\nPasillo: ").append(item.aisle)
+                if (item.shelf.isNotBlank()) append("\nEstante: ").append(item.shelf)
+            }
+        }
+        AlertDialog.Builder(this).setTitle("INVENTARIO · " + workerName)
+            .setMessage(body).setPositiveButton("CERRAR", null).show()
     }
 
     private fun showPasteDialog() {
