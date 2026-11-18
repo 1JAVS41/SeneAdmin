@@ -42,7 +42,7 @@ class MainActivity : Activity() {
         addAction("VINCULAR / CAMBIAR CARPETA", "Seleccionar la carpeta INVENTARIO SENE") { SharedInventoryManager.chooseFolder(this) }
         addAction("REPORTES DE TRABAJADORES", "Historial ordenado por trabajador, fecha y número") { showReports() }
         addAction("PERSONAL Y NÓMINA", "Perfiles, días de pago, faltas, sueldos y movimientos") {
-            info("PERSONAL Y NÓMINA", "El registro de nómina y perfiles se está integrando. Los reportes recibidos ya quedan guardados en este teléfono.")
+            startActivity(Intent(this, PayrollActivity::class.java))
         }
         addAction("CLAVE DEL PROPIETARIO", "La misma clave que utiliza SENE VENTAS") { askOwnerKey() }
         setContentView(ScrollView(this).apply { addView(root) })
@@ -103,6 +103,7 @@ class MainActivity : Activity() {
                 Toast.makeText(this, "Este reporte ya fue recibido. No se volvió a procesar.", Toast.LENGTH_LONG).show(); return
             }
             if (!SeneAdminStore.saveReport(this, report)) throw IllegalStateException("No se pudo guardar el reporte.")
+            OwnerPayrollStore.importProfile(this, report)
             var note = ""
             if (SharedInventoryManager.savedTree(this) != null) {
                 try {
