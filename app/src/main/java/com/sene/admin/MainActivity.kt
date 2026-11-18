@@ -113,7 +113,7 @@ class MainActivity : Activity() {
             var reportBackupNote = ""
             if (SharedInventoryManager.savedTree(this) != null) {
                 try {
-                    val archive = SharedInventoryManager.saveReport(this, report, message)
+                    val archive = SharedInventoryManager.saveReport(this, report, message, key)
                     reportBackupNote = "\\nRespaldo compartido: $archive"
                 } catch (e: Exception) {
                     reportBackupNote = "\\nEl reporte quedó guardado en SENE ADMIN, pero no se pudo copiar a la carpeta compartida: " + (e.message ?: "error")
