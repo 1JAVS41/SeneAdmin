@@ -78,7 +78,7 @@ class MainActivity : Activity() {
             if (category == "INVENTARIO_MAESTRO" && snapshots.isEmpty()) {
                 val source = SharedInventoryManager.list(this, key, "INVENTARIO_SENE").firstOrNull()
                 if (source != null) {
-                    SharedInventoryManager.save(this, key, "INVENTARIO_MAESTRO", source.items)
+                    SharedInventoryManager.save(this, key, "INVENTARIO_MAESTRO", source.items, source.updated)
                     snapshots = SharedInventoryManager.list(this, key, category)
                 }
             }
@@ -115,7 +115,7 @@ class MainActivity : Activity() {
             var note = ""
             if (SharedInventoryManager.savedTree(this) != null) {
                 try {
-                    val saved = SharedInventoryManager.updateMasterFromReport(this, key, report.body)
+                    val saved = SharedInventoryManager.updateMasterFromReport(this, key, report.body, report.date + " " + report.time)
                     if (saved != null) note = "\nInventario maestro actualizado: $saved"
                 } catch (e: Exception) { note = "\nEl reporte se guardó, pero no se actualizó el inventario maestro: " + (e.message ?: "error") }
             } else note = "\nVincula la carpeta INVENTARIO SENE para actualizar el inventario maestro."
