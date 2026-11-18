@@ -135,6 +135,15 @@ class MainActivity : Activity() {
         } catch (e: Exception) { info("NO SE PUDO IMPORTAR", e.message ?: "Reporte inválido. El mensaje original no se modificó.") }
     }
     private fun showReports() {
+        if (SeneAdminStore.reports(this).isEmpty()) {
+            val key = OwnerKeyStore.read(this)
+            if (key != null) SharedInventoryManager.archivedReports(this, key).forEach { report ->
+                if (SeneAdminStore.saveReport(this, report)) {
+                    if (report.body.startsWith("SENE-ORDER|1")) OwnerPayrollStore.importOrder(this, report)
+                    else OwnerPayrollStore.importProfile(this, report)
+                }
+            }
+        }
         val lines = SeneAdminStore.reports(this).sortedWith(compareBy<SeneReport> { it.workerId }.thenBy { it.date }.thenBy { it.time }.thenBy { it.number })
         val body = if (lines.isEmpty()) "Todavía no hay reportes importados. Comparte un mensaje hacia SENE ADMIN." else
             lines.groupBy { it.workerId }.entries.joinToString("\n\n") { (worker, reports) ->
