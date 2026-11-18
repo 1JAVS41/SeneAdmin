@@ -1,7 +1,7 @@
 package com.sene.admin
 
+import android.util.Base64
 import java.security.MessageDigest
-import java.util.Base64
 
 /**
  * Serialización inicial para INVENTARIO SENE e INVENTARIO MAESTRO.
@@ -18,7 +18,7 @@ object SeneFolderFormat {
 
     fun encode(category: String, ownerKey: String, payload: String): ByteArray {
         require(category == "INVENTARIO_SENE" || category == "INVENTARIO_MAESTRO")
-        val body = Base64.getEncoder().encodeToString(payload.toByteArray(Charsets.UTF_8))
+        val body = Base64.encodeToString(payload.toByteArray(Charsets.UTF_8), Base64.NO_WRAP)
         return listOf(MAGIC, "CATEGORY=$category", "OWNER=${ownerCheck(ownerKey)}", "DATA=$body")
             .joinToString("\n").toByteArray(Charsets.UTF_8)
     }
@@ -33,6 +33,6 @@ object SeneFolderFormat {
         require(MessageDigest.isEqual(owner.toByteArray(), ownerCheck(ownerKey).toByteArray())) {
             "La clave no coincide. Los archivos permanecen intactos."
         }
-        return Document(category, String(Base64.getDecoder().decode(data), Charsets.UTF_8))
+        return Document(category, String(Base64.decode(data, Base64.NO_WRAP), Charsets.UTF_8))
     }
 }
