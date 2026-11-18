@@ -220,9 +220,22 @@ object SharedInventoryManager {
             catch (_: Exception) { complete = false }
         }
         val local = java.io.File(c.filesDir, "SENE-ADMIN/$dirName")
-        local.listFiles()?.filter { it.isFile }?.sortedByDescending { sortKey(it.name) }?.drop(10)?.forEach {
-            if (!it.delete()) complete = false
+        val localFiles = local.listFiles()?.filter { it.isFile }?.sortedByDescending { sortKey(it.name) } ?: emptyList()
+        val localValid = localFiles.all { file ->
+            try {
+                val raw = file.readBytes()
+                if (dirName == "REPORTES") {
+                    SeneReportReader.read(String(raw, Charsets.UTF_8), ownerKey)
+                    true
+                } else {
+                    val doc = SeneSharedFiles.decode(raw, ownerKey)
+                    val expected = if (dirName == "INVENTARIO-MAESTRO") "INVENTARIO_MAESTRO" else "INVENTARIO_SENE"
+                    doc.category == expected
+                }
+            } catch (_: Exception) { false }
         }
+        if (localValid) localFiles.drop(10).forEach { if (!it.delete()) complete = false }
+        else complete = false
         if (complete) prefs(c).edit().putLong(prefKey, now).apply()
     }
 
