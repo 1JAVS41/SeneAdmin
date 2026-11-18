@@ -47,11 +47,31 @@ object OwnerPayrollStore {
         val day=value("Día de pago")
         val days=value("Días laborales")
         val hours=value("Horas de jornada").toIntOrNull()?:8
+        val worked=value("DÍAS TRABAJADOS REGISTRADOS").toIntOrNull()
+        val absences=value("FALTAS REGISTRADAS HASTA EL CIERRE").toIntOrNull()
+        if(worked!=null||absences!=null){
+            try{
+                val summaries=JSONObject(prefs(c).getString("attendance_summary","{}")?:"{}")
+                summaries.put(r.workerId,JSONObject().put("period",value("PERÍODO DESDE"))
+                    .put("workedDays",worked?:0).put("absences",absences?:0)
+                    .put("closingType",value("TIPO DE CIERRE")).put("closingReason",value("MOTIVO DE CIERRE"))
+                    .put("started",value("HORA DE ENTRADA")).put("closed",value("HORA DE SALIDA")))
+                prefs(c).edit().putString("attendance_summary",summaries.toString()).commit()
+            }catch(_:Exception){}
+        }
         val old=profile(c,r.workerId)
         if(upsertProfile(c,Profile(r.workerId,name,phone.ifBlank{old?.phone.orEmpty()},salary?:old?.weeklySalaryCents?:0L,
             day.ifBlank{old?.payDay.orEmpty()},days.ifBlank{old?.workDays.orEmpty()},hours)))
             prefs(c).edit().putString(stampKey,stamp).apply()
     }
+
+    data class AttendanceSummary(val period:String,val workedDays:Int,val absences:Int,val closingType:String,val closingReason:String,val started:String,val closed:String)
+    fun attendanceSummary(c:Context,profileId:String):AttendanceSummary?=try{
+        val all=JSONObject(prefs(c).getString("attendance_summary","{}")?:"{}")
+        val o=all.optJSONObject(profileId)?:return null
+        AttendanceSummary(o.optString("period"),o.optInt("workedDays"),o.optInt("absences"),
+            o.optString("closingType"),o.optString("closingReason"),o.optString("started"),o.optString("closed"))
+    }catch(_:Exception){null}
 
     fun addEntry(c:Context,profileId:String,type:String,amountCents:Long,description:String,date:String=SimpleDateFormat("yyyy-MM-dd",Locale.US).format(Date())):Boolean{
         require(type in setOf("FALTA","PRESTAMO","CONSUMO") && amountCents>=0)
