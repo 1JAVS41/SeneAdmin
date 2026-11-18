@@ -165,7 +165,7 @@ object SharedInventoryManager {
         if (last > 0L && now - last < 30L * 24L * 60L * 60L * 1000L) return
         val dir = folder(c, tree, dirName, false) ?: return
         val files = children(c, tree, dir).filter { it.first.endsWith(".sene", true) || it.first.endsWith(".txt", true) }
-            .sortedByDescending { it.first }
+            .sortedByDescending { sortKey(it.first) }
         var complete = true
         files.drop(10).forEach { (_, _, uri) ->
             try { if (!DocumentsContract.deleteDocument(c.contentResolver, uri)) complete = false }
