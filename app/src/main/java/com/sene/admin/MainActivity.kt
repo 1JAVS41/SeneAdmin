@@ -55,62 +55,50 @@ class MainActivity : Activity() {
             setPadding(22, 24, 22, 24)
             setBackgroundColor(0xFFF4F7FB.toInt())
         }
-        val header = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        header.addView(TextView(this).apply {
+        root.addView(TextView(this).apply {
             text = "SENE ADMIN"; textSize = 25f
             typeface = Typeface.DEFAULT_BOLD; setTextColor(0xFF123B68.toInt())
-        }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        header.addView(TextView(this).apply {
-            text = "⚙"; textSize = 25f; setTextColor(0xFF526579.toInt())
-            setPadding(14, 0, 8, 8); setOnClickListener { showSettings() }
         })
-        root.addView(header)
         root.addView(TextView(this).apply {
-            text = "Pega los reportes recibidos por WhatsApp. SENE ADMIN organizará todo automáticamente."
-            textSize = 14f; setTextColor(0xFF526579.toInt()); setPadding(0, 6, 0, 20)
+            text = "Control automático de nómina y reportes."
+            textSize = 14f; setTextColor(0xFF526579.toInt()); setPadding(0, 6, 0, 22)
         })
-        val paste = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL; gravity = android.view.Gravity.CENTER
-            setPadding(18, 24, 18, 24); setBackgroundColor(0xFF1769AA.toInt()); elevation = 4f
-        }
-        paste.addView(TextView(this).apply {
-            text = "PEGA AQUÍ TUS REPORTES DE WHATSAPP"; textSize = 18f
-            typeface = Typeface.DEFAULT_BOLD; gravity = android.view.Gravity.CENTER; setTextColor(-1)
-        })
-        paste.addView(TextView(this).apply {
-            text = "Puedes pegar uno o varios reportes juntos"; textSize = 13f
-            gravity = android.view.Gravity.CENTER; setTextColor(0xFFE7F2FF.toInt()); setPadding(0, 8, 0, 0)
-        })
-        val pasteLp = LinearLayout.LayoutParams(-1, ViewGroup.LayoutParams.WRAP_CONTENT)
-        pasteLp.bottomMargin = 22
-        root.addView(paste, pasteLp)
-        paste.setOnClickListener { showPasteDialog() }
-        root.addView(TextView(this).apply {
-            text = "TRABAJADORES"; textSize = 14f; typeface = Typeface.DEFAULT_BOLD
-            setTextColor(0xFF526579.toInt()); setPadding(2, 0, 0, 10)
-        })
-        val profiles = OwnerPayrollStore.profiles(this).sortedBy { it.name.lowercase(Locale.ROOT) }
-        if (profiles.isEmpty()) {
-            root.addView(TextView(this).apply {
-                text = "Aquí aparecerá automáticamente cada trabajador cuando pegues su primer reporte."
-                textSize = 14f; setTextColor(0xFF718096.toInt()); setPadding(4, 8, 4, 16)
-            })
-        } else profiles.forEach { p ->
+        fun mainOption(label: String, subtitle: String, action: () -> Unit) {
             val card = LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL; gravity = android.view.Gravity.CENTER_VERTICAL
-                setPadding(16, 15, 16, 15); setBackgroundColor(-1); elevation = 2f
+                orientation = LinearLayout.VERTICAL
+                gravity = android.view.Gravity.CENTER
+                setPadding(18, 26, 18, 26)
+                setBackgroundColor(0xFF1769AA.toInt())
+                elevation = 4f
+                isClickable = true
+                isFocusable = true
+                setOnClickListener { action() }
             }
             card.addView(TextView(this).apply {
-                text = p.name.ifBlank { "Trabajador " + p.id }; textSize = 17f
-                typeface = Typeface.DEFAULT_BOLD; setTextColor(0xFF173C67.toInt())
-            }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-            card.addView(TextView(this).apply { text = "›"; textSize = 26f; setTextColor(0xFF6B8299.toInt()) })
+                text = label; textSize = 21f; typeface = Typeface.DEFAULT_BOLD
+                gravity = android.view.Gravity.CENTER; setTextColor(-1)
+            })
+            card.addView(TextView(this).apply {
+                text = subtitle; textSize = 13f
+                gravity = android.view.Gravity.CENTER; setTextColor(0xFFE7F2FF.toInt())
+                setPadding(0, 8, 0, 0)
+            })
             val lp = LinearLayout.LayoutParams(-1, ViewGroup.LayoutParams.WRAP_CONTENT)
-            lp.bottomMargin = 9
+            lp.bottomMargin = 16
             root.addView(card, lp)
-            card.setOnClickListener {
-                startActivity(Intent(this, PayrollActivity::class.java).putExtra("profile_id", p.id))
-            }
+        }
+        mainOption("NÓMINA", "Trabajadores, desglose semanal y pagos") {
+            startActivity(Intent(this, PayrollActivity::class.java))
+        }
+        mainOption("OTROS REPORTES", "Pegar reportes de WhatsApp y consultar información") {
+            val options = arrayOf("Pegar reportes de WhatsApp", "Consultar reportes recibidos", "Ajustes")
+            AlertDialog.Builder(this).setTitle("OTROS REPORTES").setItems(options) { _, which ->
+                when (which) {
+                    0 -> showPasteDialog()
+                    1 -> showReports()
+                    2 -> showSettings()
+                }
+            }.setNegativeButton("CERRAR", null).show()
         }
         setContentView(ScrollView(this).apply { addView(root) })
     }
