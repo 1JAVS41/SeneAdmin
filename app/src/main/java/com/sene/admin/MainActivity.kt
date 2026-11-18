@@ -110,6 +110,15 @@ class MainActivity : Activity() {
                 Toast.makeText(this, "Este reporte ya fue recibido. No se volvió a procesar.", Toast.LENGTH_LONG).show(); return
             }
             if (!SeneAdminStore.saveReport(this, report)) throw IllegalStateException("No se pudo guardar el reporte.")
+            var reportBackupNote = ""
+            if (SharedInventoryManager.savedTree(this) != null) {
+                try {
+                    val archive = SharedInventoryManager.saveReport(this, report, message)
+                    reportBackupNote = "\\nRespaldo compartido: $archive"
+                } catch (e: Exception) {
+                    reportBackupNote = "\\nEl reporte quedó guardado en SENE ADMIN, pero no se pudo copiar a la carpeta compartida: " + (e.message ?: "error")
+                }
+            }
             val isOrder = report.body.startsWith("SENE-ORDER|1")
             if (isOrder) OwnerPayrollStore.importOrder(this, report) else OwnerPayrollStore.importProfile(this, report)
             var note = ""
