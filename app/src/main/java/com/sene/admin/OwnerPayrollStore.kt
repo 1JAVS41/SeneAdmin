@@ -66,12 +66,14 @@ object OwnerPayrollStore {
     }
 
     data class AttendanceSummary(val period:String,val workedDays:Int,val absences:Int,val closingType:String,val closingReason:String,val started:String,val closed:String)
-    fun attendanceSummary(c:Context,profileId:String):AttendanceSummary?=try{
-        val all=JSONObject(prefs(c).getString("attendance_summary","{}")?:"{}")
-        val o=all.optJSONObject(profileId)?:return null
-        AttendanceSummary(o.optString("period"),o.optInt("workedDays"),o.optInt("absences"),
-            o.optString("closingType"),o.optString("closingReason"),o.optString("started"),o.optString("closed"))
-    }catch(_:Exception){null}
+    fun attendanceSummary(c:Context,profileId:String):AttendanceSummary? {
+        return try{
+            val all=JSONObject(prefs(c).getString("attendance_summary","{}")?:"{}")
+            val o=all.optJSONObject(profileId) ?: return null
+            AttendanceSummary(o.optString("period"),o.optInt("workedDays"),o.optInt("absences"),
+                o.optString("closingType"),o.optString("closingReason"),o.optString("started"),o.optString("closed"))
+        }catch(_:Exception){null}
+    }
 
     fun addEntry(c:Context,profileId:String,type:String,amountCents:Long,description:String,date:String=SimpleDateFormat("yyyy-MM-dd",Locale.US).format(Date())):Boolean{
         require(type in setOf("FALTA","PRESTAMO","CONSUMO") && amountCents>=0)
