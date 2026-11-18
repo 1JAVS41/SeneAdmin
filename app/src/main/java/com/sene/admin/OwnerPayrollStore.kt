@@ -86,7 +86,7 @@ object OwnerPayrollStore {
         val payrollArray=array(c,PAYROLLS)
         val existingIndex=(0 until payrollArray.length()).firstOrNull {
             val item=payrollArray.optJSONObject(it)
-            item?.optString("profileId")==profileId && item.optString("period")==week
+            item != null && item.optString("profileId")==profileId && item.optString("period")==week
         }
         val existing=existingIndex?.let { payrollArray.optJSONObject(it) }
         if(existing?.optString("status")=="PAGADA") {
