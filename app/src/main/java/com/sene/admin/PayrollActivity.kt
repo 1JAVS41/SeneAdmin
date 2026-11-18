@@ -142,10 +142,30 @@ class PayrollActivity : Activity() {
             val message="PERÍODO: ${pay.period}\nSUELDO: ${OwnerPayrollStore.money(pay.grossCents)}\nDESCUENTO POR FALTAS: ${OwnerPayrollStore.money(pay.absenceCents)}\nPRÉSTAMOS: ${OwnerPayrollStore.money(pay.loanCents)}\nCONSUMOS: ${OwnerPayrollStore.money(pay.consumptionCents)}\nTOTAL NETO: ${OwnerPayrollStore.money(pay.netCents)}\nESTADO: ${pay.status}$reminder"
             if(pay.status=="PAGADA"){AlertDialog.Builder(this).setTitle("NÓMINA PAGADA").setMessage(message+"\nFecha/hora: ${pay.paidAt}\nCantidad entregada: ${OwnerPayrollStore.money(pay.deliveredCents)}").setPositiveButton("CERRAR",null).show();return}
             AlertDialog.Builder(this).setTitle("NÓMINA PENDIENTE").setMessage(message)
-                .setPositiveButton("MARCAR PAGADA"){_,_->markPaid(pay.id)}
+                .setPositiveButton("COMPROBAR EN SENE VENTAS"){_,_->confirmSalesPayroll(pay)}
                 .setNegativeButton("CERRAR",null).show()
         }catch(e:Exception){AlertDialog.Builder(this).setTitle("NÓMINA").setMessage(e.message?: "No se pudo generar la nómina").setPositiveButton("ACEPTAR",null).show()}
     }
+    private fun confirmSalesPayroll(pay: OwnerPayrollStore.Payroll) {
+        val amount = input("Escribe el total neto que aparece en SENE VENTAS", true)
+        val message = "Abre SENE VENTAS > SOY PATRÓN > NÓMINA.\n\nComprueba que coincidan trabajador, período, sueldo base, faltas, préstamos, consumos y TOTAL NETO.\n\nTotal esperado en SENE ADMIN: " + OwnerPayrollStore.money(pay.netCents) + "\n\nSolo continúa si todos los conceptos coinciden."
+        val dialog = AlertDialog.Builder(this).setTitle("COMPROBACIÓN DE NÓMINA")
+            .setMessage(message).setView(amount).setPositiveButton("FINALIZAR PAGO", null)
+            .setNegativeButton("CANCELAR", null).create()
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val entered = moneyToCents(amount.text.toString())
+                if (entered == null || entered != pay.netCents) {
+                    amount.error = "No coincide con el total de SENE ADMIN. No se registró el pago."
+                    return@setOnClickListener
+                }
+                dialog.dismiss()
+                markPaid(pay.id)
+            }
+        }
+        dialog.show()
+    }
+
     private fun markPaid(id:String){
         val delivered=field("Cantidad realmente entregada",true)
         AlertDialog.Builder(this).setTitle("CONFIRMAR PAGO").setMessage("La nómina se marcará PAGADA y quedará registrada la fecha, hora y cantidad entregada.")
