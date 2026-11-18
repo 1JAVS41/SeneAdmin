@@ -157,7 +157,7 @@ class PayrollActivity : Activity() {
         }catch(e:Exception){AlertDialog.Builder(this).setTitle("NÓMINA").setMessage(e.message?: "No se pudo generar la nómina").setPositiveButton("ACEPTAR",null).show()}
     }
     private fun confirmSalesPayroll(pay: OwnerPayrollStore.Payroll) {
-        val amount = input("Escribe el total neto que aparece en SENE VENTAS", true)
+        val amount = field("Total neto que aparece en SENE VENTAS", true)
         val message = "Abre SENE VENTAS > SOY PATRÓN > NÓMINA.\n\nComprueba que coincidan trabajador, período, sueldo base, faltas, préstamos, consumos y TOTAL NETO.\n\nTotal esperado en SENE ADMIN: " + OwnerPayrollStore.money(pay.netCents) + "\n\nSolo continúa si todos los conceptos coinciden."
         val dialog = AlertDialog.Builder(this).setTitle("COMPROBACIÓN DE NÓMINA")
             .setMessage(message).setView(amount).setPositiveButton("FINALIZAR PAGO", null)
