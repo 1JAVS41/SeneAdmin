@@ -29,7 +29,7 @@ object OwnerKeyStore {
         return gen.generateKey()
     }
 
-    fun hasKey(c: Context) = !prefs(c).getString(VALUE, null).isNullOrBlank()
+    fun hasKey(c: Context) = !read(c).isNullOrBlank()
     fun save(c: Context, value: String): Boolean {
         val clean = value.trim()
         if (clean.length < 8 || clean.length > 256) return false
