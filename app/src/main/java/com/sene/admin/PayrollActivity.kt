@@ -15,7 +15,7 @@ import java.util.Locale
 
 class PayrollActivity : Activity() {
     private lateinit var root: LinearLayout
-    override fun onCreate(savedInstanceState: Bundle?) { super.onCreate(savedInstanceState); render() }
+    override fun onCreate(savedInstanceState: Bundle?) {\n        super.onCreate(savedInstanceState)\n        val profileId = intent.getStringExtra("profile_id")\n        if (profileId.isNullOrBlank()) render() else if (OwnerPayrollStore.profile(this, profileId) != null) showProfile(profileId) else render()\n    }
     private fun render() {
         root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(22, 24, 22, 24); setBackgroundColor(0xFFF4F7FB.toInt()) }
         root.addView(TextView(this).apply { text = "PERSONAL Y NÓMINA"; textSize = 23f; setTextColor(0xFF123B68.toInt()); typeface = android.graphics.Typeface.DEFAULT_BOLD })
