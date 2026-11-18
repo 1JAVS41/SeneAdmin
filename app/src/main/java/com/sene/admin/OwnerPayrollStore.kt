@@ -91,6 +91,28 @@ object OwnerPayrollStore {
         }}
         return found&&saveArray(c,PAYROLLS,a)
     }
+    /** Importa órdenes cifradas recibidas desde la pantalla SOLICITA de SENE VENTAS. */
+    fun importOrder(c:Context, report:SeneReport):Boolean {
+        if (!report.body.startsWith("SENE-ORDER|1")) return false
+        val fields = report.body.lines().drop(1).mapNotNull { line ->
+            val i = line.indexOf("="); if (i <= 0) null else line.substring(0, i) to line.substring(i + 1)
+        }.toMap()
+        val orderId = fields["ORDER_ID"].orEmpty()
+        val profileId = fields["WORKER_ID"].orEmpty().ifBlank { report.workerId }
+        val type = when (fields["ORDER_TYPE"]) { "CONSUMO" -> "CONSUMO"; "PRESTAMO" -> "PRESTAMO"; else -> return false }
+        val cents = fields["AMOUNT_CENTS"]?.toLongOrNull()?.takeIf { it > 0 } ?: return false
+        if (orderId.isBlank() || entries(c, profileId).any { it.id == orderId }) return true
+        val name = fields["WORKER_NAME"].orEmpty().ifBlank { profileId }
+        val old = profile(c, profileId)
+        if (old == null) upsertProfile(c, Profile(profileId, name, "", 0L, "", "", 8))
+        val entry = Entry(orderId, profileId, type, fields["DATE"].orEmpty(), fields["DESCRIPTION"].orEmpty(),
+            cents, "")
+        val a = array(c, ENTRIES)
+        a.put(JSONObject().put("id", entry.id).put("profileId", entry.profileId).put("type", entry.type)
+            .put("date", entry.date).put("description", entry.description).put("amount", entry.amountCents).put("payrollId", ""))
+        return saveArray(c, ENTRIES, a)
+    }
+
     fun isPayDay(p:Profile):Boolean{
         val today=SimpleDateFormat("EEEE",Locale("es","MX")).format(Date())
         return p.payDay.isNotBlank()&&today.equals(p.payDay,true)
