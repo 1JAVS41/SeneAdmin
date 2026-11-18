@@ -70,6 +70,16 @@ class PayrollActivity : Activity() {
             append("TRABAJADOR: ").append(p.name)
             append("\nTELÉFONO: ").append(p.phone.ifBlank { "No indicado" })
             append("\nDÍAS LABORALES: ").append(p.workDays.ifBlank { "Sin configurar" })
+            OwnerPayrollStore.attendanceSummary(this@PayrollActivity, id)?.let { summary ->
+                append("\n\nASISTENCIA DEL ÚLTIMO CIERRE")
+                append("\nPeríodo: ").append(summary.period)
+                append("\nDías trabajados: ").append(summary.workedDays)
+                append("\nDías de falta: ").append(summary.absences)
+                append("\nTipo de cierre: ").append(summary.closingType.ifBlank { "No indicado" })
+                append("\nEntrada: ").append(summary.started.ifBlank { "No indicada" })
+                append("\nSalida: ").append(summary.closed.ifBlank { "No indicada" })
+                if (summary.closingReason.isNotBlank()) append("\nMotivo: ").append(summary.closingReason)
+            }
             append("\nDÍA DE PAGO: ").append(p.payDay.ifBlank { "Sin configurar" })
             append("\nSUELDO SEMANAL: ").append(OwnerPayrollStore.money(p.weeklySalaryCents))
             if (pay != null) {
