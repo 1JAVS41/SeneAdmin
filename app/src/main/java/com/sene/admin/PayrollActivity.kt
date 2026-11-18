@@ -22,7 +22,7 @@ class PayrollActivity : Activity() {
         root.addView(TextView(this).apply { text = "Los datos de sueldo y jornada se pueden completar automáticamente al recibir el reporte de inicio de turno."; textSize = 13f; setTextColor(0xFF64748B.toInt()); setPadding(0, 6, 0, 16) })
         addCard("AGREGAR PERFIL", "Registrar trabajador y sueldo semanal") { addProfile() }
         OwnerPayrollStore.profiles(this).sortedBy { it.name.lowercase(Locale.ROOT) }.forEach { p ->
-            addCard(p.name, "ID: ${p.id} · Sueldo semanal: ${OwnerPayrollStore.money(p.weeklySalaryCents)} · Pago: ${p.payDay.ifBlank { "Sin configurar" }}") { showProfile(p.id) }
+            addCard(p.name, "ID: ${p.id} · Sueldo semanal: ${OwnerPayrollStore.money(p.weeklySalaryCents)} · Pago: ${p.payDay.ifBlank { "Sin configurar" }}" + if (OwnerPayrollStore.isPayDay(p)) " · HOY: Revisa SENE VENTAS antes de pagar" else "") { showProfile(p.id) }
         }
         addCard("VOLVER", "Regresar al panel principal") { finish() }
         setContentView(ScrollView(this).apply { addView(root) })
@@ -65,6 +65,7 @@ class PayrollActivity : Activity() {
             append("\nSUELDO SEMANAL: ").append(OwnerPayrollStore.money(p.weeklySalaryCents))
             append("\nDÍA DE PAGO: ").append(p.payDay.ifBlank{"Sin configurar"})
             append("\nDÍAS LABORALES: ").append(p.workDays.ifBlank{"Sin configurar"})
+            if(OwnerPayrollStore.isPayDay(p)) append("\n\nRECUERDA: Revisa SENE VENTAS antes de pagar.")
             append("\n\nMOVIMIENTOS PENDIENTES: ").append(pending.size)
             pending.forEach{append("\n").append(it.date).append(" · ").append(it.type).append(" · ").append(OwnerPayrollStore.money(it.amountCents)).append(" · ").append(it.description)}
             append("\n\nHISTORIAL DE NÓMINA:")
