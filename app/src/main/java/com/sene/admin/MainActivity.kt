@@ -103,7 +103,8 @@ class MainActivity : Activity() {
                 Toast.makeText(this, "Este reporte ya fue recibido. No se volvió a procesar.", Toast.LENGTH_LONG).show(); return
             }
             if (!SeneAdminStore.saveReport(this, report)) throw IllegalStateException("No se pudo guardar el reporte.")
-            OwnerPayrollStore.importProfile(this, report)
+            val isOrder = report.body.startsWith("SENE-ORDER|1")
+            if (isOrder) OwnerPayrollStore.importOrder(this, report) else OwnerPayrollStore.importProfile(this, report)
             var note = ""
             if (SharedInventoryManager.savedTree(this) != null) {
                 try {
