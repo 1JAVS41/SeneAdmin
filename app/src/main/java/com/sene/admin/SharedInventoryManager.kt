@@ -164,7 +164,7 @@ object SharedInventoryManager {
         val datePart = report.date.replace("-", "")
         val timePart = report.time.replace(":", "").take(6).padEnd(6, '0')
         val safeWorker = report.workerId.replace(Regex("[^A-Za-z0-9_-]"), "_").take(30)
-        val name = "reporte-$datePart-$timePart-$safeWorker-${report.number}.sene"
+        val name = "reporte-$datePart-$timePart-$safeWorker-${report.number}-${report.id.take(8)}.sene"
         val uri = DocumentsContract.createDocument(c.contentResolver, dir, "application/octet-stream", name)
             ?: throw IllegalStateException("No se pudo crear el respaldo del reporte.")
         c.contentResolver.openOutputStream(uri, "w")?.use { it.write(encryptedMessage.toByteArray(Charsets.UTF_8)) }
