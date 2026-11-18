@@ -157,6 +157,25 @@ object SharedInventoryManager {
         return name
     }
 
+    /** Guarda el mensaje de reporte ya cifrado por SENE VENTAS en la carpeta compartida. */
+    fun saveReport(c: Context, report: SeneReport, encryptedMessage: String): String {
+        val tree = savedTree(c) ?: throw IllegalStateException("Carpeta compartida no seleccionada.")
+        val dir = folder(c, tree, "REPORTES", true) ?: throw IllegalStateException("No se pudo crear REPORTES.")
+        val datePart = report.date.replace("-", "")
+        val timePart = report.time.replace(":", "").take(6).padEnd(6, '0')
+        val safeWorker = report.workerId.replace(Regex("[^A-Za-z0-9_-]"), "_").take(30)
+        val name = "reporte-$datePart-$timePart-$safeWorker-${report.number}.sene"
+        val uri = DocumentsContract.createDocument(c.contentResolver, dir, "application/octet-stream", name)
+            ?: throw IllegalStateException("No se pudo crear el respaldo del reporte.")
+        c.contentResolver.openOutputStream(uri, "w")?.use { it.write(encryptedMessage.toByteArray(Charsets.UTF_8)) }
+            ?: throw IllegalStateException("No se pudo escribir el respaldo del reporte.")
+        val local = java.io.File(c.filesDir, "SENE-ADMIN/REPORTES")
+        if (!local.exists() && !local.mkdirs()) throw IllegalStateException("No se pudo crear la copia local de reportes.")
+        java.io.File(local, name).writeText(encryptedMessage, Charsets.UTF_8)
+        cleanupIfDue(c, tree, "REPORTES")
+        return name
+    }
+
     /** Limpieza cada 30 días: conserva los 10 respaldos más recientes de cada categoría. */
     private fun cleanupIfDue(c: Context, tree: Uri, dirName: String) {
         val prefKey = "last_cleanup_" + dirName
