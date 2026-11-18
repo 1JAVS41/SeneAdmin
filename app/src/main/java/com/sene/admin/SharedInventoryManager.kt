@@ -131,12 +131,12 @@ object SharedInventoryManager {
             }
     }
 
-    fun save(c: Context, ownerKey: String, category: String, items: List<Item>): String {
+    fun save(c: Context, ownerKey: String, category: String, items: List<Item>, updatedOverride: String? = null): String {
         require(items.isNotEmpty()) { "No hay productos para guardar." }
         val tree = savedTree(c) ?: throw IllegalStateException("Primero selecciona la carpeta INVENTARIO SENE.")
         val dirName = if (category == "INVENTARIO_MAESTRO") "INVENTARIO-MAESTRO" else "INVENTARIO-SENE"
         val dir = folder(c, tree, dirName, true) ?: throw IllegalStateException("No se pudo crear $dirName.")
-        val updated = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(Date())
+        val updated = normalizeUpdated(updatedOverride) ?: SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(Date())
         val text = buildString {
             append("INVENTARIO_SENE_V1\nActualizado: ").append(updated)
             append("\nCódigo | Producto | Precio | Existencia | Pasillo | Estante")
@@ -178,8 +178,23 @@ object SharedInventoryManager {
         if (complete) prefs(c).edit().putLong(prefKey, now).apply()
     }
 
-    /** Extrae una fotografía de existencias del reporte y la guarda como inventario maestro. */
-    fun updateMasterFromReport(c: Context, ownerKey: String, reportBody: String): String? {
+    private fun normalizeUpdated(value: String?): String? {
+        if (value.isNullOrBlank()) return null
+        val formats = listOf("yyyy-MM-dd HH:mm:ss", "yyyy-MM-dd'T'HH:mm:ss", "dd/MM/yyyy HH:mm:ss", "yyyy-MM-dd")
+        for (pattern in formats) try {
+            val parser = SimpleDateFormat(pattern, Locale.US).apply { isLenient = false }
+            val date = parser.parse(value.trim()) ?: continue
+            return SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(date)
+        } catch (_: Exception) { }
+        return null
+    }
+
+    /** Solo un reporte más reciente puede sustituir el inventario maestro; mensajes atrasados no revierten stock. */
+    fun updateMasterFromReport(c: Context, ownerKey: String, reportBody: String, reportUpdated: String): String? {
+        val incoming = normalizeUpdated(reportUpdated) ?: return null
+        val current = list(c, ownerKey, "INVENTARIO_MAESTRO").firstOrNull()?.updated
+        val currentNormalized = normalizeUpdated(current)
+        if (currentNormalized != null && incoming <= currentNormalized) return null
         val lines = reportBody.replace("\r", "").lines()
         val marker = lines.indexOfLast { it.trim().equals("ETIQUETA: EXISTENCIAS ACTUALES", true) }
             .takeIf { it >= 0 } ?: lines.indexOfLast { it.trim().equals("INVENTARIO_SENE_V1", true) }
@@ -187,6 +202,6 @@ object SharedInventoryManager {
         val section = lines.drop(marker + 1).takeWhile { !it.trim().startsWith("ETIQUETA:", true) }
         val items = parse(section.joinToString("\n"))
         if (items.isEmpty()) return null
-        return save(c, ownerKey, "INVENTARIO_MAESTRO", items)
+        return save(c, ownerKey, "INVENTARIO_MAESTRO", items, incoming)
     }
 }
