@@ -34,6 +34,10 @@ object OwnerPayrollStore {
     private fun profileJson(p:Profile)=JSONObject().put("id",p.id).put("name",p.name).put("phone",p.phone).put("salary",p.weeklySalaryCents).put("payDay",p.payDay).put("workDays",p.workDays).put("hours",p.hours)
 
     fun importProfile(c:Context,r:SeneReport){
+        val stamp = r.date + " " + r.time
+        val stampKey = "profile_import_" + r.workerId
+        val last = prefs(c).getString(stampKey, null)
+        if (last != null && stamp <= last) return
         val lines=r.body.lines()
         fun value(label:String)=lines.firstOrNull{it.trim().startsWith(label,true)}?.substringAfter(":")?.trim().orEmpty()
         val name=value("Trabajador").ifBlank{r.workerId}
@@ -44,8 +48,9 @@ object OwnerPayrollStore {
         val days=value("Días laborales")
         val hours=value("Horas de jornada").toIntOrNull()?:8
         val old=profile(c,r.workerId)
-        upsertProfile(c,Profile(r.workerId,name,phone.ifBlank{old?.phone.orEmpty()},salary?:old?.weeklySalaryCents?:0L,
-            day.ifBlank{old?.payDay.orEmpty()},days.ifBlank{old?.workDays.orEmpty()},hours))
+        if(upsertProfile(c,Profile(r.workerId,name,phone.ifBlank{old?.phone.orEmpty()},salary?:old?.weeklySalaryCents?:0L,
+            day.ifBlank{old?.payDay.orEmpty()},days.ifBlank{old?.workDays.orEmpty()},hours)))
+            prefs(c).edit().putString(stampKey,stamp).apply()
     }
 
     fun addEntry(c:Context,profileId:String,type:String,amountCents:Long,description:String,date:String=SimpleDateFormat("yyyy-MM-dd",Locale.US).format(Date())):Boolean{
@@ -79,7 +84,7 @@ object OwnerPayrollStore {
         }.let{SimpleDateFormat("yyyy-MM-dd",Locale.US).format(it.time)}
         payrolls(c,profileId).firstOrNull{it.period==week}?.let{return it}
         val id=UUID.randomUUID().toString()
-        val pending=entries(c,profileId).filter{it.payrollId.isBlank()}
+        val pending=entries(c,profileId).filter{it.payrollId.isBlank() && periodForDate(it.date,payDay)==week}
         val absence=pending.filter{it.type=="FALTA"}.sumOf{it.amountCents}
         val loan=pending.filter{it.type=="PRESTAMO"}.sumOf{it.amountCents}
         val consumption=pending.filter{it.type=="CONSUMO"}.sumOf{it.amountCents}
@@ -91,6 +96,13 @@ object OwnerPayrollStore {
         for(i in 0 until ea.length()){val o=ea.optJSONObject(i)?:continue;if(o.optString("profileId")==profileId&&o.optString("payrollId").isBlank())o.put("payrollId",id)}
         check(saveArray(c,ENTRIES,ea)){"No se pudieron asociar los movimientos a la nómina"}
         return payroll
+    }
+    private fun periodForDate(value:String,payDay:Int):String {
+        val date = try { SimpleDateFormat("yyyy-MM-dd",Locale.US).apply { isLenient=false }.parse(value) } catch (_:Exception) { null } ?: return ""
+        val cal = Calendar.getInstance().apply { time = date }
+        val delta=(cal.get(Calendar.DAY_OF_WEEK)-payDay+7)%7
+        cal.add(Calendar.DAY_OF_YEAR,-delta)
+        return SimpleDateFormat("yyyy-MM-dd",Locale.US).format(cal.time)
     }
     private fun payrollJson(p:Payroll)=JSONObject().put("id",p.id).put("profileId",p.profileId).put("period",p.period)
         .put("gross",p.grossCents).put("absence",p.absenceCents).put("loan",p.loanCents).put("consumption",p.consumptionCents)
