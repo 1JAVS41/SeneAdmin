@@ -68,6 +68,7 @@ object OwnerPayrollStore {
     }
     fun createOrGetPayroll(c:Context,profileId:String):Payroll{
         val p=profile(c,profileId)?:throw IllegalStateException("Perfil no encontrado")
+        require(p.weeklySalaryCents>0L) { "El perfil todavía no tiene sueldo semanal configurado" }
         val payDay = when (p.payDay.trim().lowercase(Locale("es","MX"))) {
             "domingo" -> Calendar.SUNDAY
             "lunes" -> Calendar.MONDAY
@@ -82,19 +83,35 @@ object OwnerPayrollStore {
             val delta=(get(Calendar.DAY_OF_WEEK)-payDay+7)%7
             add(Calendar.DAY_OF_YEAR,-delta)
         }.let{SimpleDateFormat("yyyy-MM-dd",Locale.US).format(it.time)}
-        payrolls(c,profileId).firstOrNull{it.period==week}?.let{return it}
-        val id=UUID.randomUUID().toString()
-        val pending=entries(c,profileId).filter{it.payrollId.isBlank() && periodForDate(it.date,payDay)==week}
-        val absence=pending.filter{it.type=="FALTA"}.sumOf{it.amountCents}
-        val loan=pending.filter{it.type=="PRESTAMO"}.sumOf{it.amountCents}
-        val consumption=pending.filter{it.type=="CONSUMO"}.sumOf{it.amountCents}
+        val payrollArray=array(c,PAYROLLS)
+        val existingIndex=(0 until payrollArray.length()).firstOrNull {
+            val item=payrollArray.optJSONObject(it)
+            item?.optString("profileId")==profileId && item.optString("period")==week
+        }
+        val existing=existingIndex?.let { payrollArray.optJSONObject(it) }
+        if(existing?.optString("status")=="PAGADA") {
+            return payrolls(c,profileId).first { it.period==week }
+        }
+        val payrollId=existing?.optString("id")?.takeIf{it.isNotBlank()}?:UUID.randomUUID().toString()
+        val relevant=entries(c,profileId).filter {
+            (it.payrollId==payrollId) || (it.payrollId.isBlank() && periodForDate(it.date,payDay)==week)
+        }
+        val absence=relevant.filter{it.type=="FALTA"}.sumOf{it.amountCents}
+        val loan=relevant.filter{it.type=="PRESTAMO"}.sumOf{it.amountCents}
+        val consumption=relevant.filter{it.type=="CONSUMO"}.sumOf{it.amountCents}
         val net=(p.weeklySalaryCents-absence-loan-consumption).coerceAtLeast(0L)
-        val payroll=Payroll(id,profileId,week,p.weeklySalaryCents,absence,loan,consumption,net,"PENDIENTE",
-            SimpleDateFormat("yyyy-MM-dd HH:mm:ss",Locale.US).format(Date()),"",0L)
-        val a=array(c,PAYROLLS);a.put(payrollJson(payroll));check(saveArray(c,PAYROLLS,a)){"No se pudo guardar la nómina"}
-        val ea=array(c,ENTRIES)
-        for(i in 0 until ea.length()){val o=ea.optJSONObject(i)?:continue;if(o.optString("profileId")==profileId&&o.optString("payrollId").isBlank())o.put("payrollId",id)}
-        check(saveArray(c,ENTRIES,ea)){"No se pudieron asociar los movimientos a la nómina"}
+        val payroll=Payroll(payrollId,profileId,week,p.weeklySalaryCents,absence,loan,consumption,net,"PENDIENTE",
+            existing?.optString("createdAt")?.takeIf{it.isNotBlank()}?:SimpleDateFormat("yyyy-MM-dd HH:mm:ss",Locale.US).format(Date()),"",0L)
+        if(existingIndex==null) payrollArray.put(payrollJson(payroll)) else payrollArray.put(existingIndex,payrollJson(payroll))
+        check(saveArray(c,PAYROLLS,payrollArray)){"No se pudo guardar la nómina"}
+        val entryArray=array(c,ENTRIES)
+        val relevantIds=relevant.map{it.id}.toSet()
+        for(i in 0 until entryArray.length()){
+            val item=entryArray.optJSONObject(i)?:continue
+            if(item.optString("profileId")==profileId && item.optString("id") in relevantIds && item.optString("payrollId").isBlank())
+                item.put("payrollId",payrollId)
+        }
+        check(saveArray(c,ENTRIES,entryArray)){"No se pudieron asociar los movimientos a la nómina"}
         return payroll
     }
     private fun periodForDate(value:String,payDay:Int):String {
