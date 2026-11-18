@@ -74,7 +74,14 @@ class MainActivity : Activity() {
         if (key == null) { askOwnerKey(); return }
         if (SharedInventoryManager.savedTree(this) == null) { SharedInventoryManager.chooseFolder(this); return }
         try {
-            val snapshots = SharedInventoryManager.list(this, key, category)
+            var snapshots = SharedInventoryManager.list(this, key, category)
+            if (category == "INVENTARIO_MAESTRO" && snapshots.isEmpty()) {
+                val source = SharedInventoryManager.list(this, key, "INVENTARIO_SENE").firstOrNull()
+                if (source != null) {
+                    SharedInventoryManager.save(this, key, "INVENTARIO_MAESTRO", source.items)
+                    snapshots = SharedInventoryManager.list(this, key, category)
+                }
+            }
             val latest = snapshots.firstOrNull()
             val title = if (category == "INVENTARIO_MAESTRO") "INVENTARIO MAESTRO" else "INVENTARIO SENE"
             if (latest == null) { info(title, "No hay archivos de esta categoría. Los TXT anteriores se pueden leer sin modificarlos; los nuevos respaldos se guardarán cifrados."); return }
