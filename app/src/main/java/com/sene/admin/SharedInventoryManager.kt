@@ -145,7 +145,29 @@ object SharedInventoryManager {
         val local = java.io.File(c.filesDir, "SENE-ADMIN/$dirName")
         if (!local.exists() && !local.mkdirs()) throw IllegalStateException("No se pudo crear la copia local.")
         java.io.File(local, name).writeBytes(bytes)
+        cleanupIfDue(c, tree, dirName)
         return name
+    }
+
+    /** Limpieza cada 30 días: conserva los 10 respaldos más recientes de cada categoría. */
+    private fun cleanupIfDue(c: Context, tree: Uri, dirName: String) {
+        val prefKey = "last_cleanup_" + dirName
+        val now = System.currentTimeMillis()
+        val last = prefs(c).getLong(prefKey, 0L)
+        if (last > 0L && now - last < 30L * 24L * 60L * 60L * 1000L) return
+        val dir = folder(c, tree, dirName, false) ?: return
+        val files = children(c, tree, dir).filter { it.first.endsWith(".sene", true) || it.first.endsWith(".txt", true) }
+            .sortedByDescending { it.first }
+        var complete = true
+        files.drop(10).forEach { (_, _, uri) ->
+            try { if (!DocumentsContract.deleteDocument(c.contentResolver, uri)) complete = false }
+            catch (_: Exception) { complete = false }
+        }
+        val local = java.io.File(c.filesDir, "SENE-ADMIN/$dirName")
+        local.listFiles()?.filter { it.isFile }?.sortedByDescending { it.name }?.drop(10)?.forEach {
+            if (!it.delete()) complete = false
+        }
+        if (complete) prefs(c).edit().putLong(prefKey, now).apply()
     }
 
     /** Extrae una fotografía de existencias del reporte y la guarda como inventario maestro. */
