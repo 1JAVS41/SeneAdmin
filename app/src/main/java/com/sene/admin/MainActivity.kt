@@ -14,13 +14,12 @@ import android.widget.Toast
 
 class MainActivity : Activity() {
     private lateinit var root: LinearLayout
-    private val reports = mutableListOf<SeneReport>()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         showHome()
-        handleIncoming(intent)
         if (!OwnerKeyStore.hasKey(this)) askOwnerKey()
+        else handleIncoming(intent)
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -97,6 +96,7 @@ class MainActivity : Activity() {
                 if (!OwnerKeyStore.save(this, value)) { input.error = "No se pudo guardar la clave"; return@setOnClickListener }
                 dlg.dismiss()
                 Toast.makeText(this, "Clave del propietario guardada en este teléfono", Toast.LENGTH_LONG).show()
+                handleIncoming(intent)
             }
         }
         dlg.show()
@@ -111,7 +111,9 @@ class MainActivity : Activity() {
         }
         try {
             val report = SeneReportReader.read(message, key)
-            if (reports.none { it.id == report.id }) reports.add(report)
+            if (!SeneAdminStore.saveReport(this, report)) {
+                throw IllegalStateException("No se pudo guardar el reporte en el historial.")
+            }
             Toast.makeText(this, "Reporte recibido: ${report.type}", Toast.LENGTH_LONG).show()
             showReports()
         } catch (e: Exception) {
@@ -120,7 +122,7 @@ class MainActivity : Activity() {
     }
 
     private fun showReports() {
-        val lines = reports.sortedWith(compareBy<SeneReport> { it.date }.thenBy { it.time }).asReversed()
+        val lines = SeneAdminStore.reports(this).sortedWith(compareBy<SeneReport> { it.date }.thenBy { it.time }).asReversed()
         val body = if (lines.isEmpty()) "Todavía no hay reportes importados.\n\nComparte un mensaje de reporte hacia SENE ADMIN." else
             lines.joinToString("\n\n") { "TRABAJADOR: ${it.workerId}\nFECHA: ${it.date} ${it.time}\nTIPO: ${it.type}\nNÚMERO: ${it.number}\n\n${it.body}" }
         AlertDialog.Builder(this).setTitle("REPORTES RECIBIDOS").setMessage(body).setPositiveButton("CERRAR", null).show()
