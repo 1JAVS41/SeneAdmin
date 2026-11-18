@@ -33,6 +33,7 @@ object OwnerKeyStore {
     fun save(c: Context, value: String): Boolean {
         val clean = value.trim()
         if (clean.length < 8 || clean.length > 256) return false
+        if (hasKey(c)) return matches(c, clean)
         return try {
             val cipher = Cipher.getInstance("AES/GCM/NoPadding")
             cipher.init(Cipher.ENCRYPT_MODE, wrappingKey())
@@ -48,4 +49,10 @@ object OwnerKeyStore {
         cipher.init(Cipher.DECRYPT_MODE, wrappingKey(), GCMParameterSpec(128, packed.copyOfRange(0, IV_SIZE)))
         cipher.doFinal(packed.copyOfRange(IV_SIZE, packed.size)).toString(Charsets.UTF_8)
     } catch (_: Exception) { null }
+
+    fun matches(c: Context, candidate: String): Boolean {
+        val current = read(c) ?: return false
+        return java.security.MessageDigest.isEqual(current.toByteArray(Charsets.UTF_8),
+            candidate.trim().toByteArray(Charsets.UTF_8))
+    }
 }
