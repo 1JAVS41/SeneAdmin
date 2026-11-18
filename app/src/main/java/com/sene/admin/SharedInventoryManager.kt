@@ -153,7 +153,7 @@ object SharedInventoryManager {
         val local = java.io.File(c.filesDir, "SENE-ADMIN/$dirName")
         if (!local.exists() && !local.mkdirs()) throw IllegalStateException("No se pudo crear la copia local.")
         java.io.File(local, name).writeBytes(bytes)
-        cleanupIfDue(c, tree, dirName)
+        cleanupIfDue(c, tree, dirName, ownerKey)
         return name
     }
 
@@ -172,7 +172,7 @@ object SharedInventoryManager {
         val local = java.io.File(c.filesDir, "SENE-ADMIN/REPORTES")
         if (!local.exists() && !local.mkdirs()) throw IllegalStateException("No se pudo crear la copia local de reportes.")
         java.io.File(local, name).writeText(encryptedMessage, Charsets.UTF_8)
-        cleanupIfDue(c, tree, "REPORTES")
+        cleanupIfDue(c, tree, "REPORTES", ownerKey)
         return name
     }
 
@@ -190,7 +190,7 @@ object SharedInventoryManager {
     }
 
     /** Limpieza cada 30 días: conserva los 10 respaldos más recientes de cada categoría. */
-    private fun cleanupIfDue(c: Context, tree: Uri, dirName: String) {
+    private fun cleanupIfDue(c: Context, tree: Uri, dirName: String, ownerKey: String) {
         val prefKey = "last_cleanup_" + dirName
         val now = System.currentTimeMillis()
         val last = prefs(c).getLong(prefKey, 0L)
@@ -198,6 +198,22 @@ object SharedInventoryManager {
         val dir = folder(c, tree, dirName, false) ?: return
         val files = children(c, tree, dir).filter { it.first.endsWith(".sene", true) || it.first.endsWith(".txt", true) }
             .sortedByDescending { sortKey(it.first) }
+        // Nunca limpiar si no se pudo comprobar la clave de todos los respaldos cifrados existentes.
+        // Los TXT heredados se conservan intactos; una clave incorrecta no autoriza ninguna eliminación.
+        val valid = files.all { (_, _, uri) ->
+            try {
+                val raw = c.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return@all false
+                if (dirName == "REPORTES") {
+                    SeneReportReader.read(String(raw, Charsets.UTF_8), ownerKey)
+                    true
+                } else if (SeneSharedFiles.isSharedFile(raw)) {
+                    val doc = SeneSharedFiles.decode(raw, ownerKey)
+                    val expected = if (dirName == "INVENTARIO-MAESTRO") "INVENTARIO_MAESTRO" else "INVENTARIO_SENE"
+                    doc.category == expected
+                } else false
+            } catch (_: Exception) { false }
+        }
+        if (!valid) return
         var complete = true
         files.drop(10).forEach { (_, _, uri) ->
             try { if (!DocumentsContract.deleteDocument(c.contentResolver, uri)) complete = false }
