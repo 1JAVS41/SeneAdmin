@@ -62,37 +62,65 @@ class PayrollActivity : Activity() {
             }
     }
     private fun showProfile(id: String) {
-        val p=OwnerPayrollStore.profile(this,id)?:return
-        val entries=OwnerPayrollStore.entries(this,id)
-        val payrolls=OwnerPayrollStore.payrolls(this,id).sortedByDescending{it.createdAt}
-        val pending=entries.filter{it.payrollId.isBlank()}
-        val detail=buildString{
-            append("TRABAJADOR: ").append(p.name).append("\nID: ").append(p.id)
-            append("\nTELÉFONO: ").append(p.phone.ifBlank{"No indicado"})
+        val p = OwnerPayrollStore.profile(this, id) ?: return
+        val pay = try { OwnerPayrollStore.createOrGetPayroll(this, id) } catch (_: Exception) { null }
+        val entries = OwnerPayrollStore.entries(this, id)
+        val allPayrolls = OwnerPayrollStore.payrolls(this, id).sortedByDescending { it.createdAt }
+        val detail = buildString {
+            append("TRABAJADOR: ").append(p.name)
+            append("\nTELÉFONO: ").append(p.phone.ifBlank { "No indicado" })
+            append("\nDÍAS LABORALES: ").append(p.workDays.ifBlank { "Sin configurar" })
+            append("\nDÍA DE PAGO: ").append(p.payDay.ifBlank { "Sin configurar" })
             append("\nSUELDO SEMANAL: ").append(OwnerPayrollStore.money(p.weeklySalaryCents))
-            append("\nDÍA DE PAGO: ").append(p.payDay.ifBlank{"Sin configurar"})
-            append("\nDÍAS LABORALES: ").append(p.workDays.ifBlank{"Sin configurar"})
-            if(OwnerPayrollStore.isPayDay(p)) append("\n\nRECUERDA: Revisa SENE VENTAS antes de pagar.")
-            append("\n\nMOVIMIENTOS PENDIENTES: ").append(pending.size)
-            pending.forEach{append("\n").append(it.date).append(" · ").append(it.type).append(" · ").append(OwnerPayrollStore.money(it.amountCents)).append(" · ").append(it.description)}
+            if (pay != null) {
+                append("\n\nDESGLOSE DE LA SEMANA")
+                append("\nSueldo base: ").append(OwnerPayrollStore.money(pay.grossCents))
+                append("\nDescuento por faltas: ").append(OwnerPayrollStore.money(pay.absenceCents))
+                append("\nPréstamos: ").append(OwnerPayrollStore.money(pay.loanCents))
+                append("\nConsumos: ").append(OwnerPayrollStore.money(pay.consumptionCents))
+                append("\nTOTAL NETO: ").append(OwnerPayrollStore.money(pay.netCents))
+                append("\nESTADO: ").append(pay.status)
+            } else append("\n\nTodavía falta configurar el sueldo semanal para generar nómina.")
+            append("\n\nMOVIMIENTOS REGISTRADOS:")
+            if (entries.isEmpty()) append("\nTodavía no hay movimientos.")
+            entries.sortedByDescending { it.date }.forEach {
+                append("\n").append(it.date).append(" · ").append(it.type)
+                    .append(" · ").append(OwnerPayrollStore.money(it.amountCents))
+                    .append(" · ").append(it.description)
+            }
             append("\n\nHISTORIAL DE NÓMINA:")
-            if(payrolls.isEmpty())append("\nTodavía no hay nóminas.")
-            payrolls.forEach{append("\n").append(it.period).append(" · ").append(it.status).append(" · Neto ").append(OwnerPayrollStore.money(it.netCents))
-                if(it.status=="PAGADA")append(" · Entregado ").append(OwnerPayrollStore.money(it.deliveredCents)).append(" · ").append(it.paidAt)}
+            if (allPayrolls.isEmpty()) append("\nTodavía no hay nóminas.")
+            allPayrolls.forEach {
+                append("\n").append(it.period).append(" · ").append(it.status)
+                    .append(" · Neto ").append(OwnerPayrollStore.money(it.netCents))
+            }
         }
-        val box=LinearLayout(this).apply{orientation=1;setPadding(18,8,18,8)}
-        box.addView(TextView(this).apply{text=detail;textSize=13f;setTextColor(0xFF26364F.toInt())})
+        val box = LinearLayout(this).apply { orientation = 1; setPadding(18, 8, 18, 8) }
+        box.addView(TextView(this).apply {
+            text = detail; textSize = 13f; setTextColor(0xFF26364F.toInt())
+        })
         lateinit var dialog: AlertDialog
-        fun option(label:String, action:()->Unit) {
-            box.addView(Button(this).apply{text=label;isAllCaps=false;setOnClickListener{dialog.dismiss();action()}})
+        fun option(label: String, action: () -> Unit) {
+            box.addView(Button(this).apply {
+                text = label; isAllCaps = false
+                setOnClickListener { dialog.dismiss(); action() }
+            })
         }
-        option("REGISTRAR FALTA"){addEntry(p,"FALTA")}
-        option("REGISTRAR PRÉSTAMO"){addEntry(p,"PRESTAMO")}
-        option("REGISTRAR CONSUMO"){addEntry(p,"CONSUMO")}
-        option("GENERAR / CONSULTAR NÓMINA"){payroll(p)}
-        dialog=AlertDialog.Builder(this).setTitle(p.name).setView(ScrollView(this).apply{addView(box)})
-            .setPositiveButton("CERRAR",null).create()
+        option("CONSULTAR / PAGAR NÓMINA") { payroll(p) }
+        option("VER OTROS REPORTES DEL TRABAJADOR") { showReportsForWorker(id) }
+        dialog = AlertDialog.Builder(this).setTitle("PAGAR A · " + p.name)
+            .setView(ScrollView(this).apply { addView(box) })
+            .setPositiveButton("CERRAR", null).create()
         dialog.show()
+    }
+
+    private fun showReportsForWorker(id: String) {
+        val lines = SeneAdminStore.reports(this).filter { it.workerId == id }
+            .sortedWith(compareBy<SeneReport> { it.date }.thenBy { it.time }.thenBy { it.number })
+        val body = if (lines.isEmpty()) "Todavía no hay reportes recibidos para este trabajador."
+        else lines.joinToString("\n\n") { it.date + " " + it.time + " · " + it.type + "\n\n" + it.body }
+        AlertDialog.Builder(this).setTitle("REPORTES DEL TRABAJADOR")
+            .setMessage(body).setPositiveButton("CERRAR", null).show()
     }
     private fun addEntry(p:OwnerPayrollStore.Profile,type:String){
         val amount=field("Importe a descontar",true);val desc=field("Motivo o descripción")
