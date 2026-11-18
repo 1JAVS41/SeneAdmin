@@ -5,6 +5,7 @@ import android.app.AlertDialog
 import android.os.Bundle
 import android.text.InputType
 import android.view.ViewGroup
+import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
@@ -71,19 +72,19 @@ class PayrollActivity : Activity() {
             payrolls.forEach{append("\n").append(it.period).append(" · ").append(it.status).append(" · Neto ").append(OwnerPayrollStore.money(it.netCents))
                 if(it.status=="PAGADA")append(" · Entregado ").append(OwnerPayrollStore.money(it.deliveredCents)).append(" · ").append(it.paidAt)}
         }
-        val box=LinearLayout(this).apply{orientation=1;setPadding(16,8,16,8)}
+        val box=LinearLayout(this).apply{orientation=1;setPadding(18,8,18,8)}
         box.addView(TextView(this).apply{text=detail;textSize=13f;setTextColor(0xFF26364F.toInt())})
-        val dialog=AlertDialog.Builder(this).setTitle(p.name).setView(ScrollView(this).apply{addView(box)})
-            .setPositiveButton("CERRAR",null).create()
-        dialog.setOnShowListener{
-            // Acciones separadas para evitar operaciones accidentales.
-            dialog.getButton(-1).setOnClickListener{dialog.dismiss()}
+        lateinit var dialog: AlertDialog
+        fun option(label:String, action:()->Unit) {
+            box.addView(Button(this).apply{text=label;isAllCaps=false;setOnClickListener{dialog.dismiss();action()}})
         }
+        option("REGISTRAR FALTA"){addEntry(p,"FALTA")}
+        option("REGISTRAR PRÉSTAMO"){addEntry(p,"PRESTAMO")}
+        option("REGISTRAR CONSUMO"){addEntry(p,"CONSUMO")}
+        option("GENERAR / CONSULTAR NÓMINA"){payroll(p)}
+        dialog=AlertDialog.Builder(this).setTitle(p.name).setView(ScrollView(this).apply{addView(box)})
+            .setPositiveButton("CERRAR",null).create()
         dialog.show()
-        AlertDialog.Builder(this).setTitle("MOVIMIENTOS · "+p.name)
-            .setItems(arrayOf("REGISTRAR FALTA","REGISTRAR PRÉSTAMO","REGISTRAR CONSUMO","GENERAR / CONSULTAR NÓMINA","CERRAR")){_,which->
-                when(which){0->addEntry(p,"FALTA");1->addEntry(p,"PRESTAMO");2->addEntry(p,"CONSUMO");3->payroll(p)}
-            }.show()
     }
     private fun addEntry(p:OwnerPayrollStore.Profile,type:String){
         val amount=field("Importe a descontar",true);val desc=field("Motivo o descripción")
