@@ -113,7 +113,7 @@ class MainActivity : Activity() {
                 } catch (e: Exception) { note = "\nEl reporte se guardó, pero no se actualizó el inventario maestro: " + (e.message ?: "error") }
             } else note = "\nVincula la carpeta INVENTARIO SENE para actualizar el inventario maestro."
             Toast.makeText(this, "Reporte recibido: ${report.type}", Toast.LENGTH_LONG).show()
-            AlertDialog.Builder(this).setTitle("REPORTE RECIBIDO")
+            AlertDialog.Builder(this).setTitle(if (isOrder) "ORDEN RECIBIDA" else "REPORTE RECIBIDO")
                 .setMessage("Trabajador: ${report.workerId}\nFecha: ${report.date} ${report.time}\nNúmero: ${report.number}$note")
                 .setPositiveButton("VER REPORTES") { _, _ -> showReports() }.setNegativeButton("CERRAR", null).show()
         } catch (e: Exception) { info("NO SE PUDO IMPORTAR", e.message ?: "Reporte inválido. El mensaje original no se modificó.") }
