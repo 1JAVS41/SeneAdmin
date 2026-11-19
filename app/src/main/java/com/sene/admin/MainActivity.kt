@@ -104,10 +104,94 @@ class MainActivity : AppCompatActivity() {
         mainOption("PEGAR REPORTES DE WHATSAPP", "Importar reportes enviados por tus trabajadores", 0xFF218A57.toInt()) {
             showPasteDialog()
         }
+        mainOption("REVISAR PENDIENTES", "Productos sin stock y productos dañados", 0xFFB66A24.toInt()) {
+            showPendingReviews()
+        }
         mainOption("AJUSTES", "Configuración protegida", 0xFFE7A0A0.toInt()) {
             showSettings()
         }
+        root.addView(TextView(this).apply {
+            text = "NO OLVIDES AGREGAR LOS REPORTES DE TUS TRABAJADORES"
+            textSize = 13f
+            typeface = Typeface.DEFAULT_BOLD
+            setTextColor(0xFFB42318.toInt())
+            isSingleLine = true
+            ellipsize = android.text.TextUtils.TruncateAt.MARQUEE
+            marqueeRepeatLimit = -1
+            isSelected = true
+            setPadding(4, 10, 4, 4)
+        })
         setContentView(ScrollView(this).apply { addView(root) })
+    }
+
+    private fun showPendingReviews() {
+        AlertDialog.Builder(this).setTitle("REVISAR PENDIENTES")
+            .setItems(arrayOf("PRODUCTOS SIN STOCK", "PRODUCTOS DAÑADOS")) { _, which ->
+                if (which == 0) showOutOfStockProducts() else showDamagedProducts()
+            }.setNegativeButton("CERRAR", null).show()
+    }
+
+    private fun showOutOfStockProducts() {
+        val latest = SeneAdminStore.reports(this)
+            .sortedWith(compareByDescending<SeneReport> { it.date }.thenByDescending { it.time }.thenByDescending { it.number })
+            .firstNotNullOfOrNull { report ->
+                SharedInventoryManager.inventoryFromReport(report)?.let { report to it }
+            }
+        if (latest == null) {
+            info("PRODUCTOS SIN STOCK", "Todavía no hay un inventario válido recibido.")
+            return
+        }
+        val (report, snapshot) = latest
+        val empty = snapshot.items.filter { it.stock <= 0 }.distinctBy { it.code.ifBlank { it.name } }
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(14, 12, 14, 12)
+            setBackgroundColor(0xFFF4F7FB.toInt())
+        }
+        addLabel(content, "Inventario actualizado", report.date + " " + report.time, 0xFFDCEBFA.toInt())
+        if (empty.isEmpty()) addLabel(content, "ESTADO", "No hay productos agotados en el inventario más reciente.", 0xFFDDF4E5.toInt())
+        empty.sortedBy { it.name.lowercase(Locale.ROOT) }.forEach { item ->
+            addLabel(content, item.name, "Código: " + item.code + " · Existencia: " + item.stock, 0xFFFFE8E5.toInt())
+        }
+        AlertDialog.Builder(this).setTitle("PRODUCTOS SIN STOCK")
+            .setView(ScrollView(this).apply { addView(content) })
+            .setPositiveButton("CERRAR", null).show()
+    }
+
+    private fun showDamagedProducts() {
+        val reports = SeneAdminStore.reports(this)
+            .sortedWith(compareBy<SeneReport> { it.date }.thenBy { it.time }.thenBy { it.number })
+        val records = linkedMapOf<String, List<String>>()
+        reports.forEach { report ->
+            val lines = report.body.replace("\\r", "").lines()
+            val marker = lines.indexOfLast { it.trim().equals("PRODUCTOS_DANADOS_SENE_V1", true) }
+            if (marker < 0) return@forEach
+            for (raw in lines.drop(marker + 1)) {
+                val line = raw.trim()
+                if (line.isBlank() || line.startsWith("ETIQUETA:", true) || line.startsWith("Guarde este reporte", true)) break
+                if (line.startsWith("CODIGO", true) || line.startsWith("CÓDIGO", true)) continue
+                val parts = line.split("|").map { it.trim() }
+                if (parts.size < 6) continue
+                val identity = listOf(parts[0], parts[3], parts[4], parts[5]).joinToString("|")
+                records.putIfAbsent(identity, parts)
+            }
+        }
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(14, 12, 14, 12)
+            setBackgroundColor(0xFFF4F7FB.toInt())
+        }
+        if (records.isEmpty()) {
+            addLabel(content, "ESTADO", "No hay productos dañados registrados.", 0xFFDDF4E5.toInt())
+        } else {
+            records.values.forEach { parts ->
+                addLabel(content, parts[1], "Código: " + parts[0] + " · Cantidad: " + parts[2] +
+                    "\\nFecha: " + parts[3] + "\\nMotivo: " + parts[4] + "\\nTrabajador: " + parts[5], 0xFFFFE8E5.toInt())
+            }
+        }
+        AlertDialog.Builder(this).setTitle("PRODUCTOS DAÑADOS")
+            .setView(ScrollView(this).apply { addView(content) })
+            .setPositiveButton("CERRAR", null).show()
     }
 
     private fun addLabel(parent:LinearLayout,label:String,value:String,accent:Int=0xFFE8F1FB.toInt()) {
