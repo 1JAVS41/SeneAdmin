@@ -108,16 +108,17 @@ object OwnerPayrollStore {
         summary.put(r.workerId,JSONObject().put("period",period).put("workedDays",worked?:0).put("absences",absences?:0)
             .put("closingType",reportValue(lines,"TIPO DE CIERRE")).put("closingReason",reportValue(lines,"MOTIVO DE CIERRE"))
             .put("started",reportValue(lines,"HORA DE ENTRADA")).put("closed",reportValue(lines,"HORA DE SALIDA")))
-        if(!prefs(c).edit().putString("attendance_summary",summary.toString()).putString(stampKey,stamp).commit())return false
+        if(!prefs(c).edit().putString("attendance_summary",summary.toString()).commit())return false
 
-        val count=absences?:return true
-        val p=profile(c,r.workerId)?:return true
+        val count=absences?:return prefs(c).edit().putString(stampKey,stamp).commit()
+        val p=profile(c,r.workerId)?:return prefs(c).edit().putString(stampKey,stamp).commit()
         val daysPerWeek=reportValue(lines,"DÍAS LABORABLES POR SEMANA","DIAS LABORABLES POR SEMANA").toIntOrNull()
             ?:p.workDays.split(",").map{it.trim()}.filter{it.isNotBlank()}.size
-        if(daysPerWeek<=0||p.weeklySalaryCents<=0L)return true
+        if(daysPerWeek<=0||p.weeklySalaryCents<=0L)return prefs(c).edit().putString(stampKey,stamp).commit()
         val payDay=payDayNumber(p.payDay)
         val payrollPeriod=periodForDate(period,payDay)
-        if(payrolls(c,r.workerId).any{it.period==payrollPeriod&&it.status=="PAGADA"})return true
+        if(payrolls(c,r.workerId).any{it.period==payrollPeriod&&it.status=="PAGADA"})
+            return prefs(c).edit().putString(stampKey,stamp).commit()
         val amount=(p.weeklySalaryCents/daysPerWeek*count).coerceAtMost(p.weeklySalaryCents)
         val id="attendance-absence-"+r.workerId+"-"+payrollPeriod
         val a=array(c,ENTRIES)
@@ -127,7 +128,8 @@ object OwnerPayrollStore {
             .put("date",payrollPeriod).put("description","Faltas reportadas por SENE VENTAS: $count")
             .put("amount",amount).put("payrollId",oldEntry?.optString("payrollId").orEmpty())
         if(index==null)a.put(entry)else a.put(index,entry)
-        return saveArray(c,ENTRIES,a)
+        if(!saveArray(c,ENTRIES,a))return false
+        return prefs(c).edit().putString(stampKey,stamp).commit()
     }
 
     private fun importPayrollRequests(c:Context,r:SeneReport,lines:List<String>):Boolean {
