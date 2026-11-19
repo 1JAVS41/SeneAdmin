@@ -40,7 +40,7 @@ class PayrollActivity : Activity() {
         setContentView(ScrollView(this).apply { addView(root) })
     }
     private fun addCard(title: String, subtitle: String, action: () -> Unit) {
-        val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(16, 14, 16, 14); setBackgroundColor(-1); elevation = 2f }
+        val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(16, 14, 16, 14); background = android.graphics.drawable.GradientDrawable().apply { setColor(0xFFE8F1FB.toInt()); cornerRadius=20f }; elevation = 2f }
         box.addView(TextView(this).apply { text = title; textSize = 16f; typeface = android.graphics.Typeface.DEFAULT_BOLD; setTextColor(0xFF173C7B.toInt()) })
         box.addView(TextView(this).apply { text = subtitle; textSize = 12f; setTextColor(0xFF64748B.toInt()); setPadding(0, 4, 0, 0) })
         val lp = LinearLayout.LayoutParams(-1, -2); lp.bottomMargin = 10; root.addView(box, lp); box.setOnClickListener { action() }
@@ -123,7 +123,6 @@ class PayrollActivity : Activity() {
             })
         }
         option("CONSULTAR / PAGAR NÓMINA") { payroll(p) }
-        option("VER OTROS REPORTES DEL TRABAJADOR") { showReportsForWorker(id) }
         dialog = AlertDialog.Builder(this).setTitle("PAGAR A · " + p.name)
             .setView(ScrollView(this).apply { addView(box) })
             .setPositiveButton("CERRAR", null).create()
