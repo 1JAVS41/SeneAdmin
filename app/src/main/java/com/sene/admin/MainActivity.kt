@@ -1,6 +1,9 @@
 package com.sene.admin
 
-import android.app.Activity
+import androidx.appcompat.app.AppCompatActivity
+import androidx.biometric.BiometricManager
+import androidx.biometric.BiometricPrompt
+import androidx.core.content.ContextCompat
 import android.app.AlertDialog
 import android.content.Intent
 import android.graphics.Typeface
@@ -14,13 +17,13 @@ import android.widget.TextView
 import android.widget.Toast
 import java.util.Locale
 
-class MainActivity : Activity() {
+class MainActivity : AppCompatActivity() {
     private lateinit var root: LinearLayout
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         showHome()
-        if (!OwnerKeyStore.hasKey(this)) askOwnerKey() else handleIncoming(intent)
+        if (!OwnerKeyStore.hasKey(this)) askOwnerKey() else if (!AccessPinStore.hasPin(this)) askCreatePin() else handleIncoming(intent)
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -172,17 +175,75 @@ class MainActivity : Activity() {
     }
 
     private fun showSettings() {
-        val options = arrayOf("Vincular / cambiar carpeta compartida", "Clave del propietario",
-            "Ver inventario maestro", "Ver inventario SENE", "Ver todos los reportes")
-        AlertDialog.Builder(this).setTitle("AJUSTES").setItems(options) { _, which ->
-            when (which) {
-                0 -> SharedInventoryManager.chooseFolder(this)
-                1 -> askOwnerKey()
-                2 -> showInventory("INVENTARIO_MAESTRO")
-                3 -> showInventory("INVENTARIO_SENE")
-                4 -> showReports()
+        val pin=EditText(this).apply { hint="PIN de acceso"; setSingleLine(true); inputType=InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_VARIATION_PASSWORD }
+        val d=AlertDialog.Builder(this).setTitle("ACCESO A AJUSTES").setMessage("Introduce tu PIN para continuar.")
+            .setView(pin).setPositiveButton("ENTRAR",null).setNegativeButton("CANCELAR",null).create()
+        d.setOnShowListener {
+            d.getButton(-1).setOnClickListener {
+                if(!AccessPinStore.matches(this,pin.text.toString())) { pin.error="PIN incorrecto"; return@setOnClickListener }
+                d.dismiss(); showSettingsMenu()
             }
-        }.setNegativeButton("CERRAR", null).show()
+            if(AccessPinStore.fingerprintEnabled(this)) {
+                d.setButton(-3,"HUELLA",null as android.content.DialogInterface.OnClickListener?)
+                d.getButton(-3).setOnClickListener { authenticateFingerprint { d.dismiss(); showSettingsMenu() } }
+            }
+        }
+        d.show()
+    }
+
+    private fun showSettingsMenu() {
+        val options=arrayOf("Cambiar PIN de acceso","Activar / desactivar huella","Vincular / cambiar carpeta compartida","Ver inventario maestro","Ver todos los reportes")
+        AlertDialog.Builder(this).setTitle("AJUSTES").setItems(options) { _,which ->
+            when(which) { 0->askChangePin(); 1->toggleFingerprint(); 2->SharedInventoryManager.chooseFolder(this); 3->showInventory("INVENTARIO_MAESTRO"); 4->showReports() }
+        }.setNegativeButton("CERRAR",null).show()
+    }
+
+    private fun askCreatePin() {
+        val a=EditText(this).apply { hint="Crea un PIN de 4 a 8 dígitos"; setSingleLine(true); inputType=InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_VARIATION_PASSWORD }
+        val b=EditText(this).apply { hint="Confirma tu PIN"; setSingleLine(true); inputType=InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_VARIATION_PASSWORD }
+        val box=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(20,8,20,4); addView(a); addView(b) }
+        val d=AlertDialog.Builder(this).setTitle("CREA TU PIN DE ACCESO").setMessage("Debes establecer este PIN para continuar. Protege la entrada a AJUSTES.")
+            .setView(box).setPositiveButton("GUARDAR PIN",null).create()
+        d.setCancelable(false)
+        d.setOnShowListener { d.getButton(-1).setOnClickListener {
+            val x=a.text.toString()
+            if(x.length !in 4..8 || x.any { !it.isDigit() }) { a.error="Usa de 4 a 8 números"; return@setOnClickListener }
+            if(x!=b.text.toString()) { b.error="Los PIN no coinciden"; return@setOnClickListener }
+            if(!AccessPinStore.save(this,x)) { a.error="No se pudo guardar"; return@setOnClickListener }
+            d.dismiss(); handleIncoming(intent)
+        } }
+        d.show()
+    }
+
+    private fun askChangePin() {
+        val a=EditText(this).apply { hint="Nuevo PIN (4 a 8 dígitos)"; setSingleLine(true); inputType=InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_VARIATION_PASSWORD }
+        val b=EditText(this).apply { hint="Confirmar PIN"; setSingleLine(true); inputType=InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_VARIATION_PASSWORD }
+        val box=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(20,8,20,4); addView(a); addView(b) }
+        val d=AlertDialog.Builder(this).setTitle("CAMBIAR PIN").setView(box).setPositiveButton("GUARDAR",null).setNegativeButton("CANCELAR",null).create()
+        d.setOnShowListener { d.getButton(-1).setOnClickListener {
+            val x=a.text.toString()
+            if(x.length !in 4..8 || x.any { !it.isDigit() }) { a.error="Usa de 4 a 8 números"; return@setOnClickListener }
+            if(x!=b.text.toString()) { b.error="Los PIN no coinciden"; return@setOnClickListener }
+            if(!AccessPinStore.save(this,x)) { a.error="No se pudo guardar"; return@setOnClickListener }
+            d.dismiss(); Toast.makeText(this,"PIN actualizado",Toast.LENGTH_LONG).show()
+        } }
+        d.show()
+    }
+
+    private fun toggleFingerprint() {
+        if(AccessPinStore.fingerprintEnabled(this)) { AccessPinStore.setFingerprintEnabled(this,false); info("HUELLA DESACTIVADA","El PIN seguirá protegiendo Ajustes."); return }
+        if(BiometricManager.from(this).canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_STRONG)!=BiometricManager.BIOMETRIC_SUCCESS) {
+            info("HUELLA NO DISPONIBLE","Registra una huella en los ajustes de seguridad de Android y vuelve a intentarlo."); return
+        }
+        authenticateFingerprint { AccessPinStore.setFingerprintEnabled(this,true); info("HUELLA ACTIVADA","Ahora puedes usar tu huella o tu PIN para entrar a Ajustes.") }
+    }
+
+    private fun authenticateFingerprint(onSuccess:()->Unit) {
+        val prompt=BiometricPrompt(this,ContextCompat.getMainExecutor(this),object:BiometricPrompt.AuthenticationCallback() {
+            override fun onAuthenticationSucceeded(result:BiometricPrompt.AuthenticationResult) { super.onAuthenticationSucceeded(result); onSuccess() }
+            override fun onAuthenticationError(errorCode:Int,errString:CharSequence) { super.onAuthenticationError(errorCode,errString); Toast.makeText(this@MainActivity,errString,Toast.LENGTH_LONG).show() }
+        })
+        prompt.authenticate(BiometricPrompt.PromptInfo.Builder().setTitle("SENE ADMIN").setSubtitle("Confirma tu identidad para entrar a Ajustes").setNegativeButtonText("CANCELAR").build())
     }
 
     private fun askOwnerKey() {
@@ -191,7 +252,7 @@ class MainActivity : Activity() {
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
         }
         val dlg = AlertDialog.Builder(this).setTitle("CLAVE DEL PROPIETARIO")
-            .setMessage("Introduce la misma clave que utilizas en SENE VENTAS. Si eres cliente nuevo, crea aquí tu clave y consérvala.")
+            .setMessage("Introduce obligatoriamente la MISMA CLAVE DE CIFRADO que ya está configurada en SENE VENTAS. SENE ADMIN no genera ni crea una clave nueva. No podrás continuar sin introducirla.")
             .setView(input).setPositiveButton("GUARDAR", null).setNegativeButton("CANCELAR", null).create()
         dlg.setOnShowListener {
             dlg.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
@@ -202,11 +263,11 @@ class MainActivity : Activity() {
                     return@setOnClickListener
                 }
                 dlg.dismiss()
-                Toast.makeText(this, "Clave del propietario guardada", Toast.LENGTH_LONG).show()
-                showHome()
-                handleIncoming(intent)
+                Toast.makeText(this, "Clave de SENE VENTAS guardada", Toast.LENGTH_LONG).show()
+                askCreatePin()
             }
         }
+        dlg.setCancelable(false)
         dlg.show()
     }
 
