@@ -163,7 +163,7 @@ class MainActivity : AppCompatActivity() {
             .sortedWith(compareBy<SeneReport> { it.date }.thenBy { it.time }.thenBy { it.number })
         val records = linkedMapOf<String, List<String>>()
         reports.forEach { report ->
-            val lines = report.body.replace("\\r", "").lines()
+            val lines = report.body.replace("\r", "").lines()
             val marker = lines.indexOfLast { it.trim().equals("PRODUCTOS_DANADOS_SENE_V1", true) }
             if (marker < 0) return@forEach
             for (raw in lines.drop(marker + 1)) {
@@ -186,7 +186,7 @@ class MainActivity : AppCompatActivity() {
         } else {
             records.values.forEach { parts ->
                 addLabel(content, parts[1], "Código: " + parts[0] + " · Cantidad: " + parts[2] +
-                    "\\nFecha: " + parts[3] + "\\nMotivo: " + parts[4] + "\\nTrabajador: " + parts[5], 0xFFFFE8E5.toInt())
+                    "\nFecha: " + parts[3] + "\nMotivo: " + parts[4] + "\nTrabajador: " + parts[5], 0xFFFFE8E5.toInt())
             }
         }
         AlertDialog.Builder(this).setTitle("PRODUCTOS DAÑADOS")
