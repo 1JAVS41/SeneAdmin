@@ -133,10 +133,36 @@ class PayrollActivity : Activity() {
     private fun showReportsForWorker(id: String) {
         val lines = SeneAdminStore.reports(this).filter { it.workerId == id }
             .sortedWith(compareBy<SeneReport> { it.date }.thenBy { it.time }.thenBy { it.number })
-        val body = if (lines.isEmpty()) "Todavía no hay reportes recibidos para este trabajador."
-        else lines.joinToString("\n\n") { it.date + " " + it.time + " · " + it.type + "\n\n" + it.body }
+        val content=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setPadding(14,12,14,12);setBackgroundColor(0xFFF4F7FB.toInt())}
+        if(lines.isEmpty()) {
+            val empty=TextView(this).apply{text="Todavía no hay reportes recibidos para este trabajador.";textSize=14f;setTextColor(0xFF526579.toInt());setPadding(8,16,8,16)}
+            content.addView(empty)
+        }
+        lines.asReversed().forEach { report ->
+            val card=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setPadding(14,12,14,12)
+                background=android.graphics.drawable.GradientDrawable().apply{setColor(-1);cornerRadius=18f}}
+            fun label(name:String,value:String) {
+                val chip=LinearLayout(this).apply{orientation=1;setPadding(12,9,12,9)
+                    background=android.graphics.drawable.GradientDrawable().apply{setColor(0xFFE8F1FB.toInt());cornerRadius=14f}}
+                chip.addView(TextView(this).apply{text=name.uppercase(Locale.ROOT);textSize=10f;typeface=android.graphics.Typeface.DEFAULT_BOLD;setTextColor(0xFF54708D.toInt())})
+                chip.addView(TextView(this).apply{text=value;textSize=13f;setTextColor(0xFF173C65.toInt());setPadding(0,2,0,0)})
+                val lp=LinearLayout.LayoutParams(-1,-2);lp.bottomMargin=6;card.addView(chip,lp)
+            }
+            label("FECHA",report.date+" "+report.time)
+            label("TIPO",report.type)
+            label("NÚMERO",report.number.toString())
+            report.body.replace("\r","").lines().forEach { raw ->
+                val value=raw.trim()
+                if(value.isBlank()||value.startsWith("SENE-ORDER|1"))return@forEach
+                if(value.startsWith("ETIQUETA:",true)) {
+                    card.addView(TextView(this).apply{text=value.substringAfter(":").trim();textSize=13f;typeface=android.graphics.Typeface.DEFAULT_BOLD;setTextColor(0xFF123B68.toInt());setPadding(2,9,2,5)})
+                } else if(value.contains(":")) label(value.substringBefore(":").trim(),value.substringAfter(":").trim())
+                else label("DETALLE",value)
+            }
+            val lp=LinearLayout.LayoutParams(-1,-2);lp.bottomMargin=10;content.addView(card,lp)
+        }
         AlertDialog.Builder(this).setTitle("REPORTES DEL TRABAJADOR")
-            .setMessage(body).setPositiveButton("CERRAR", null).show()
+            .setView(ScrollView(this).apply{addView(content)}).setPositiveButton("CERRAR",null).show()
     }
     private fun addEntry(p:OwnerPayrollStore.Profile,type:String){
         val amount=field("Importe a descontar",true);val desc=field("Motivo o descripción")
