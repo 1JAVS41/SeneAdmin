@@ -101,6 +101,9 @@ class MainActivity : AppCompatActivity() {
         mainOption("REPORTES", "Ventas, caja y actividad importante") {
             showReports()
         }
+        mainOption("INVENTARIO", "Consultar el inventario maestro actualizado", 0xFF218A57.toInt()) {
+            showInventory("INVENTARIO_MAESTRO")
+        }
         mainOption("PEGAR REPORTES DE WHATSAPP", "Importar reportes enviados por tus trabajadores", 0xFF218A57.toInt()) {
             showPasteDialog()
         }
@@ -382,7 +385,7 @@ class MainActivity : AppCompatActivity() {
     private fun showInventory(category: String) {
         val key = OwnerKeyStore.read(this)
         if (key == null) { askOwnerKey(); return }
-        if (SharedInventoryManager.savedTree(this) == null) { SharedInventoryManager.chooseFolder(this); return }
+        if (SharedInventoryManager.savedTree(this) == null) { explainSharedFolder(); return }
         try {
             var snapshots = SharedInventoryManager.list(this, key, category)
             if (category == "INVENTARIO_MAESTRO" && snapshots.isEmpty()) {
@@ -395,23 +398,47 @@ class MainActivity : AppCompatActivity() {
             val latest = snapshots.firstOrNull()
             val title = if (category == "INVENTARIO_MAESTRO") "INVENTARIO MAESTRO" else "INVENTARIO SENE"
             if (latest == null) {
-                info(title, "No hay archivos de esta categoría. Los TXT anteriores se pueden leer sin modificarlos; los nuevos respaldos se guardarán cifrados.")
+                info(title, "Todavía no hay productos registrados en el inventario maestro. Se actualizará al incorporar reportes válidos de SENE VENTAS.")
                 return
             }
-            val detail = buildString {
-                append("Archivo: ").append(latest.fileName).append("\nActualizado: ").append(latest.updated)
-                append("\nProductos: ").append(latest.items.size)
-                if (latest.legacy) append("\n\nTXT anterior sin cifrado; se conservó intacto.")
-                append("\n\n")
-                latest.items.take(80).forEach {
-                    append(it.code).append(" · ").append(it.name).append("\nExistencia: ").append(it.stock).append(" | Precio: $").append(it.price)
-                    if (it.aisle.isNotBlank() || it.shelf.isNotBlank()) append("\nPasillo: ").append(it.aisle).append(" | Estante: ").append(it.shelf)
-                    append("\n\n")
-                }
-                if (latest.items.size > 80) append("Se muestran los primeros 80 productos.")
-                append("\nRespaldos encontrados: ").append(snapshots.size)
+            val content = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(14, 12, 14, 12)
+                setBackgroundColor(0xFFF4F7FB.toInt())
             }
-            AlertDialog.Builder(this).setTitle(title).setMessage(detail).setPositiveButton("CERRAR", null).show()
+            addLabel(content, "Última actualización", latest.updated, 0xFFDCEBFA.toInt())
+            addLabel(content, "Productos registrados", latest.items.size.toString(), 0xFFDDF4E5.toInt())
+            addLabel(content, "Respaldos disponibles", snapshots.size.toString(), 0xFFE8E5FA.toInt())
+            if (latest.legacy) addLabel(content, "Formato anterior", "Inventario TXT heredado. Se conserva el archivo original.", 0xFFFFF0D9.toInt())
+            latest.items.sortedBy { it.name.lowercase(Locale.ROOT) }.forEach { item ->
+                val card = LinearLayout(this).apply {
+                    orientation = LinearLayout.VERTICAL
+                    setPadding(14, 12, 14, 12)
+                    background = android.graphics.drawable.GradientDrawable().apply {
+                        setColor(-1)
+                        cornerRadius = 18f
+                    }
+                    elevation = 1f
+                }
+                card.addView(TextView(this).apply {
+                    text = item.name
+                    textSize = 16f
+                    typeface = Typeface.DEFAULT_BOLD
+                    setTextColor(0xFF123B68.toInt())
+                    setPadding(0, 0, 0, 7)
+                })
+                addLabel(card, "Código", item.code, 0xFFE8F1FB.toInt())
+                addLabel(card, "Precio", OwnerPayrollStore.money((item.price * 100.0).toLong()), 0xFFE8F1FB.toInt())
+                addLabel(card, "Existencia", item.stock.toString(), if (item.stock > 0) 0xFFDDF4E5.toInt() else 0xFFFFE8E5.toInt())
+                if (item.aisle.isNotBlank()) addLabel(card, "Pasillo", item.aisle)
+                if (item.shelf.isNotBlank()) addLabel(card, "Estante", item.shelf)
+                val lp = LinearLayout.LayoutParams(-1, -2)
+                lp.bottomMargin = 10
+                content.addView(card, lp)
+            }
+            AlertDialog.Builder(this).setTitle(title)
+                .setView(ScrollView(this).apply { addView(content) })
+                .setPositiveButton("CERRAR", null).show()
         } catch (e: Exception) {
             info("NO SE PUDO ABRIR EL INVENTARIO", e.message ?: "Verifica la clave y los permisos. El archivo original permanece intacto.")
         }
