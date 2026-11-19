@@ -21,7 +21,7 @@ object SeneReportReader {
     fun read(message: String, ownerKey: String): SeneReport {
         val lines = message.trim().lines()
         require(lines.size >= 11 && lines[0] == "SENE-ADMIN-REPORT|1") { "Formato de reporte no reconocido" }
-        val fields = lines.take(8)
+        val fields = lines.take(9)
         fun field(name: String) = fields.firstOrNull { it.startsWith("${name}=") }
             ?.substringAfter("=") ?: throw IllegalArgumentException("Falta el campo ${name}")
         val keyId = field("KEY_ID")
