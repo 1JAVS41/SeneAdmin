@@ -210,7 +210,11 @@ object SharedInventoryManager {
                     val doc = SeneSharedFiles.decode(raw, ownerKey)
                     val expected = if (dirName == "INVENTARIO-MAESTRO") "INVENTARIO_MAESTRO" else "INVENTARIO_SENE"
                     doc.category == expected
-                } else false
+                } else {
+                    val expected = if (dirName == "INVENTARIO-MAESTRO") "INVENTARIO_MAESTRO" else "INVENTARIO_SENE"
+                    decode(c, raw, ownerKey, expected, name)
+                    true
+                }
             } catch (_: Exception) { false }
         }
         if (!valid) return
@@ -232,11 +236,25 @@ object SharedInventoryManager {
                     val expected = if (dirName == "INVENTARIO-MAESTRO") "INVENTARIO_MAESTRO" else "INVENTARIO_SENE"
                     doc.category == expected
                 }
-            } catch (_: Exception) { false }
+            } catch (_: Exception) {
+                try {
+                    val expected = if (dirName == "INVENTARIO-MAESTRO") "INVENTARIO_MAESTRO" else "INVENTARIO_SENE"
+                    decode(c, file.readBytes(), ownerKey, expected, file.name)
+                    true
+                } catch (_: Exception) { false }
+            }
         }
         if (localValid) localFiles.drop(10).forEach { if (!it.delete()) complete = false }
         else complete = false
         if (complete) prefs(c).edit().putLong(prefKey, now).apply()
+    }
+
+    /** Ejecuta la retención programada para las tres categorías al abrir SENE ADMIN. */
+    fun cleanupAllIfDue(c: Context, ownerKey: String) {
+        val tree = savedTree(c) ?: return
+        listOf("INVENTARIO-SENE", "INVENTARIO-MAESTRO", "REPORTES").forEach { category ->
+            try { cleanupIfDue(c, tree, category, ownerKey) } catch (_: Exception) { }
+        }
     }
 
     private fun normalizeUpdated(value: String?): String? {
