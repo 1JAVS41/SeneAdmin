@@ -93,7 +93,53 @@ object OwnerPayrollStore {
             if(!upsertProfile(c,Profile(r.workerId,name,phone,salary,payDay,workDays,hours)))return false
             if(!prefs(c).edit().putString(stampKey,stamp).commit())return false
         }
-        return importAttendance(c,r,lines,stamp) && importPayrollRequests(c,r,lines)
+        return importDailyAttendance(c,r) && importAttendance(c,r,lines,stamp) && importPayrollRequests(c,r,lines)
+    }
+
+    private fun importDailyAttendance(c:Context,r:SeneReport):Boolean {
+        val day=isoDate(r.date)
+        if(day.isBlank())return true
+        val type=r.type.uppercase(Locale.ROOT)
+        val status=when {
+            type.contains("CIERRE") || type.contains("FIN_TURNO") || type.contains("CLOSE") -> "WORKED"
+            type.contains("INICIO") || type.contains("PERIOD") || type.contains("START") -> "WORKING"
+            else -> return true
+        }
+        val all=try{JSONObject(prefs(c).getString("attendance_days","{}")?:"{}")}catch(_:Exception){JSONObject()}
+        val worker=all.optJSONObject(r.workerId) ?: JSONObject()
+        val previous=worker.optJSONObject(day)
+        val stamp=r.date+" "+r.time
+        if(previous!=null && previous.optString("stamp")>=stamp)return true
+        worker.put(day,JSONObject().put("status",status).put("stamp",stamp))
+        all.put(r.workerId,worker)
+        return prefs(c).edit().putString("attendance_days",all.toString()).commit()
+    }
+
+    data class DayAttendance(val day:String,val status:String)
+    fun weekAttendance(c:Context,p:Profile):List<DayAttendance> {
+        val all=try{JSONObject(prefs(c).getString("attendance_days","{}")?:"{}")}catch(_:Exception){JSONObject()}
+        val worker=all.optJSONObject(p.id) ?: JSONObject()
+        val today=Calendar.getInstance()
+        val monday=Calendar.getInstance().apply {
+            val delta=(get(Calendar.DAY_OF_WEEK)-Calendar.MONDAY+7)%7
+            add(Calendar.DAY_OF_YEAR,-delta)
+        }
+        val scheduled=p.workDays.split(Regex("[,;|]")).map{it.trim().lowercase(Locale("es","MX"))}
+            .filter{it.isNotBlank()}.toSet()
+        val names=listOf("LUNES","MARTES","MIÉRCOLES","JUEVES","VIERNES","SÁBADO","DOMINGO")
+        return (0..6).map { index ->
+            val date=Calendar.getInstance().apply { timeInMillis=monday.timeInMillis; add(Calendar.DAY_OF_YEAR,index) }
+            val key=SimpleDateFormat("yyyy-MM-dd",Locale.US).format(date.time)
+            val stored=worker.optJSONObject(key)?.optString("status").orEmpty()
+            val isScheduled=scheduled.isEmpty() || scheduled.any { it.replace("é","e").uppercase(Locale.ROOT)==names[index].replace("É","E") }
+            val status=when {
+                stored=="WORKED" -> "WORKED"
+                stored=="WORKING" -> "WORKING"
+                date.after(today) || !isScheduled -> "FUTURE"
+                else -> "NOT_WORKED"
+            }
+            DayAttendance(names[index],status)
+        }
     }
 
     private fun importAttendance(c:Context,r:SeneReport,lines:List<String>,stamp:String):Boolean {
@@ -269,6 +315,8 @@ object OwnerPayrollStore {
         if(deliveredCents<0)return false
         val a=array(c,PAYROLLS);var found=false
         for(i in 0 until a.length()){val o=a.optJSONObject(i)?:continue;if(o.optString("id")==payrollId){
+            val ownerProfile=profile(c,o.optString("profileId")) ?: return false
+            if(!isPayDay(ownerProfile))return false
             if(o.optString("status")=="PAGADA")return false
             o.put("status","PAGADA").put("paidAt",SimpleDateFormat("yyyy-MM-dd HH:mm:ss",Locale.US).format(Date())).put("delivered",deliveredCents);found=true;break
         }}
@@ -297,8 +345,9 @@ object OwnerPayrollStore {
     }
 
     fun isPayDay(p:Profile):Boolean{
-        val today=SimpleDateFormat("EEEE",Locale("es","MX")).format(Date())
-        return p.payDay.isNotBlank()&&today.equals(p.payDay,true)
+        if(p.payDay.isBlank())return false
+        val today=Calendar.getInstance().get(Calendar.DAY_OF_WEEK)
+        return today==payDayNumber(p.payDay)
     }
     fun money(cents:Long)="$" + String.format(Locale.US,"%,.2f",cents/100.0)
 }
