@@ -12,7 +12,7 @@ import java.util.UUID
 object OwnerPayrollStore {
     data class Profile(val id:String,val name:String,val phone:String,val weeklySalaryCents:Long,val payDay:String,val workDays:String,val hours:Int,val createdAt:String="",val firstShiftAt:String="")
     data class Entry(val id:String,val profileId:String,val type:String,val date:String,val description:String,val amountCents:Long,val payrollId:String)
-    data class Payroll(val id:String,val profileId:String,val period:String,val grossCents:Long,val absenceCents:Long,val loanCents:Long,val consumptionCents:Long,val netCents:Long,val status:String,val createdAt:String,val paidAt:String,val deliveredCents:Long)
+    data class Payroll(val id:String,val profileId:String,val period:String,val grossCents:Long,val absenceCents:Long,val earlyExitCents:Long,val loanCents:Long,val consumptionCents:Long,val netCents:Long,val status:String,val createdAt:String,val paidAt:String,val deliveredCents:Long)
     private const val PREFS="sene_admin_payroll_v1"
     private const val PROFILES="profiles"
     private const val ENTRIES="entries"
@@ -324,7 +324,7 @@ object OwnerPayrollStore {
         val a=array(c,ENTRIES);return (0 until a.length()).mapNotNull{i->try{val o=a.getJSONObject(i);if(o.getString("profileId")!=profileId)null else Entry(o.getString("id"),profileId,o.getString("type"),o.getString("date"),o.optString("description"),o.optLong("amount"),o.optString("payrollId"))}catch(_:Exception){null}}
     }
     fun payrolls(c:Context,profileId:String):List<Payroll>{
-        val a=array(c,PAYROLLS);return (0 until a.length()).mapNotNull{i->try{val o=a.getJSONObject(i);if(o.getString("profileId")!=profileId)null else Payroll(o.getString("id"),profileId,o.getString("period"),o.optLong("gross"),o.optLong("absence"),o.optLong("loan"),o.optLong("consumption"),o.optLong("net"),o.optString("status"),o.optString("createdAt"),o.optString("paidAt"),o.optLong("delivered"))}catch(_:Exception){null}}
+        val a=array(c,PAYROLLS);return (0 until a.length()).mapNotNull{i->try{val o=a.getJSONObject(i);if(o.getString("profileId")!=profileId)null else Payroll(o.getString("id"),profileId,o.getString("period"),o.optLong("gross"),o.optLong("absence"),o.optLong("earlyExit"),o.optLong("loan"),o.optLong("consumption"),o.optLong("net"),o.optString("status"),o.optString("createdAt"),o.optString("paidAt"),o.optLong("delivered"))}catch(_:Exception){null}}
     }
     fun createOrGetPayroll(c:Context,profileId:String):Payroll{
         val p=profile(c,profileId)?:throw IllegalStateException("Perfil no encontrado")
@@ -357,10 +357,11 @@ object OwnerPayrollStore {
             (it.payrollId==payrollId) || (it.payrollId.isBlank() && periodForDate(it.date,payDay)==week)
         }
         val absence=relevant.filter{it.type=="FALTA"}.sumOf{it.amountCents}
+        val earlyExit=relevant.filter{it.type=="SALIDA_ANTICIPADA"}.sumOf{it.amountCents}
         val loan=relevant.filter{it.type=="PRESTAMO"}.sumOf{it.amountCents}
         val consumption=relevant.filter{it.type=="CONSUMO"}.sumOf{it.amountCents}
-        val net=(p.weeklySalaryCents-absence-loan-consumption).coerceAtLeast(0L)
-        val payroll=Payroll(payrollId,profileId,week,p.weeklySalaryCents,absence,loan,consumption,net,"PENDIENTE",
+        val net=(p.weeklySalaryCents-absence-earlyExit-loan-consumption).coerceAtLeast(0L)
+        val payroll=Payroll(payrollId,profileId,week,p.weeklySalaryCents,absence,earlyExit,loan,consumption,net,"PENDIENTE",
             existing?.optString("createdAt")?.takeIf{it.isNotBlank()}?:SimpleDateFormat("yyyy-MM-dd HH:mm:ss",Locale.US).format(Date()),"",0L)
         if(existingIndex==null) payrollArray.put(payrollJson(payroll)) else payrollArray.put(existingIndex,payrollJson(payroll))
         check(saveArray(c,PAYROLLS,payrollArray)){"No se pudo guardar la nómina"}
@@ -382,7 +383,7 @@ object OwnerPayrollStore {
         return SimpleDateFormat("yyyy-MM-dd",Locale.US).format(cal.time)
     }
     private fun payrollJson(p:Payroll)=JSONObject().put("id",p.id).put("profileId",p.profileId).put("period",p.period)
-        .put("gross",p.grossCents).put("absence",p.absenceCents).put("loan",p.loanCents).put("consumption",p.consumptionCents)
+        .put("gross",p.grossCents).put("absence",p.absenceCents).put("earlyExit",p.earlyExitCents).put("loan",p.loanCents).put("consumption",p.consumptionCents)
         .put("net",p.netCents).put("status",p.status).put("createdAt",p.createdAt).put("paidAt",p.paidAt).put("delivered",p.deliveredCents)
     fun markPaid(c:Context,payrollId:String,deliveredCents:Long):Boolean{
         if(deliveredCents<0)return false
