@@ -124,29 +124,39 @@ object OwnerPayrollStore {
             if(!upsertProfile(c,Profile(r.workerId,name,phone,salary,payDay,workDays,hours,createdAt,firstShiftAt)))return false
             if(!prefs(c).edit().putString(stampKey,stamp).commit())return false
         }
-        return importDailyAttendance(c,r) && importAttendance(c,r,lines,stamp) && importPayrollRequests(c,r,lines) && importEarlyExit(c,r,lines)
+        return importDailyAttendance(c,r,lines) && importAttendance(c,r,lines,stamp) && importPayrollRequests(c,r,lines) && importEarlyExit(c,r,lines)
     }
 
-    private fun importDailyAttendance(c:Context,r:SeneReport):Boolean {
-        val day=isoDate(r.date)
-        if(day.isBlank())return true
+    private fun importDailyAttendance(c:Context,r:SeneReport,lines:List<String>):Boolean {
         val type=r.type.uppercase(Locale.ROOT)
-        val status=when {
-            type.contains("CIERRE") || type.contains("FIN_TURNO") || type.contains("CLOSE") -> "WORKED"
-            type.contains("INICIO") || type.contains("PERIOD") || type.contains("START") -> "WORKING"
-            else -> return true
-        }
+        val isClosing=type.contains("CIERRE") || type.contains("FIN_TURNO") || type.contains("CLOSE")
+        val isStarting=type.contains("INICIO") || type.contains("PERIOD") || type.contains("START")
+        if(!isClosing && !isStarting)return true
+        val entry=reportValue(lines,"HORA DE ENTRADA")
+        val exit=reportValue(lines,"HORA DE SALIDA").ifBlank { if(isClosing) r.date+" "+r.time else "" }
+        val day=isoDate(entry).takeIf { entry.isNotBlank() }?.takeIf { it.length==10 } ?: isoDate(r.date)
+        if(day.isBlank())return true
+        val closingType=reportValue(lines,"TIPO DE CIERRE").trim().uppercase(Locale.ROOT)
+        val status=if(isStarting) "WORKING" else if(closingType=="EARLY_EXIT" || closingType=="EARLY EXIT") "EARLY_EXIT" else "WORKED"
         val all=try{JSONObject(prefs(c).getString("attendance_days","{}")?:"{}")}catch(_:Exception){JSONObject()}
         val worker=all.optJSONObject(r.workerId) ?: JSONObject()
-        val previous=worker.optJSONObject(day)
+        val previous=worker.optJSONObject(day) ?: JSONObject()
         val stamp=r.date+" "+r.time
-        if(previous!=null && previous.optString("stamp")>=stamp)return true
-        worker.put(day,JSONObject().put("status",status).put("stamp",stamp))
+        val oldStamp=previous.optString("stamp")
+        val merged=JSONObject(previous.toString())
+        if(entry.isNotBlank())merged.put("started",entry)
+        if(exit.isNotBlank())merged.put("closed",exit)
+        if(oldStamp.isBlank() || stamp>=oldStamp) {
+            merged.put("status",status).put("stamp",stamp)
+        } else if(merged.optString("status").isBlank()) {
+            merged.put("status",status).put("stamp",stamp)
+        }
+        worker.put(day,merged)
         all.put(r.workerId,worker)
         return prefs(c).edit().putString("attendance_days",all.toString()).commit()
     }
 
-    data class DayAttendance(val day:String,val status:String)
+    data class DayAttendance(val day:String,val status:String,val started:String="",val closed:String="")
     fun weekAttendance(c:Context,p:Profile):List<DayAttendance> {
         val all=try{JSONObject(prefs(c).getString("attendance_days","{}")?:"{}")}catch(_:Exception){JSONObject()}
         val worker=all.optJSONObject(p.id) ?: JSONObject()
@@ -162,17 +172,19 @@ object OwnerPayrollStore {
         return (0..6).map { index ->
             val date=Calendar.getInstance().apply { timeInMillis=monday.timeInMillis; add(Calendar.DAY_OF_YEAR,index) }
             val key=SimpleDateFormat("yyyy-MM-dd",Locale.US).format(date.time)
-            val stored=worker.optJSONObject(key)?.optString("status").orEmpty()
+            val record=worker.optJSONObject(key) ?: JSONObject()
+            val stored=record.optString("status")
             val workText=p.workDays.lowercase(Locale("es","MX")).replace("á","a").replace("é","e").replace("í","i").replace("ó","o").replace("ú","u")
             val isScheduled=scheduled.isEmpty() || workText.contains(names[index].lowercase(Locale.ROOT).replace("é","e"))
             val todayKey=SimpleDateFormat("yyyy-MM-dd",Locale.US).format(today.time)
             val status=when {
+                stored=="EARLY_EXIT" -> "EARLY_EXIT"
                 stored=="WORKED" -> "WORKED"
                 stored=="WORKING" -> "WORKING"
                 key>todayKey || !isScheduled -> "FUTURE"
                 else -> if (createdDate.isNotBlank() && key < createdDate) "NO_RECORD" else "NOT_WORKED"
             }
-            DayAttendance(names[index],status)
+            DayAttendance(names[index],status,record.optString("started"),record.optString("closed"))
         }
     }
 
