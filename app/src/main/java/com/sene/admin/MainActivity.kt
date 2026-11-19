@@ -289,7 +289,9 @@ class MainActivity : Activity() {
         if (report.body.startsWith("SENE-ORDER|1")) {
             check(OwnerPayrollStore.importOrder(this, report)) { "No se pudo organizar la solicitud del trabajador." }
         } else {
-            OwnerPayrollStore.importProfile(this, report)
+            check(OwnerPayrollStore.importProfile(this, report)) {
+                "No se pudieron guardar los datos del trabajador, la asistencia o sus movimientos de nómina."
+            }
         }
 
         // El inventario del reporte se consulta desde el historial local y se muestra
