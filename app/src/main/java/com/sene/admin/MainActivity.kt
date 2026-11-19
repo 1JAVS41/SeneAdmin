@@ -280,8 +280,30 @@ class MainActivity : AppCompatActivity() {
     private fun showSettingsMenu() {
         val options=arrayOf("Cambiar PIN de acceso","Activar / desactivar huella","Vincular / cambiar carpeta compartida","Ver inventario maestro","Ver todos los reportes")
         AlertDialog.Builder(this).setTitle("AJUSTES").setItems(options) { _,which ->
-            when(which) { 0->askChangePin(); 1->toggleFingerprint(); 2->SharedInventoryManager.chooseFolder(this); 3->showInventory("INVENTARIO_MAESTRO"); 4->showReports() }
+            when(which) { 0->askChangePin(); 1->toggleFingerprint(); 2->explainSharedFolder(); 3->showInventory("INVENTARIO_MAESTRO"); 4->showReports() }
         }.setNegativeButton("CERRAR",null).show()
+    }
+
+    private fun explainSharedFolder() {
+        AlertDialog.Builder(this)
+            .setTitle("VINCULAR / CAMBIAR CARPETA COMPARTIDA")
+            .setMessage(
+                "Antes de continuar, el dueño debe preparar una carpeta compartida o sincronizada " +
+                "a la que tengan acceso los dos teléfonos. Si está en la nube, compártela también " +
+                "con la cuenta que se utiliza en el otro teléfono.\n\n" +
+                "1. Pulsa CONTINUAR y busca esa carpeta en el selector de archivos de Android.\n" +
+                "2. Selecciona la carpeta principal compartida (no crees ni elijas las subcarpetas internas de SENE).\n" +
+                "3. Pulsa «Usar esta carpeta» y después «Permitir», si Android lo solicita.\n" +
+                "4. Repite la vinculación en SENE VENTAS y SENE ADMIN, en sus respectivos teléfonos, " +
+                "seleccionando exactamente la misma carpeta compartida.\n" +
+                "5. Introduce en ambas aplicaciones la misma clave del propietario.\n\n" +
+                "SENE organizará dentro de esa carpeta INVENTARIO-SENE, INVENTARIO-MAESTRO y REPORTES. " +
+                "No borres ni renombres esas carpetas. Si cambias la carpeta vinculada, los archivos " +
+                "que estén en la carpeta anterior no se trasladan automáticamente."
+            )
+            .setPositiveButton("CONTINUAR") { _, _ -> SharedInventoryManager.chooseFolder(this) }
+            .setNegativeButton("CANCELAR", null)
+            .show()
     }
 
     private fun askCreatePin() {
