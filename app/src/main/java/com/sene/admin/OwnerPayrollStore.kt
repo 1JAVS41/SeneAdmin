@@ -25,6 +25,35 @@ object OwnerPayrollStore {
         val a=array(c,PROFILES);return (0 until a.length()).mapNotNull{i->try{val o=a.getJSONObject(i);Profile(o.getString("id"),o.getString("name"),o.optString("phone"),o.optLong("salary"),o.optString("payDay"),o.optString("workDays"),o.optInt("hours",8))}catch(_:Exception){null}}
     }
     fun profile(c:Context,id:String)=profiles(c).firstOrNull{it.id==id}
+
+    /** Elimina el perfil y sus datos locales de nómina y asistencia, sin tocar reportes importados. */
+    fun deleteProfile(c:Context,id:String):Boolean {
+        if(profile(c,id)==null)return false
+        val profileArray=JSONArray()
+        profiles(c).filterNot{it.id==id}.forEach{profileArray.put(profileJson(it))}
+        if(!saveArray(c,PROFILES,profileArray))return false
+        val entryArray=JSONArray()
+        (0 until array(c,ENTRIES).length()).forEach{i->
+            val item=array(c,ENTRIES).optJSONObject(i)?:return@forEach
+            if(item.optString("profileId")!=id)entryArray.put(item)
+        }
+        if(!saveArray(c,ENTRIES,entryArray))return false
+        val payrollArray=JSONArray()
+        val oldPayrolls=array(c,PAYROLLS)
+        for(i in 0 until oldPayrolls.length()){
+            val item=oldPayrolls.optJSONObject(i)?:continue
+            if(item.optString("profileId")!=id)payrollArray.put(item)
+        }
+        if(!saveArray(c,PAYROLLS,payrollArray))return false
+        val p=prefs(c)
+        val attendance=try{JSONObject(p.getString("attendance_days","{}")?:"{}")}catch(_:Exception){JSONObject()}
+        attendance.remove(id)
+        val summaries=try{JSONObject(p.getString("attendance_summary","{}")?:"{}")}catch(_:Exception){JSONObject()}
+        summaries.remove(id)
+        return p.edit().putString("attendance_days",attendance.toString())
+            .putString("attendance_summary",summaries.toString())
+            .remove("profile_import_"+id).remove("attendance_import_"+id).commit()
+    }
     fun upsertProfile(c:Context,p:Profile):Boolean{
         val a=JSONArray();var replaced=false
         profiles(c).forEach{old->if(old.id==p.id){a.put(profileJson(p));replaced=true}else a.put(profileJson(old))}
