@@ -284,16 +284,22 @@ class MainActivity : Activity() {
     }
 
     private fun processReport(report: SeneReport, message: String, key: String) {
-        if (!SeneAdminStore.saveReport(this, report)) throw IllegalStateException("No se pudo guardar el reporte.")
+        // Primero clasifica y aplica los datos. Solo después registra el ID como importado:
+        // si falla el procesamiento, el dueño puede pegar el mismo mensaje otra vez.
+        if (report.body.startsWith("SENE-ORDER|1")) {
+            check(OwnerPayrollStore.importOrder(this, report)) { "No se pudo organizar la solicitud del trabajador." }
+        } else {
+            OwnerPayrollStore.importProfile(this, report)
+        }
+
+        // El inventario del reporte se consulta desde el historial local y se muestra
+        // automáticamente en INVENTARIO SENE; no requiere que el dueño lo separe.
         if (SharedInventoryManager.savedTree(this) != null) {
             try { SharedInventoryManager.saveReport(this, report, message, key) } catch (_: Exception) { }
-        }
-        if (report.body.startsWith("SENE-ORDER|1")) OwnerPayrollStore.importOrder(this, report)
-        else OwnerPayrollStore.importProfile(this, report)
-        if (SharedInventoryManager.savedTree(this) != null) {
             try { SharedInventoryManager.updateMasterFromReport(this, key, report.body, report.date + " " + report.time) }
             catch (_: Exception) { }
         }
+        check(SeneAdminStore.saveReport(this, report)) { "No se pudo registrar el reporte importado." }
     }
 
     private fun showReports() {
