@@ -19,9 +19,12 @@ object SeneReportReader {
     private fun decode(s: String) = Base64.decode(s, Base64.NO_WRAP or Base64.URL_SAFE)
 
     fun read(message: String, ownerKey: String): SeneReport {
-        val lines = message.trim().lines()
+        val pastedLines = message.trim().lines()
+        // SENE VENTAS añade esta instrucción visible; se retira antes de validar el protocolo.
+        val lines = if (pastedLines.firstOrNull() == "*COPIA Y PEGA en SeneAdmin*") pastedLines.drop(1) else pastedLines
         require(lines.size >= 11 && lines[0] == "SENE-ADMIN-REPORT|1") { "Formato de reporte no reconocido" }
-        val fields = lines.take(9)
+        // El AAD original contiene exactamente las 8 líneas desde el identificador del protocolo hasta KEY_ID.
+        val fields = lines.take(8)
         fun field(name: String) = fields.firstOrNull { it.startsWith("${name}=") }
             ?.substringAfter("=") ?: throw IllegalArgumentException("Falta el campo ${name}")
         val keyId = field("KEY_ID")
