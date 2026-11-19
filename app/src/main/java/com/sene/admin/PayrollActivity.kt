@@ -94,6 +94,7 @@ class PayrollActivity : Activity() {
         if(pay!=null) {
             tag("SUELDO BASE",OwnerPayrollStore.money(pay.grossCents))
             tag("DESCUENTO POR FALTAS",OwnerPayrollStore.money(pay.absenceCents))
+            tag("DESCUENTO POR SALIDAS ANTICIPADAS",OwnerPayrollStore.money(pay.earlyExitCents))
             tag("PRÉSTAMOS",OwnerPayrollStore.money(pay.loanCents))
             tag("CONSUMOS",OwnerPayrollStore.money(pay.consumptionCents))
             tag("TOTAL NETO",OwnerPayrollStore.money(pay.netCents),0xFFDDF4E5.toInt())
@@ -102,9 +103,10 @@ class PayrollActivity : Activity() {
         val attendanceTitle=TextView(this).apply { text="ASISTENCIA DE LA SEMANA"; textSize=14f; typeface=android.graphics.Typeface.DEFAULT_BOLD; setTextColor(0xFF123B68.toInt()); setPadding(2,12,2,8) }
         box.addView(attendanceTitle)
         OwnerPayrollStore.weekAttendance(this,p).forEach { day ->
-            val symbol=when(day.status){"WORKED"->"🟢";"NOT_WORKED"->"❌️";"WORKING"->"🔁";else->"—"}
+            val symbol=when(day.status){"WORKED"->"🟢";"NOT_WORKED"->"❌️";"WORKING"->"🔁";"NO_RECORD"->"—";else->"—"}
             val bg=when(day.status){"WORKED"->0xFFDDF4E5.toInt();"NOT_WORKED"->0xFFFFE4E6.toInt();"WORKING"->0xFFFFF1D6.toInt();else->0xFFE8EDF3.toInt()}
-            val chip=TextView(this).apply { text=day.day+" - ["+symbol+"]"; textSize=13f; typeface=android.graphics.Typeface.DEFAULT_BOLD; setTextColor(0xFF26364F.toInt()); setPadding(14,9,14,9); background=android.graphics.drawable.GradientDrawable().apply{setColor(bg);cornerRadius=14f} }
+            val statusText=if(day.status=="NO_RECORD")" · Aún no tenía registro" else ""
+            val chip=TextView(this).apply { text=day.day+" - ["+symbol+"]"+statusText; textSize=13f; typeface=android.graphics.Typeface.DEFAULT_BOLD; setTextColor(0xFF26364F.toInt()); setPadding(14,9,14,9); background=android.graphics.drawable.GradientDrawable().apply{setColor(bg);cornerRadius=14f} }
             val lp=LinearLayout.LayoutParams(-1,-2);lp.bottomMargin=5;box.addView(chip,lp)
         }
         val movementTitle=TextView(this).apply { text="MOVIMIENTOS REGISTRADOS"; textSize=14f; typeface=android.graphics.Typeface.DEFAULT_BOLD; setTextColor(0xFF123B68.toInt()); setPadding(2,14,2,8) }
