@@ -523,8 +523,18 @@ class MainActivity : AppCompatActivity() {
                     val normalized=key.uppercase(Locale.ROOT)
                     val relevant=important.any { it.equals(key,true) } ||
                         listOf("VENTA","CAJA","DEVOLU","GASTO","EFECTIVO","TRANSFERENCIA","CORTE","HORA DE ENTRADA","HORA DE SALIDA").any { normalized.contains(it) }
-                    if(relevant && !normalized.contains("DETALLE") && !normalized.contains("INVENTARIO") && !normalized.contains("ARCHIVO"))
-                        addLabel(card,key,line.substringAfter(":").trim())
+                    if(relevant && !normalized.contains("DETALLE") && !normalized.contains("INVENTARIO") && !normalized.contains("ARCHIVO")) {
+                        val rawValue=line.substringAfter(":").trim()
+                        val displayValue=if(normalized=="TIPO DE CIERRE" && rawValue.equals("EARLY_EXIT",true)) "Cierre anticipado" else rawValue
+                        val displayKey=when(normalized) {
+                            "HORA DE ENTRADA" -> "Hora de entrada"
+                            "HORA DE SALIDA" -> "Hora de salida"
+                            else -> key
+                        }
+                        if(normalized!="TIPO DE CIERRE" || !rawValue.equals("EARLY_EXIT",true))
+                            addLabel(card,displayKey,displayValue)
+                        else addLabel(card,"Tipo de cierre",displayValue,0xFFFFE8D6.toInt())
+                    }
                 }
             }
             if(card.childCount>2) { val lp=LinearLayout.LayoutParams(-1,-2); lp.bottomMargin=10; content.addView(card,lp) }
