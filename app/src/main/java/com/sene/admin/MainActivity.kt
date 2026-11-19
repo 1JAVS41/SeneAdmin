@@ -90,6 +90,9 @@ class MainActivity : Activity() {
         mainOption("NÓMINA", "Perfiles de trabajadores y pagos") {
             startActivity(Intent(this, PayrollActivity::class.java))
         }
+        mainOption("ADMINISTRAR TRABAJADORES", "Seleccionar y eliminar un perfil") {
+            showWorkerAdministration()
+        }
         mainOption("OTROS REPORTES", "Reportes organizados por trabajador") {
             showReports()
         }
@@ -359,6 +362,29 @@ class MainActivity : Activity() {
                 AlertDialog.Builder(this).setTitle("REPORTES · "+profiles[which].second)
                     .setView(ScrollView(this).apply{addView(content)}).setPositiveButton("CERRAR",null).show()
             }.setNegativeButton("CERRAR", null).show()
+    }
+
+
+    private fun showWorkerAdministration() {
+        val profiles=OwnerPayrollStore.profiles(this).sortedBy{it.name.lowercase(Locale.ROOT)}
+        if(profiles.isEmpty()){
+            info("ADMINISTRAR TRABAJADORES","No hay perfiles de trabajadores registrados.")
+            return
+        }
+        AlertDialog.Builder(this).setTitle("ADMINISTRAR TRABAJADORES")
+            .setItems(profiles.map{it.name}.toTypedArray()){_,which->
+                val selected=profiles[which]
+                AlertDialog.Builder(this).setTitle("ELIMINAR PERFIL")
+                    .setMessage("¿Deseas eliminar el perfil de "+selected.name+"? También se eliminarán sus datos de nómina, movimientos y asistencia guardados en SENE ADMIN. Los reportes importados se conservarán.")
+                    .setPositiveButton("ELIMINAR"){_,_->
+                        if(OwnerPayrollStore.deleteProfile(this,selected.id)){
+                            Toast.makeText(this,"Perfil eliminado",Toast.LENGTH_LONG).show()
+                        }else{
+                            info("NO SE PUDO ELIMINAR","No se pudo completar la eliminación del perfil.")
+                        }
+                    }
+                    .setNegativeButton("CANCELAR",null).show()
+            }.setNegativeButton("CERRAR",null).show()
     }
 
     private fun info(title: String, message: String) {
