@@ -79,6 +79,8 @@ class PayrollActivity : Activity() {
             val lp=LinearLayout.LayoutParams(-1,-2); lp.bottomMargin=8; box.addView(chip,lp)
         }
         tag("TRABAJADOR",p.name,0xFFDCEBFA.toInt())
+        if(p.createdAt.isNotBlank())tag("FECHA Y HORA DE CREACIÓN DEL PERFIL",p.createdAt)
+        if(p.firstShiftAt.isNotBlank())tag("FECHA Y HORA DEL PRIMER INICIO DE TURNO",p.firstShiftAt)
         tag("TELÉFONO",p.phone.ifBlank{"No indicado"})
         tag("DÍA DE PAGO",p.payDay.ifBlank{"Sin configurar"})
         tag("SUELDO SEMANAL",OwnerPayrollStore.money(p.weeklySalaryCents))
@@ -88,7 +90,7 @@ class PayrollActivity : Activity() {
             tag("ÚLTIMO PERÍODO",summary.period)
             tag("DÍAS TRABAJADOS / FALTAS",summary.workedDays.toString()+" trabajados · "+summary.absences+" faltas")
             tag("TURNO",summary.started.ifBlank{"—"}+" a "+summary.closed.ifBlank{"En curso"})
-            if(summary.closingType.isNotBlank())tag("TIPO DE CIERRE",summary.closingType)
+            if(summary.closingType.isNotBlank())tag("TIPO DE CIERRE",if(summary.closingType=="EARLY_EXIT")"CIERRE DE TURNO ANTICIPADO" else summary.closingType)
             if(summary.closingReason.isNotBlank())tag("MOTIVO",summary.closingReason)
         }
         if(pay!=null) {
