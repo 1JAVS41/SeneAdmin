@@ -412,7 +412,11 @@ class MainActivity : AppCompatActivity() {
                         card.addView(TextView(this).apply { text=heading; textSize=13f; typeface=Typeface.DEFAULT_BOLD; setTextColor(0xFF123B68.toInt()); setPadding(2,9,2,5) })
                 } else if(line.contains(":")) {
                     val key=line.substringBefore(":").trim()
-                    if(important.any { it.equals(key,true) }) addLabel(card,key,line.substringAfter(":").trim())
+                    val normalized=key.uppercase(Locale.ROOT)
+                    val relevant=important.any { it.equals(key,true) } ||
+                        listOf("VENTA","CAJA","DEVOLU","GASTO","EFECTIVO","TRANSFERENCIA","CORTE","HORA DE ENTRADA","HORA DE SALIDA").any { normalized.contains(it) }
+                    if(relevant && !normalized.contains("DETALLE") && !normalized.contains("INVENTARIO") && !normalized.contains("ARCHIVO"))
+                        addLabel(card,key,line.substringAfter(":").trim())
                 }
             }
             if(card.childCount>2) { val lp=LinearLayout.LayoutParams(-1,-2); lp.bottomMargin=10; content.addView(card,lp) }
