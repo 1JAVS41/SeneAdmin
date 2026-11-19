@@ -176,17 +176,17 @@ class MainActivity : AppCompatActivity() {
 
     private fun showSettings() {
         val pin=EditText(this).apply { hint="PIN de acceso"; setSingleLine(true); inputType=InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_VARIATION_PASSWORD }
-        val d=AlertDialog.Builder(this).setTitle("ACCESO A AJUSTES").setMessage("Introduce tu PIN para continuar.")
-            .setView(pin).setPositiveButton("ENTRAR",null).setNegativeButton("CANCELAR",null).create()
+        val fingerprint=AccessPinStore.fingerprintEnabled(this)
+        val builder=AlertDialog.Builder(this).setTitle("ACCESO A AJUSTES").setMessage("Introduce tu PIN para continuar.")
+            .setView(pin).setPositiveButton("ENTRAR",null).setNegativeButton("CANCELAR",null)
+        if(fingerprint) builder.setNeutralButton("HUELLA",null)
+        val d=builder.create()
         d.setOnShowListener {
             d.getButton(-1).setOnClickListener {
                 if(!AccessPinStore.matches(this,pin.text.toString())) { pin.error="PIN incorrecto"; return@setOnClickListener }
                 d.dismiss(); showSettingsMenu()
             }
-            if(AccessPinStore.fingerprintEnabled(this)) {
-                d.setButton(-3,"HUELLA",null as android.content.DialogInterface.OnClickListener?)
-                d.getButton(-3).setOnClickListener { authenticateFingerprint { d.dismiss(); showSettingsMenu() } }
-            }
+            if(fingerprint) d.getButton(-3).setOnClickListener { authenticateFingerprint { d.dismiss(); showSettingsMenu() } }
         }
         d.show()
     }
