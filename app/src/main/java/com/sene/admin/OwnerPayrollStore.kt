@@ -131,11 +131,13 @@ object OwnerPayrollStore {
             val date=Calendar.getInstance().apply { timeInMillis=monday.timeInMillis; add(Calendar.DAY_OF_YEAR,index) }
             val key=SimpleDateFormat("yyyy-MM-dd",Locale.US).format(date.time)
             val stored=worker.optJSONObject(key)?.optString("status").orEmpty()
-            val isScheduled=scheduled.isEmpty() || scheduled.any { it.replace("é","e").uppercase(Locale.ROOT)==names[index].replace("É","E") }
+            val workText=p.workDays.lowercase(Locale("es","MX")).replace("á","a").replace("é","e").replace("í","i").replace("ó","o").replace("ú","u")
+            val isScheduled=scheduled.isEmpty() || workText.contains(names[index].lowercase(Locale.ROOT).replace("é","e"))
+            val todayKey=SimpleDateFormat("yyyy-MM-dd",Locale.US).format(today.time)
             val status=when {
                 stored=="WORKED" -> "WORKED"
                 stored=="WORKING" -> "WORKING"
-                date.after(today) || !isScheduled -> "FUTURE"
+                key>todayKey || !isScheduled -> "FUTURE"
                 else -> "NOT_WORKED"
             }
             DayAttendance(names[index],status)
@@ -345,9 +347,17 @@ object OwnerPayrollStore {
     }
 
     fun isPayDay(p:Profile):Boolean{
-        if(p.payDay.isBlank())return false
-        val today=Calendar.getInstance().get(Calendar.DAY_OF_WEEK)
-        return today==payDayNumber(p.payDay)
+        val expected=when(p.payDay.trim().lowercase(Locale("es","MX"))) {
+            "domingo"->Calendar.SUNDAY
+            "lunes"->Calendar.MONDAY
+            "martes"->Calendar.TUESDAY
+            "miércoles","miercoles"->Calendar.WEDNESDAY
+            "jueves"->Calendar.THURSDAY
+            "viernes"->Calendar.FRIDAY
+            "sábado","sabado"->Calendar.SATURDAY
+            else->return false
+        }
+        return Calendar.getInstance().get(Calendar.DAY_OF_WEEK)==expected
     }
     fun money(cents:Long)="$" + String.format(Locale.US,"%,.2f",cents/100.0)
 }
