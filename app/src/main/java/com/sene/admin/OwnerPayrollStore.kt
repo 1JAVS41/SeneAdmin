@@ -199,7 +199,7 @@ object OwnerPayrollStore {
         val summary=try{JSONObject(prefs(c).getString("attendance_summary","{}")?:"{}")}catch(_:Exception){JSONObject()}
         summary.put(r.workerId,JSONObject().put("period",period).put("workedDays",worked?:0).put("absences",absences?:0)
             .put("closingType",reportValue(lines,"TIPO DE CIERRE")).put("closingReason",reportValue(lines,"MOTIVO DE CIERRE"))
-            .put("started",reportValue(lines,"HORA DE ENTRADA")).put("closed",reportValue(lines,"HORA DE SALIDA")))
+            .put("started",reportValue(lines,"HORA DE ENTRADA")).put("closed",reportValue(lines,"HORA DE SALIDA").ifBlank { if(r.type.contains("CIERRE",true) || r.type.contains("FIN_TURNO",true) || r.type.contains("CLOSE",true)) r.date+" "+r.time else "" }))
         if(!prefs(c).edit().putString("attendance_summary",summary.toString()).commit())return false
 
         val count=absences?:return prefs(c).edit().putString(stampKey,stamp).commit()
