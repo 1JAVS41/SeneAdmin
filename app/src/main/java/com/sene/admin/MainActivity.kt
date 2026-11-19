@@ -87,83 +87,42 @@ class MainActivity : Activity() {
             lp.bottomMargin = 16
             root.addView(card, lp)
         }
-        mainOption("NÓMINA", "Trabajadores, desglose semanal y pagos") {
+        mainOption("NÓMINA", "Perfiles de trabajadores y pagos") {
             startActivity(Intent(this, PayrollActivity::class.java))
         }
-        mainOption("INVENTARIO SENE", "Inventario más reciente recibido por trabajador") {
+        mainOption("OTROS REPORTES", "Reportes organizados por trabajador") {
+            showReports()
+        }
+        mainOption("INVENTARIO SENE", "Último inventario recibido, organizado por producto") {
             showSeneInventory()
         }
-        mainOption("OTROS REPORTES", "Pegar reportes de WhatsApp y consultar información") {
-            val options = arrayOf("Pegar reportes de WhatsApp", "Consultar reportes recibidos", "Ajustes")
-            AlertDialog.Builder(this).setTitle("OTROS REPORTES").setItems(options) { _, which ->
-                when (which) {
-                    0 -> showPasteDialog()
-                    1 -> showReports()
-                    2 -> showSettings()
-                }
-            }.setNegativeButton("CERRAR", null).show()
+        mainOption("PEGAR REPORTES DE WHATSAPP", "Importar reportes enviados por tus trabajadores") {
+            showPasteDialog()
+        }
+        mainOption("AJUSTES", "PIN de acceso y clave de cifrado") {
+            showSettings()
         }
         setContentView(ScrollView(this).apply { addView(root) })
     }
 
     private fun showSeneInventory() {
-        val reports = SeneAdminStore.reports(this)
-        val latest = reports.sortedWith(compareBy<SeneReport> { it.date }.thenBy { it.time }.thenBy { it.number })
-            .mapNotNull { report ->
-                val inventory = SharedInventoryManager.inventoryFromReport(report) ?: return@mapNotNull null
-                Triple(report, inventory, report.body.lines().firstOrNull { it.trim().startsWith("TRABAJADOR:", true) }
-                    ?.substringAfter(":")?.trim().orEmpty().ifBlank { OwnerPayrollStore.profile(this, report.workerId)?.name ?: report.workerId })
+        val latest = SeneAdminStore.reports(this)
+            .sortedWith(compareByDescending<SeneReport> { it.date }.thenByDescending { it.time }.thenByDescending { it.number })
+            .firstNotNullOfOrNull { report ->
+                SharedInventoryManager.inventoryFromReport(report)?.let { report to it }
             }
-            .groupBy { it.first.workerId }
-            .values.mapNotNull { rows -> rows.maxWithOrNull(compareBy<Triple<SeneReport, SharedInventoryManager.Snapshot, String>> { it.first.date }.thenBy { it.first.time }.thenBy { it.first.number }) }
-            .sortedBy { it.third.lowercase(Locale.ROOT) }
 
-        val content = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(18, 10, 18, 10)
+        if (latest == null) {
+            info("INVENTARIO SENE", "Todavía no se ha recibido un reporte que contenga inventario.")
+            return
         }
-        if (latest.isEmpty()) {
-            content.addView(TextView(this).apply {
-                text = "Todavía no se reciben reportes con inventario. Al recibir el primer reporte de inicio de turno aparecerá aquí."
-                textSize = 15f; setTextColor(0xFF526579.toInt()); setPadding(8, 18, 8, 18)
-            })
-        } else {
-            latest.sortedWith(compareByDescending<Triple<SeneReport, SharedInventoryManager.Snapshot, String>> { it.first.date + " " + it.first.time })
-                .forEach { (report, inventory, workerName) ->
-                    val card = LinearLayout(this).apply {
-                        orientation = LinearLayout.VERTICAL
-                        setPadding(16, 14, 16, 14)
-                        setBackgroundColor(0xFFFFFFFF.toInt())
-                        elevation = 3f
-                        isClickable = true
-                        isFocusable = true
-                    }
-                    card.addView(TextView(this).apply {
-                        text = workerName; textSize = 17f; typeface = Typeface.DEFAULT_BOLD
-                        setTextColor(0xFF173C7B.toInt())
-                    })
-                    card.addView(TextView(this).apply {
-                        text = "ÚLTIMO INVENTARIO · " + report.date + " " + report.time +
-                            "\nProductos registrados: " + inventory.items.size
-                        textSize = 13f; setTextColor(0xFF526579.toInt()); setPadding(0, 5, 0, 0)
-                    })
-                    card.setOnClickListener { showInventoryDetail(workerName, report, inventory) }
-                    val lp = LinearLayout.LayoutParams(-1, -2); lp.bottomMargin = 12
-                    content.addView(card, lp)
-                }
-        }
-        AlertDialog.Builder(this).setTitle("INVENTARIO SENE")
-            .setView(ScrollView(this).apply { addView(content) })
-            .setPositiveButton("CERRAR", null).show()
-    }
-
-    private fun showInventoryDetail(workerName: String, report: SeneReport, inventory: SharedInventoryManager.Snapshot) {
-        val body = buildString {
-            append("TRABAJADOR: ").append(workerName)
-            append("\nFECHA DEL REPORTE: ").append(report.date).append(" ").append(report.time)
-            append("\nPRODUCTOS: ").append(inventory.items.size)
-            append("\n\nINVENTARIO RECIBIDO")
-            inventory.items.forEach { item ->
+        val (report, inventory) = latest
+        val detail = buildString {
+            append("ÚLTIMO INVENTARIO RECIBIDO")
+            append("\nActualizado: ").append(report.date).append(" ").append(report.time)
+            append("\nProductos: ").append(inventory.items.size)
+            append("\n\nINVENTARIO ORGANIZADO")
+            inventory.items.sortedBy { it.name.lowercase(Locale.ROOT) }.forEach { item ->
                 append("\n\n").append(item.name)
                 append("\nCódigo: ").append(item.code)
                 append("\nPrecio: ").append(OwnerPayrollStore.money((item.price * 100.0).toLong()))
@@ -172,8 +131,8 @@ class MainActivity : Activity() {
                 if (item.shelf.isNotBlank()) append("\nEstante: ").append(item.shelf)
             }
         }
-        AlertDialog.Builder(this).setTitle("INVENTARIO · " + workerName)
-            .setMessage(body).setPositiveButton("CERRAR", null).show()
+        AlertDialog.Builder(this).setTitle("INVENTARIO SENE")
+            .setMessage(detail).setPositiveButton("CERRAR", null).show()
     }
 
     private fun showPasteDialog() {
@@ -343,14 +302,27 @@ class MainActivity : Activity() {
                 }
             }
         }
-        val lines = SeneAdminStore.reports(this).sortedWith(compareBy<SeneReport> { it.workerId }.thenBy { it.date }.thenBy { it.time }.thenBy { it.number })
-        val body = if (lines.isEmpty()) "Todavía no hay reportes importados." else
-            lines.groupBy { it.workerId }.entries.joinToString("\n\n") { (worker, reports) ->
-                "TRABAJADOR: " + worker + "\n" + reports.joinToString("\n\n") {
+        val reports = SeneAdminStore.reports(this)
+        val profiles = (OwnerPayrollStore.profiles(this).map { it.id to it.name } +
+            reports.map { it.workerId to (OwnerPayrollStore.profile(this, it.workerId)?.name ?: it.workerId) })
+            .distinctBy { it.first }.sortedBy { it.second.lowercase(Locale.ROOT) }
+        if (profiles.isEmpty()) {
+            info("OTROS REPORTES", "Todavía no hay perfiles ni reportes recibidos.")
+            return
+        }
+        val labels = profiles.map { it.second }.toTypedArray()
+        AlertDialog.Builder(this).setTitle("REPORTES · TRABAJADORES")
+            .setItems(labels) { _, which ->
+                val workerId = profiles[which].first
+                val workerReports = reports.filter { it.workerId == workerId }
+                    .sortedWith(compareBy<SeneReport> { it.date }.thenBy { it.time }.thenBy { it.number })
+                val body = if (workerReports.isEmpty()) "Todavía no hay reportes para este trabajador."
+                else workerReports.joinToString("\n\n") {
                     "FECHA: " + it.date + " " + it.time + "\nNÚMERO: " + it.number + "\nTIPO: " + it.type + "\n\n" + it.body
                 }
-            }
-        AlertDialog.Builder(this).setTitle("REPORTES RECIBIDOS").setMessage(body).setPositiveButton("CERRAR", null).show()
+                AlertDialog.Builder(this).setTitle("REPORTES · " + profiles[which].second)
+                    .setMessage(body).setPositiveButton("CERRAR", null).show()
+            }.setNegativeButton("CERRAR", null).show()
     }
 
     private fun info(title: String, message: String) {
