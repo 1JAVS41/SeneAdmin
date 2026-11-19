@@ -10,7 +10,7 @@ import java.util.Locale
 import java.util.UUID
 
 object OwnerPayrollStore {
-    data class Profile(val id:String,val name:String,val phone:String,val weeklySalaryCents:Long,val payDay:String,val workDays:String,val hours:Int)
+    data class Profile(val id:String,val name:String,val phone:String,val weeklySalaryCents:Long,val payDay:String,val workDays:String,val hours:Int,val createdAt:String="",val firstShiftAt:String="")
     data class Entry(val id:String,val profileId:String,val type:String,val date:String,val description:String,val amountCents:Long,val payrollId:String)
     data class Payroll(val id:String,val profileId:String,val period:String,val grossCents:Long,val absenceCents:Long,val loanCents:Long,val consumptionCents:Long,val netCents:Long,val status:String,val createdAt:String,val paidAt:String,val deliveredCents:Long)
     private const val PREFS="sene_admin_payroll_v1"
@@ -22,7 +22,7 @@ object OwnerPayrollStore {
     private fun saveArray(c:Context,key:String,a:JSONArray)=prefs(c).edit().putString(key,a.toString()).commit()
 
     fun profiles(c:Context):List<Profile>{
-        val a=array(c,PROFILES);return (0 until a.length()).mapNotNull{i->try{val o=a.getJSONObject(i);Profile(o.getString("id"),o.getString("name"),o.optString("phone"),o.optLong("salary"),o.optString("payDay"),o.optString("workDays"),o.optInt("hours",8))}catch(_:Exception){null}}
+        val a=array(c,PROFILES);return (0 until a.length()).mapNotNull{i->try{val o=a.getJSONObject(i);Profile(o.getString("id"),o.getString("name"),o.optString("phone"),o.optLong("salary"),o.optString("payDay"),o.optString("workDays"),o.optInt("hours",8),o.optString("createdAt"),o.optString("firstShiftAt"))}catch(_:Exception){null}}
     }
     fun profile(c:Context,id:String)=profiles(c).firstOrNull{it.id==id}
 
@@ -60,7 +60,7 @@ object OwnerPayrollStore {
         if(!replaced)a.put(profileJson(p))
         return saveArray(c,PROFILES,a)
     }
-    private fun profileJson(p:Profile)=JSONObject().put("id",p.id).put("name",p.name).put("phone",p.phone).put("salary",p.weeklySalaryCents).put("payDay",p.payDay).put("workDays",p.workDays).put("hours",p.hours)
+    private fun profileJson(p:Profile)=JSONObject().put("id",p.id).put("name",p.name).put("phone",p.phone).put("salary",p.weeklySalaryCents).put("payDay",p.payDay).put("workDays",p.workDays).put("hours",p.hours).put("createdAt",p.createdAt).put("firstShiftAt",p.firstShiftAt)
 
     private fun reportValue(lines:List<String>,vararg labels:String):String {
         val line=lines.firstOrNull { raw ->
@@ -119,10 +119,12 @@ object OwnerPayrollStore {
             val payDay=reportValue(lines,"DÍA DE PAGO","DIA DE PAGO").ifBlank{old?.payDay.orEmpty()}
             val workDays=reportValue(lines,"DÍAS LABORALES","DIAS LABORALES").ifBlank{old?.workDays.orEmpty()}
             val hours=Regex("\\d+").find(reportValue(lines,"HORAS DE JORNADA"))?.value?.toIntOrNull()?.coerceIn(1,24)?:old?.hours?:8
-            if(!upsertProfile(c,Profile(r.workerId,name,phone,salary,payDay,workDays,hours)))return false
+            val createdAt=reportValue(lines,"FECHA Y HORA DE CREACIÓN DEL PERFIL","FECHA Y HORA DE CREACION DEL PERFIL").ifBlank{old?.createdAt.orEmpty()}
+            val firstShiftAt=reportValue(lines,"FECHA Y HORA DEL PRIMER INICIO DE TURNO").ifBlank{old?.firstShiftAt.orEmpty()}
+            if(!upsertProfile(c,Profile(r.workerId,name,phone,salary,payDay,workDays,hours,createdAt,firstShiftAt)))return false
             if(!prefs(c).edit().putString(stampKey,stamp).commit())return false
         }
-        return importDailyAttendance(c,r) && importAttendance(c,r,lines,stamp) && importPayrollRequests(c,r,lines)
+        return importDailyAttendance(c,r) && importAttendance(c,r,lines,stamp) && importPayrollRequests(c,r,lines) && importEarlyExit(c,r,lines)
     }
 
     private fun importDailyAttendance(c:Context,r:SeneReport):Boolean {
@@ -148,6 +150,7 @@ object OwnerPayrollStore {
     fun weekAttendance(c:Context,p:Profile):List<DayAttendance> {
         val all=try{JSONObject(prefs(c).getString("attendance_days","{}")?:"{}")}catch(_:Exception){JSONObject()}
         val worker=all.optJSONObject(p.id) ?: JSONObject()
+        val createdDate=isoDate(p.createdAt)
         val today=Calendar.getInstance()
         val monday=Calendar.getInstance().apply {
             val delta=(get(Calendar.DAY_OF_WEEK)-Calendar.MONDAY+7)%7
@@ -167,7 +170,7 @@ object OwnerPayrollStore {
                 stored=="WORKED" -> "WORKED"
                 stored=="WORKING" -> "WORKING"
                 key>todayKey || !isScheduled -> "FUTURE"
-                else -> "NOT_WORKED"
+                else -> if (createdDate.isNotBlank() && key < createdDate) "NO_RECORD" else "NOT_WORKED"
             }
             DayAttendance(names[index],status)
         }
@@ -207,6 +210,45 @@ object OwnerPayrollStore {
         if(index==null)a.put(entry)else a.put(index,entry)
         if(!saveArray(c,ENTRIES,a))return false
         return prefs(c).edit().putString(stampKey,stamp).commit()
+    }
+
+    private fun parseReportTimestamp(raw:String):Long {
+        val value=raw.trim()
+        val patterns=listOf("dd/MM/yyyy HH:mm:ss","dd/MM/yyyy HH:mm","yyyy-MM-dd HH:mm:ss","yyyy-MM-dd'T'HH:mm:ss")
+        for(pattern in patterns)try{
+            return SimpleDateFormat(pattern,Locale("es","MX")).apply{isLenient=false}.parse(value)?.time ?: continue
+        }catch(_:Exception){}
+        return 0L
+    }
+
+    /** Descuenta solo el tiempo que faltó para completar una jornada cerrada anticipadamente. */
+    private fun importEarlyExit(c:Context,r:SeneReport,lines:List<String>):Boolean {
+        val closingType=reportValue(lines,"TIPO DE CIERRE").uppercase(Locale.ROOT)
+        if(closingType!="EARLY_EXIT")return true
+        val p=profile(c,r.workerId)?:return true
+        if(p.weeklySalaryCents<=0L||p.hours<=0)return true
+        val start=parseReportTimestamp(reportValue(lines,"HORA DE ENTRADA"))
+        val closed=parseReportTimestamp(reportValue(lines,"HORA DE SALIDA"))
+        if(start<=0L||closed<=0L||closed<=start)return true
+        val scheduledEnd=start+p.hours*3600000L
+        val missingMillis=(scheduledEnd-closed).coerceAtLeast(0L)
+        if(missingMillis<60000L)return true
+        val daysPerWeek=p.workDays.split(Regex("[,;|]")).map{it.trim()}.filter{it.isNotBlank()}.size
+        if(daysPerWeek<=0)return true
+        val period=periodForDate(SimpleDateFormat("yyyy-MM-dd",Locale.US).format(Date(start)),payDayNumber(p.payDay))
+        if(period.isBlank()||payrolls(c,r.workerId).any{it.period==period&&it.status=="PAGADA"})return true
+        val amount=(p.weeklySalaryCents.toDouble()/daysPerWeek/p.hours*(missingMillis/3600000.0)).toLong()
+            .coerceAtMost(p.weeklySalaryCents)
+        if(amount<=0L)return true
+        val id="early-exit-"+r.id
+        val a=array(c,ENTRIES)
+        val index=(0 until a.length()).firstOrNull{a.optJSONObject(it)?.optString("id")==id}
+        val entry=JSONObject().put("id",id).put("profileId",r.workerId).put("type","SALIDA_ANTICIPADA")
+            .put("date",SimpleDateFormat("yyyy-MM-dd",Locale.US).format(Date(start)))
+            .put("description","Tiempo no trabajado: "+(missingMillis/60000L)+" minutos. Motivo: "+reportValue(lines,"MOTIVO DE CIERRE"))
+            .put("amount",amount).put("payrollId",index?.let{a.optJSONObject(it)?.optString("payrollId")}.orEmpty())
+        if(index==null)a.put(entry)else a.put(index,entry)
+        return saveArray(c,ENTRIES,a)
     }
 
     private fun importPayrollRequests(c:Context,r:SeneReport,lines:List<String>):Boolean {
