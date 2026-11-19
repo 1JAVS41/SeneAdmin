@@ -301,12 +301,29 @@ object SharedInventoryManager {
         val current = list(c, ownerKey, "INVENTARIO_MAESTRO").firstOrNull()?.updated
         val currentNormalized = normalizeUpdated(current)
         if (currentNormalized != null && incoming <= currentNormalized) return null
+
         val lines = reportBody.replace("\r", "").lines()
-        val marker = lines.indexOfLast { it.trim().equals("ETIQUETA: EXISTENCIAS ACTUALES", true) }
-            .takeIf { it >= 0 } ?: lines.indexOfLast { it.trim().equals("INVENTARIO_SENE_V1", true) }
-        if (marker < 0) return null
-        val section = lines.drop(marker + 1).takeWhile { !it.trim().startsWith("ETIQUETA:", true) }
-        val items = parse(section.joinToString("\n"))
+        // En cierres se usa el inventario final; en reportes de inicio, las existencias actuales.
+        val finalMarker = lines.indexOfLast { it.trim().equals("INVENTARIO AL FINALIZAR TURNO", true) }
+        val items = if (finalMarker >= 0) {
+            val section = lines.drop(finalMarker + 1).takeWhile { line ->
+                val value = line.trim()
+                value.isNotBlank() && !value.startsWith("ETIQUETA:", true) &&
+                    !value.startsWith("Guarde este reporte", true)
+            }
+            parse(section.joinToString("\n"))
+        } else {
+            val marker = lines.indexOfLast { it.trim().equals("ETIQUETA: EXISTENCIAS ACTUALES", true) }
+                .takeIf { it >= 0 } ?: lines.indexOfLast { it.trim().equals("INVENTARIO_SENE_V1", true) }
+            if (marker < 0) return null
+            val section = lines.drop(marker + 1).takeWhile { line ->
+                val value = line.trim()
+                value.isNotBlank() && !value.startsWith("ETIQUETA:", true) &&
+                    !value.startsWith("DESGLOSE PARA NÓMINA", true) &&
+                    !value.startsWith("Guarde este reporte", true)
+            }
+            parse(section.joinToString("\n"))
+        }
         if (items.isEmpty()) return null
         return save(c, ownerKey, "INVENTARIO_MAESTRO", items, incoming)
     }
