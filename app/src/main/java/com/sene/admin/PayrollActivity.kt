@@ -27,11 +27,16 @@ class PayrollActivity : Activity() {
         root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(22, 24, 22, 24); setBackgroundColor(0xFFF4F7FB.toInt()) }
         root.addView(TextView(this).apply { text = "PERSONAL Y NÓMINA"; textSize = 23f; setTextColor(0xFF123B68.toInt()); typeface = android.graphics.Typeface.DEFAULT_BOLD })
         root.addView(TextView(this).apply { text = "Los datos de sueldo y jornada se pueden completar automáticamente al recibir el reporte de inicio de turno."; textSize = 13f; setTextColor(0xFF64748B.toInt()); setPadding(0, 6, 0, 16) })
-        addCard("AGREGAR PERFIL", "Registrar trabajador y sueldo semanal") { addProfile() }
-        OwnerPayrollStore.profiles(this).sortedBy { it.name.lowercase(Locale.ROOT) }.forEach { p ->
-            addCard(p.name, "ID: ${p.id} · Sueldo semanal: ${OwnerPayrollStore.money(p.weeklySalaryCents)} · Pago: ${p.payDay.ifBlank { "Sin configurar" }}" + if (OwnerPayrollStore.isPayDay(p)) " · HOY: Revisa SENE VENTAS antes de pagar" else "") { showProfile(p.id) }
+        val profiles = OwnerPayrollStore.profiles(this).sortedBy { it.name.lowercase(Locale.ROOT) }
+        if (profiles.isEmpty()) {
+            root.addView(TextView(this).apply {
+                text = "Los perfiles aparecerán automáticamente cuando SENE ADMIN reciba los reportes de inicio de turno."
+                textSize = 14f; setTextColor(0xFF64748B.toInt()); setPadding(4, 16, 4, 16)
+            })
         }
-        addCard("VOLVER", "Regresar al panel principal") { finish() }
+        profiles.forEach { p ->
+            addCard(p.name, "Sueldo semanal: ${OwnerPayrollStore.money(p.weeklySalaryCents)} · Pago: ${p.payDay.ifBlank { "Sin configurar" }}" + if (OwnerPayrollStore.isPayDay(p)) " · HOY: Revisa SENE VENTAS antes de pagar" else "") { showProfile(p.id) }
+        }
         setContentView(ScrollView(this).apply { addView(root) })
     }
     private fun addCard(title: String, subtitle: String, action: () -> Unit) {
