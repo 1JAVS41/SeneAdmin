@@ -152,14 +152,14 @@ class PayrollActivity : Activity() {
         }
     }
     private fun payroll(p:OwnerPayrollStore.Profile){
-        if(!OwnerPayrollStore.isPayDay(p)) {
-            AlertDialog.Builder(this).setTitle("PAGO NO DISPONIBLE")
-                .setMessage("La nómina solo se puede pagar el día establecido: "+p.payDay.ifBlank{"Sin configurar"}+". Hoy no está permitido registrar el pago.")
-                .setPositiveButton("ACEPTAR",null).show()
-            return
-        }
         try{
             val pay=OwnerPayrollStore.createOrGetPayroll(this,p.id)
+            if(pay.status!="PAGADA" && !OwnerPayrollStore.isPayDay(p)) {
+                AlertDialog.Builder(this).setTitle("PAGO NO DISPONIBLE")
+                    .setMessage("La nómina solo se puede pagar el día establecido: "+p.payDay.ifBlank{"Sin configurar"}+". Hoy no está permitido registrar el pago.")
+                    .setPositiveButton("ACEPTAR",null).show()
+                return
+            }
             val reminder=if(OwnerPayrollStore.isPayDay(p))"\n\nRECUERDA: Revisa SENE VENTAS antes de pagar." else ""
             val message="PERÍODO: ${pay.period}\nSUELDO: ${OwnerPayrollStore.money(pay.grossCents)}\nDESCUENTO POR FALTAS: ${OwnerPayrollStore.money(pay.absenceCents)}\nPRÉSTAMOS: ${OwnerPayrollStore.money(pay.loanCents)}\nCONSUMOS: ${OwnerPayrollStore.money(pay.consumptionCents)}\nTOTAL NETO: ${OwnerPayrollStore.money(pay.netCents)}\nESTADO: ${pay.status}$reminder"
             if(pay.status=="PAGADA"){AlertDialog.Builder(this).setTitle("NÓMINA PAGADA").setMessage(message+"\nFecha/hora: ${pay.paidAt}\nCantidad entregada: ${OwnerPayrollStore.money(pay.deliveredCents)}").setPositiveButton("CERRAR",null).show();return}
