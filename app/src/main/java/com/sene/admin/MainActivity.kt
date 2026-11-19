@@ -525,7 +525,7 @@ class MainActivity : AppCompatActivity() {
                         listOf("VENTA","CAJA","DEVOLU","GASTO","EFECTIVO","TRANSFERENCIA","CORTE","HORA DE ENTRADA","HORA DE SALIDA").any { normalized.contains(it) }
                     if(relevant && !normalized.contains("DETALLE") && !normalized.contains("INVENTARIO") && !normalized.contains("ARCHIVO")) {
                         val rawValue=line.substringAfter(":").trim()
-                        val displayValue=if(normalized=="TIPO DE CIERRE" && rawValue.equals("EARLY_EXIT",true)) "Cierre anticipado" else rawValue
+                        val displayValue=if(normalized=="TIPO DE CIERRE" && rawValue.equals("EARLY_EXIT",true)) "Cierre anticipado" else if(normalized=="HORA DE SALIDA" && (rawValue.isBlank() || rawValue.equals("Por definir",true)) && (report.type.contains("CIERRE",true) || report.type.contains("FIN_TURNO",true) || report.type.contains("CLOSE",true))) report.date+" "+report.time else rawValue
                         val displayKey=when(normalized) {
                             "HORA DE ENTRADA" -> "Hora de entrada"
                             "HORA DE SALIDA" -> "Hora de salida"
