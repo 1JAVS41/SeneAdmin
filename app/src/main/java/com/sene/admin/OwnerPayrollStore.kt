@@ -160,7 +160,7 @@ object OwnerPayrollStore {
     fun weekAttendance(c:Context,p:Profile):List<DayAttendance> {
         val all=try{JSONObject(prefs(c).getString("attendance_days","{}")?:"{}")}catch(_:Exception){JSONObject()}
         val worker=all.optJSONObject(p.id) ?: JSONObject()
-        val createdDate=isoDate(p.createdAt)
+        val createdDate=payrollStartDate(p)
         val today=Calendar.getInstance()
         val monday=Calendar.getInstance().apply {
             val delta=(get(Calendar.DAY_OF_WEEK)-Calendar.MONDAY+7)%7
@@ -239,6 +239,9 @@ object OwnerPayrollStore {
         if(closingType!="EARLY_EXIT")return true
         val p=profile(c,r.workerId)?:return true
         if(p.weeklySalaryCents<=0L||p.hours<=0)return true
+        val effectiveStart=payrollStartDate(p)
+        val shiftDate=SimpleDateFormat("yyyy-MM-dd",Locale.US).format(Date(start))
+        if(effectiveStart.isNotBlank() && shiftDate<effectiveStart)return true
         val start=parseReportTimestamp(reportValue(lines,"HORA DE ENTRADA"))
         val closed=parseReportTimestamp(reportValue(lines,"HORA DE SALIDA"))
         if(start<=0L||closed<=0L||closed<=start)return true
@@ -338,9 +341,41 @@ object OwnerPayrollStore {
     fun payrolls(c:Context,profileId:String):List<Payroll>{
         val a=array(c,PAYROLLS);return (0 until a.length()).mapNotNull{i->try{val o=a.getJSONObject(i);if(o.getString("profileId")!=profileId)null else Payroll(o.getString("id"),profileId,o.getString("period"),o.optLong("gross"),o.optLong("absence"),o.optLong("earlyExit"),o.optLong("loan"),o.optLong("consumption"),o.optLong("net"),o.optString("status"),o.optString("createdAt"),o.optString("paidAt"),o.optLong("delivered"))}catch(_:Exception){null}}
     }
+    private fun payrollStartDate(p:Profile):String {
+        val created=isoDate(p.createdAt)
+        val firstShift=isoDate(p.firstShiftAt)
+        return when {
+            created.isBlank() -> firstShift
+            firstShift.isBlank() -> created
+            firstShift>created -> firstShift
+            else -> created
+        }
+    }
+
+    private fun scheduledDayCount(start:String,end:String,workDays:String):Int {
+        if(start.isBlank()||end.isBlank()||start>end)return 0
+        val names=workDays.split(Regex("[,;|]")).map{it.trim().lowercase(Locale("es","MX"))
+            .replace("á","a").replace("é","e").replace("í","i").replace("ó","o").replace("ú","u")}
+            .filter{it.isNotBlank()}.toSet()
+        if(names.isEmpty())return 0
+        val calendar=try{Calendar.getInstance().apply{time=SimpleDateFormat("yyyy-MM-dd",Locale.US).apply{isLenient=false}.parse(start)?:return 0}}catch(_:Exception){return 0}
+        val last=try{SimpleDateFormat("yyyy-MM-dd",Locale.US).apply{isLenient=false}.parse(end)?:return 0}catch(_:Exception){return 0}
+        var count=0
+        while(!calendar.time.after(last)){
+            val day=when(calendar.get(Calendar.DAY_OF_WEEK)){
+                Calendar.MONDAY->"lunes";Calendar.TUESDAY->"martes";Calendar.WEDNESDAY->"miercoles"
+                Calendar.THURSDAY->"jueves";Calendar.FRIDAY->"viernes";Calendar.SATURDAY->"sabado";else->"domingo"
+            }
+            if(day in names)count++
+            calendar.add(Calendar.DAY_OF_YEAR,1)
+        }
+        return count
+    }
+
     fun createOrGetPayroll(c:Context,profileId:String):Payroll{
         val p=profile(c,profileId)?:throw IllegalStateException("Perfil no encontrado")
         require(p.weeklySalaryCents>0L) { "El perfil todavía no tiene sueldo semanal configurado" }
+        require(p.workDays.isNotBlank()) { "Configura los días laborales antes de generar la nómina" }
         val payDay = when (p.payDay.trim().lowercase(Locale("es","MX"))) {
             "domingo" -> Calendar.SUNDAY
             "lunes" -> Calendar.MONDAY
@@ -349,12 +384,18 @@ object OwnerPayrollStore {
             "jueves" -> Calendar.THURSDAY
             "viernes" -> Calendar.FRIDAY
             "sábado", "sabado" -> Calendar.SATURDAY
-            else -> Calendar.MONDAY
+            else -> throw IllegalStateException("Configura un día de pago válido")
         }
         val week=Calendar.getInstance().apply {
             val delta=(get(Calendar.DAY_OF_WEEK)-payDay+7)%7
             add(Calendar.DAY_OF_YEAR,-delta)
         }.let{SimpleDateFormat("yyyy-MM-dd",Locale.US).format(it.time)}
+        val weekStart=try{val d=SimpleDateFormat("yyyy-MM-dd",Locale.US).parse(week)!!;Calendar.getInstance().apply{time=d;add(Calendar.DAY_OF_YEAR,-6)}.let{SimpleDateFormat("yyyy-MM-dd",Locale.US).format(it.time)}}catch(_:Exception){week}
+        val effectiveStart=payrollStartDate(p)
+        val payableStart=if(effectiveStart.isBlank()||effectiveStart<weekStart)weekStart else effectiveStart
+        val payableDays=scheduledDayCount(payableStart,week,p.workDays)
+        val configuredDays=p.workDays.split(Regex("[,;|]")).map{it.trim()}.filter{it.isNotBlank()}.distinct().size
+        val proratedGross=if(configuredDays>0)(p.weeklySalaryCents*payableDays/configuredDays).coerceAtMost(p.weeklySalaryCents) else 0L
         val payrollArray=array(c,PAYROLLS)
         val existingIndex=(0 until payrollArray.length()).firstOrNull {
             val item=payrollArray.optJSONObject(it)
@@ -372,8 +413,10 @@ object OwnerPayrollStore {
         val earlyExit=relevant.filter{it.type=="SALIDA_ANTICIPADA"}.sumOf{it.amountCents}
         val loan=relevant.filter{it.type=="PRESTAMO"}.sumOf{it.amountCents}
         val consumption=relevant.filter{it.type=="CONSUMO"}.sumOf{it.amountCents}
-        val net=(p.weeklySalaryCents-absence-earlyExit-loan-consumption).coerceAtLeast(0L)
-        val payroll=Payroll(payrollId,profileId,week,p.weeklySalaryCents,absence,earlyExit,loan,consumption,net,"PENDIENTE",
+        val allowedAbsence=absence.coerceAtMost(proratedGross)
+        val allowedEarlyExit=earlyExit.coerceAtMost((proratedGross-allowedAbsence).coerceAtLeast(0L))
+        val net=(proratedGross-allowedAbsence-allowedEarlyExit-loan-consumption).coerceAtLeast(0L)
+        val payroll=Payroll(payrollId,profileId,week,proratedGross,allowedAbsence,allowedEarlyExit,loan,consumption,net,"PENDIENTE",
             existing?.optString("createdAt")?.takeIf{it.isNotBlank()}?:SimpleDateFormat("yyyy-MM-dd HH:mm:ss",Locale.US).format(Date()),"",0L)
         if(existingIndex==null) payrollArray.put(payrollJson(payroll)) else payrollArray.put(existingIndex,payrollJson(payroll))
         check(saveArray(c,PAYROLLS,payrollArray)){"No se pudo guardar la nómina"}
