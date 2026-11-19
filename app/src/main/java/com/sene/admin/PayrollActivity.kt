@@ -89,7 +89,7 @@ class PayrollActivity : Activity() {
         OwnerPayrollStore.attendanceSummary(this,id)?.let { summary ->
             tag("ÚLTIMO PERÍODO",summary.period)
             tag("DÍAS TRABAJADOS / FALTAS",summary.workedDays.toString()+" trabajados · "+summary.absences+" faltas")
-            tag("TURNO",summary.started.ifBlank{"—"}+" a "+summary.closed.ifBlank{"En curso"})
+            tag("TURNO",summary.started.ifBlank{"—"}+" · Finalizó: "+summary.closed.ifBlank{"Por definir"})
             if(summary.closingType.isNotBlank())tag("TIPO DE CIERRE",if(summary.closingType=="EARLY_EXIT")"CIERRE DE TURNO ANTICIPADO" else summary.closingType)
             if(summary.closingReason.isNotBlank())tag("MOTIVO",summary.closingReason)
         }
