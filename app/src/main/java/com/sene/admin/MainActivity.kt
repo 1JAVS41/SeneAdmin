@@ -255,7 +255,7 @@ class MainActivity : AppCompatActivity() {
         }
         val dlg = AlertDialog.Builder(this).setTitle("CLAVE DEL PROPIETARIO")
             .setMessage("Introduce obligatoriamente la MISMA CLAVE DE CIFRADO que ya está configurada en SENE VENTAS. SENE ADMIN no genera ni crea una clave nueva. No podrás continuar sin introducirla.")
-            .setView(input).setPositiveButton("GUARDAR", null).setNegativeButton("CANCELAR", null).create()
+            .setView(input).setPositiveButton("CONTINUAR", null).create()
         dlg.setOnShowListener {
             dlg.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
                 val value = input.text.toString().trim()
