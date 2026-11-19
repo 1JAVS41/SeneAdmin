@@ -105,6 +105,14 @@ class MainActivity : Activity() {
         setContentView(ScrollView(this).apply { addView(root) })
     }
 
+    private fun addLabel(parent:LinearLayout,label:String,value:String,accent:Int=0xFFE8F1FB.toInt()) {
+        val card=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL;setPadding(14,10,14,10)
+            background=android.graphics.drawable.GradientDrawable().apply{setColor(accent);cornerRadius=18f} }
+        card.addView(TextView(this).apply{text=label.uppercase(Locale.ROOT);textSize=10f;typeface=Typeface.DEFAULT_BOLD;setTextColor(0xFF54708D.toInt())})
+        card.addView(TextView(this).apply{text=value;textSize=14f;typeface=Typeface.DEFAULT_BOLD;setTextColor(0xFF173C65.toInt());setPadding(0,3,0,0)})
+        val lp=LinearLayout.LayoutParams(-1,-2);lp.bottomMargin=8;parent.addView(card,lp)
+    }
+
     private fun showSeneInventory() {
         val latest = SeneAdminStore.reports(this)
             .sortedWith(compareByDescending<SeneReport> { it.date }.thenByDescending { it.time }.thenByDescending { it.number })
@@ -117,22 +125,22 @@ class MainActivity : Activity() {
             return
         }
         val (report, inventory) = latest
-        val detail = buildString {
-            append("ÚLTIMO INVENTARIO RECIBIDO")
-            append("\nActualizado: ").append(report.date).append(" ").append(report.time)
-            append("\nProductos: ").append(inventory.items.size)
-            append("\n\nINVENTARIO ORGANIZADO")
-            inventory.items.sortedBy { it.name.lowercase(Locale.ROOT) }.forEach { item ->
-                append("\n\n").append(item.name)
-                append("\nCódigo: ").append(item.code)
-                append("\nPrecio: ").append(OwnerPayrollStore.money((item.price * 100.0).toLong()))
-                append("\nExistencia: ").append(item.stock)
-                if (item.aisle.isNotBlank()) append("\nPasillo: ").append(item.aisle)
-                if (item.shelf.isNotBlank()) append("\nEstante: ").append(item.shelf)
-            }
+        val content=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setPadding(14,12,14,12);setBackgroundColor(0xFFF4F7FB.toInt())}
+        addLabel(content,"Actualizado",report.date+" "+report.time,0xFFDCEBFA.toInt())
+        addLabel(content,"Productos",inventory.items.size.toString(),0xFFDDF4E5.toInt())
+        inventory.items.sortedBy{it.name.lowercase(Locale.ROOT)}.forEach { item ->
+            val group=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setPadding(14,12,14,12)
+                background=android.graphics.drawable.GradientDrawable().apply{setColor(-1);cornerRadius=18f}}
+            group.addView(TextView(this).apply{text=item.name;textSize=16f;typeface=Typeface.DEFAULT_BOLD;setTextColor(0xFF123B68.toInt());setPadding(0,0,0,7)})
+            addLabel(group,"Código",item.code)
+            addLabel(group,"Precio",OwnerPayrollStore.money((item.price*100.0).toLong()))
+            addLabel(group,"Existencia",item.stock.toString(),0xFFDDF4E5.toInt())
+            if(item.aisle.isNotBlank())addLabel(group,"Pasillo",item.aisle)
+            if(item.shelf.isNotBlank())addLabel(group,"Estante",item.shelf)
+            val lp=LinearLayout.LayoutParams(-1,-2);lp.bottomMargin=10;content.addView(group,lp)
         }
         AlertDialog.Builder(this).setTitle("INVENTARIO SENE")
-            .setMessage(detail).setPositiveButton("CERRAR", null).show()
+            .setView(ScrollView(this).apply{addView(content)}).setPositiveButton("CERRAR",null).show()
     }
 
     private fun showPasteDialog() {
@@ -328,12 +336,28 @@ class MainActivity : Activity() {
                 val workerId = profiles[which].first
                 val workerReports = reports.filter { it.workerId == workerId }
                     .sortedWith(compareBy<SeneReport> { it.date }.thenBy { it.time }.thenBy { it.number })
-                val body = if (workerReports.isEmpty()) "Todavía no hay reportes para este trabajador."
-                else workerReports.joinToString("\n\n") {
-                    "FECHA: " + it.date + " " + it.time + "\nNÚMERO: " + it.number + "\nTIPO: " + it.type + "\n\n" + it.body
+                val content=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setPadding(14,12,14,12);setBackgroundColor(0xFFF4F7FB.toInt())}
+                if(workerReports.isEmpty()) addLabel(content,"REPORTES","Todavía no hay reportes para este trabajador.")
+                workerReports.asReversed().forEach { report ->
+                    val card=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setPadding(14,12,14,12)
+                        background=android.graphics.drawable.GradientDrawable().apply{setColor(-1);cornerRadius=18f}}
+                    addLabel(card,"FECHA",report.date+" "+report.time,0xFFDCEBFA.toInt())
+                    addLabel(card,"NÚMERO",report.number.toString())
+                    addLabel(card,"TIPO",report.type,0xFFDDF4E5.toInt())
+                    report.body.replace("\r","").lines().forEach { raw ->
+                        val line=raw.trim()
+                        if(line.isBlank()||line.startsWith("SENE-ORDER|1"))return@forEach
+                        if(line.startsWith("ETIQUETA:",true)) {
+                            val heading=TextView(this).apply{text=line.substringAfter(":").trim();textSize=13f;typeface=Typeface.DEFAULT_BOLD;setTextColor(0xFF123B68.toInt());setPadding(2,10,2,6)}
+                            card.addView(heading)
+                        } else if(line.contains(":")) {
+                            addLabel(card,line.substringBefore(":").trim(),line.substringAfter(":").trim())
+                        } else addLabel(card,"DETALLE",line)
+                    }
+                    val lp=LinearLayout.LayoutParams(-1,-2);lp.bottomMargin=10;content.addView(card,lp)
                 }
-                AlertDialog.Builder(this).setTitle("REPORTES · " + profiles[which].second)
-                    .setMessage(body).setPositiveButton("CERRAR", null).show()
+                AlertDialog.Builder(this).setTitle("REPORTES · "+profiles[which].second)
+                    .setView(ScrollView(this).apply{addView(content)}).setPositiveButton("CERRAR",null).show()
             }.setNegativeButton("CERRAR", null).show()
     }
 
