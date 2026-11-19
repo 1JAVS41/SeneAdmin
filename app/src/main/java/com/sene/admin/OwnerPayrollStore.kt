@@ -202,13 +202,18 @@ object OwnerPayrollStore {
             .put("started",reportValue(lines,"HORA DE ENTRADA")).put("closed",reportValue(lines,"HORA DE SALIDA").ifBlank { if(r.type.equals("EARLY_EXIT",true) || r.type.contains("CIERRE",true) || r.type.contains("FIN_TURNO",true) || r.type.contains("CLOSE",true)) r.date+" "+r.time else "" }))
         if(!prefs(c).edit().putString("attendance_summary",summary.toString()).commit())return false
 
-        val count=absences?:return prefs(c).edit().putString(stampKey,stamp).commit()
+        val reportedCount=absences?:return prefs(c).edit().putString(stampKey,stamp).commit()
         val p=profile(c,r.workerId)?:return prefs(c).edit().putString(stampKey,stamp).commit()
         val daysPerWeek=reportValue(lines,"DÍAS LABORABLES POR SEMANA","DIAS LABORABLES POR SEMANA").toIntOrNull()
-            ?:p.workDays.split(",").map{it.trim()}.filter{it.isNotBlank()}.size
+            ?:p.workDays.split(Regex("[,;|]")).map{it.trim()}.filter{it.isNotBlank()}.distinct().size
         if(daysPerWeek<=0||p.weeklySalaryCents<=0L)return prefs(c).edit().putString(stampKey,stamp).commit()
         val payDay=payDayNumber(p.payDay)
         val payrollPeriod=periodForDate(period,payDay)
+        val periodStart=try{val d=SimpleDateFormat("yyyy-MM-dd",Locale.US).parse(payrollPeriod)!!;Calendar.getInstance().apply{time=d;add(Calendar.DAY_OF_YEAR,-6)}.let{SimpleDateFormat("yyyy-MM-dd",Locale.US).format(it.time)}}catch(_:Exception){payrollPeriod}
+        val effectiveStart=payrollStartDate(p)
+        val eligibleStart=if(effectiveStart.isBlank()||effectiveStart<periodStart)periodStart else effectiveStart
+        val eligibleDays=scheduledDayCount(eligibleStart,payrollPeriod,p.workDays)
+        val count=reportedCount.coerceAtMost(eligibleDays)
         if(payrolls(c,r.workerId).any{it.period==payrollPeriod&&it.status=="PAGADA"})
             return prefs(c).edit().putString(stampKey,stamp).commit()
         val amount=(p.weeklySalaryCents/daysPerWeek*count).coerceAtMost(p.weeklySalaryCents)
@@ -406,8 +411,11 @@ object OwnerPayrollStore {
             return payrolls(c,profileId).first { it.period==week }
         }
         val payrollId=existing?.optString("id")?.takeIf{it.isNotBlank()}?:UUID.randomUUID().toString()
+        val effectiveStart=payrollStartDate(p)
         val relevant=entries(c,profileId).filter {
-            (it.payrollId==payrollId) || (it.payrollId.isBlank() && periodForDate(it.date,payDay)==week)
+            val entryDate=isoDate(it.date)
+            val onOrAfterStart=effectiveStart.isBlank() || entryDate.isNotBlank() && entryDate>=effectiveStart
+            onOrAfterStart && ((it.payrollId==payrollId) || (it.payrollId.isBlank() && periodForDate(it.date,payDay)==week))
         }
         val absence=relevant.filter{it.type=="FALTA"}.sumOf{it.amountCents}
         val earlyExit=relevant.filter{it.type=="SALIDA_ANTICIPADA"}.sumOf{it.amountCents}
