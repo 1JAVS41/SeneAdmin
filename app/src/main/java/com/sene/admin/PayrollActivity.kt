@@ -105,10 +105,19 @@ class PayrollActivity : Activity() {
         val attendanceTitle=TextView(this).apply { text="ASISTENCIA DE LA SEMANA"; textSize=14f; typeface=android.graphics.Typeface.DEFAULT_BOLD; setTextColor(0xFF123B68.toInt()); setPadding(2,12,2,8) }
         box.addView(attendanceTitle)
         OwnerPayrollStore.weekAttendance(this,p).forEach { day ->
-            val symbol=when(day.status){"WORKED"->"🟢";"NOT_WORKED"->"❌️";"WORKING"->"🔁";"NO_RECORD"->"—";else->"—"}
-            val bg=when(day.status){"WORKED"->0xFFDDF4E5.toInt();"NOT_WORKED"->0xFFFFE4E6.toInt();"WORKING"->0xFFFFF1D6.toInt();else->0xFFE8EDF3.toInt()}
-            val statusText=if(day.status=="NO_RECORD")" · Aún no tenía registro" else ""
-            val chip=TextView(this).apply { text=day.day+" - ["+symbol+"]"+statusText; textSize=13f; typeface=android.graphics.Typeface.DEFAULT_BOLD; setTextColor(0xFF26364F.toInt()); setPadding(14,9,14,9); background=android.graphics.drawable.GradientDrawable().apply{setColor(bg);cornerRadius=14f} }
+            val symbol=when(day.status){"WORKED"->"🟢";"EARLY_EXIT"->"🟢";"NOT_WORKED"->"❌️";"WORKING"->"🔁";"NO_RECORD"->"—";else->"—"}
+            val bg=when(day.status){"WORKED"->0xFFDDF4E5.toInt();"EARLY_EXIT"->0xFFFFE8D6.toInt();"NOT_WORKED"->0xFFFFE4E6.toInt();"WORKING"->0xFFFFF1D6.toInt();else->0xFFE8EDF3.toInt()}
+            val statusText=when(day.status) {
+                "NO_RECORD" -> "Aún no tenía registro"
+                "EARLY_EXIT" -> "Cierre anticipado"
+                "WORKING" -> "En curso"
+                "WORKED" -> "Jornada completada"
+                "NOT_WORKED" -> "Sin asistencia"
+                else -> ""
+            }
+            val times=listOf(day.started.takeIf{it.isNotBlank()}?.let{"Entrada: $it"},day.closed.takeIf{it.isNotBlank()}?.let{"Salida: $it"}).filterNotNull().joinToString(" · ")
+            val detail=listOf(statusText,times).filter{it.isNotBlank()}.joinToString(" · ")
+            val chip=TextView(this).apply { text=day.day+" - ["+symbol+"]"+if(detail.isBlank()) "" else " · "+detail; textSize=13f; typeface=android.graphics.Typeface.DEFAULT_BOLD; setTextColor(0xFF26364F.toInt()); setPadding(14,9,14,9); background=android.graphics.drawable.GradientDrawable().apply{setColor(bg);cornerRadius=14f} }
             val lp=LinearLayout.LayoutParams(-1,-2);lp.bottomMargin=5;box.addView(chip,lp)
         }
         val movementTitle=TextView(this).apply { text="MOVIMIENTOS REGISTRADOS"; textSize=14f; typeface=android.graphics.Typeface.DEFAULT_BOLD; setTextColor(0xFF123B68.toInt()); setPadding(2,14,2,8) }
