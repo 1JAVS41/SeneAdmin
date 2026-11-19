@@ -199,7 +199,7 @@ class PayrollActivity : Activity() {
                 return
             }
             val reminder=if(OwnerPayrollStore.isPayDay(p))"\n\nRECUERDA: Revisa SENE VENTAS antes de pagar." else ""
-            val message="PERÍODO: ${pay.period}\nSUELDO: ${OwnerPayrollStore.money(pay.grossCents)}\nDESCUENTO POR FALTAS: ${OwnerPayrollStore.money(pay.absenceCents)}\nDESCUENTO POR SALIDAS ANTICIPADAS: ${OwnerPayrollStore.money(pay.earlyExitCents)}\nPRÉSTAMOS: ${OwnerPayrollStore.money(pay.loanCents)}\nCONSUMOS: ${OwnerPayrollStore.money(pay.consumptionCents)}\nTOTAL NETO: ${OwnerPayrollStore.money(pay.netCents)}\nESTADO: ${pay.status}$reminder"
+            val message="PERÍODO: ${pay.period}\nSUELDO BASE (PROPORCIONAL DESDE EL INICIO EFECTIVO): ${OwnerPayrollStore.money(pay.grossCents)}\nLos días anteriores al registro o al primer inicio de turno no generan sueldo ni faltas. Solo cuentan los días laborales configurados desde el inicio efectivo.\nDESCUENTO POR FALTAS: ${OwnerPayrollStore.money(pay.absenceCents)}\nDESCUENTO POR SALIDAS ANTICIPADAS: ${OwnerPayrollStore.money(pay.earlyExitCents)}\nPRÉSTAMOS: ${OwnerPayrollStore.money(pay.loanCents)}\nCONSUMOS: ${OwnerPayrollStore.money(pay.consumptionCents)}\nTOTAL NETO: ${OwnerPayrollStore.money(pay.netCents)}\nESTADO: ${pay.status}$reminder"
             if(pay.status=="PAGADA"){AlertDialog.Builder(this).setTitle("NÓMINA PAGADA").setMessage(message+"\nFecha/hora: ${pay.paidAt}\nCantidad entregada: ${OwnerPayrollStore.money(pay.deliveredCents)}").setPositiveButton("CERRAR",null).show();return}
             AlertDialog.Builder(this).setTitle("NÓMINA PENDIENTE").setMessage(message)
                 .setPositiveButton("COMPROBAR EN SENE VENTAS"){_,_->confirmSalesPayroll(pay)}
