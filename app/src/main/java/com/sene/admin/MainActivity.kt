@@ -313,54 +313,52 @@ class MainActivity : Activity() {
     }
 
     private fun showReports() {
-        if (SeneAdminStore.reports(this).isEmpty()) {
-            val key = OwnerKeyStore.read(this)
-            if (key != null) SharedInventoryManager.archivedReports(this, key).forEach { report ->
-                if (SeneAdminStore.saveReport(this, report)) {
-                    if (report.body.startsWith("SENE-ORDER|1")) OwnerPayrollStore.importOrder(this, report)
-                    else OwnerPayrollStore.importProfile(this, report)
-                }
-            }
-        }
         val reports = SeneAdminStore.reports(this)
         val profiles = (OwnerPayrollStore.profiles(this).map { it.id to it.name } +
             reports.map { it.workerId to (OwnerPayrollStore.profile(this, it.workerId)?.name ?: it.workerId) })
             .distinctBy { it.first }.sortedBy { it.second.lowercase(Locale.ROOT) }
-        if (profiles.isEmpty()) {
-            info("OTROS REPORTES", "Todavía no hay perfiles ni reportes recibidos.")
-            return
+        if (profiles.isEmpty()) { info("REPORTES", "Todavía no hay reportes recibidos."); return }
+        val list = LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(14,12,14,12); setBackgroundColor(0xFFF4F7FB.toInt()) }
+        profiles.forEach { (workerId,name) ->
+            val card = LinearLayout(this).apply {
+                orientation=LinearLayout.VERTICAL; setPadding(16,14,16,14); elevation=2f
+                background=android.graphics.drawable.GradientDrawable().apply { setColor(-1); cornerRadius=18f }
+            }
+            card.addView(TextView(this).apply { text=name; textSize=16f; typeface=Typeface.DEFAULT_BOLD; setTextColor(0xFF173C65.toInt()) })
+            card.addView(TextView(this).apply { text="Ventas, caja y actividad importante"; textSize=12f; setTextColor(0xFF64748B.toInt()); setPadding(0,4,0,0) })
+            val lp=LinearLayout.LayoutParams(-1,-2); lp.bottomMargin=9; list.addView(card,lp)
+            card.setOnClickListener { showWorkerReports(workerId,name) }
         }
-        val labels = profiles.map { it.second }.toTypedArray()
-        AlertDialog.Builder(this).setTitle("REPORTES · TRABAJADORES")
-            .setItems(labels) { _, which ->
-                val workerId = profiles[which].first
-                val workerReports = reports.filter { it.workerId == workerId }
-                    .sortedWith(compareBy<SeneReport> { it.date }.thenBy { it.time }.thenBy { it.number })
-                val content=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setPadding(14,12,14,12);setBackgroundColor(0xFFF4F7FB.toInt())}
-                if(workerReports.isEmpty()) addLabel(content,"REPORTES","Todavía no hay reportes para este trabajador.")
-                workerReports.asReversed().forEach { report ->
-                    val card=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setPadding(14,12,14,12)
-                        background=android.graphics.drawable.GradientDrawable().apply{setColor(-1);cornerRadius=18f}}
-                    addLabel(card,"FECHA",report.date+" "+report.time,0xFFDCEBFA.toInt())
-                    addLabel(card,"NÚMERO",report.number.toString())
-                    addLabel(card,"TIPO",report.type,0xFFDDF4E5.toInt())
-                    report.body.replace("\r","").lines().forEach { raw ->
-                        val line=raw.trim()
-                        if(line.isBlank()||line.startsWith("SENE-ORDER|1"))return@forEach
-                        if(line.startsWith("ETIQUETA:",true)) {
-                            val heading=TextView(this).apply{text=line.substringAfter(":").trim();textSize=13f;typeface=Typeface.DEFAULT_BOLD;setTextColor(0xFF123B68.toInt());setPadding(2,10,2,6)}
-                            card.addView(heading)
-                        } else if(line.contains(":")) {
-                            addLabel(card,line.substringBefore(":").trim(),line.substringAfter(":").trim())
-                        } else addLabel(card,"DETALLE",line)
-                    }
-                    val lp=LinearLayout.LayoutParams(-1,-2);lp.bottomMargin=10;content.addView(card,lp)
-                }
-                AlertDialog.Builder(this).setTitle("REPORTES · "+profiles[which].second)
-                    .setView(ScrollView(this).apply{addView(content)}).setPositiveButton("CERRAR",null).show()
-            }.setNegativeButton("CERRAR", null).show()
+        AlertDialog.Builder(this).setTitle("REPORTES").setView(ScrollView(this).apply { addView(list) })
+            .setPositiveButton("CERRAR",null).show()
     }
 
+    private fun showWorkerReports(workerId:String,name:String) {
+        val reports=SeneAdminStore.reports(this).filter { it.workerId==workerId }
+            .sortedWith(compareBy<SeneReport>{it.date}.thenBy{it.time}.thenBy{it.number}).asReversed()
+        val content=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(14,12,14,12); setBackgroundColor(0xFFF4F7FB.toInt()) }
+        val important=setOf("FECHA Y HORA","TRABAJADOR","NÚMERO DEL TRABAJADOR","TIPO","HORA DE ENTRADA","HORA DE SALIDA","HORA PROGRAMADA DE SALIDA","CAJA INICIAL","CAJA ACTUAL","CAJA FINAL","VENTAS","TOTAL DE VENTAS","VENTA TOTAL","DEVOLUCIONES","GASTOS","MOVIMIENTOS","EFECTIVO","TRANSFERENCIAS","TARJETA","TOTAL","TOTAL EN CAJA","CORTE","TIPO DE CIERRE","MOTIVO DE CIERRE","SUELDO SEMANAL","DÍA DE PAGO","DÍAS LABORALES","HORAS DE JORNADA")
+        if(reports.isEmpty()) addLabel(content,"REPORTES","Todavía no hay reportes para este trabajador.")
+        reports.forEach { report ->
+            val card=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(14,12,14,12); background=android.graphics.drawable.GradientDrawable().apply { setColor(-1); cornerRadius=18f } }
+            addLabel(card,"FECHA",report.date+" "+report.time,0xFFDCEBFA.toInt())
+            addLabel(card,"TIPO",report.type,0xFFDDF4E5.toInt())
+            report.body.replace("\r","").lines().forEach { raw ->
+                val line=raw.trim()
+                if(line.startsWith("ETIQUETA:",true)) {
+                    val heading=line.substringAfter(":").trim()
+                    if(heading.contains("VENTA",true)||heading.contains("CAJA",true)||heading.contains("TURNO",true)||heading.contains("CIERRE",true))
+                        card.addView(TextView(this).apply { text=heading; textSize=13f; typeface=Typeface.DEFAULT_BOLD; setTextColor(0xFF123B68.toInt()); setPadding(2,9,2,5) })
+                } else if(line.contains(":")) {
+                    val key=line.substringBefore(":").trim()
+                    if(important.any { it.equals(key,true) }) addLabel(card,key,line.substringAfter(":").trim())
+                }
+            }
+            if(card.childCount>2) { val lp=LinearLayout.LayoutParams(-1,-2); lp.bottomMargin=10; content.addView(card,lp) }
+        }
+        AlertDialog.Builder(this).setTitle("REPORTES · "+name)
+            .setView(ScrollView(this).apply { addView(content) }).setPositiveButton("CERRAR",null).show()
+    }
 
     private fun showWorkerAdministration() {
         val profiles=OwnerPayrollStore.profiles(this).sortedBy{it.name.lowercase(Locale.ROOT)}
