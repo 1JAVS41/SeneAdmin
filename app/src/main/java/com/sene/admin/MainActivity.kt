@@ -63,12 +63,12 @@ class MainActivity : Activity() {
             text = "Control automático de nómina y reportes."
             textSize = 14f; setTextColor(0xFF526579.toInt()); setPadding(0, 6, 0, 22)
         })
-        fun mainOption(label: String, subtitle: String, action: () -> Unit) {
+        fun mainOption(label: String, subtitle: String, color: Int = 0xFF1769AA.toInt(), action: () -> Unit) {
             val card = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
                 gravity = android.view.Gravity.CENTER
                 setPadding(18, 26, 18, 26)
-                setBackgroundColor(0xFF1769AA.toInt())
+                setBackgroundColor(color)
                 elevation = 4f
                 isClickable = true
                 isFocusable = true
@@ -93,16 +93,13 @@ class MainActivity : Activity() {
         mainOption("ADMINISTRAR TRABAJADORES", "Seleccionar y eliminar un perfil") {
             showWorkerAdministration()
         }
-        mainOption("OTROS REPORTES", "Reportes organizados por trabajador") {
+        mainOption("REPORTES", "Ventas, caja y actividad importante") {
             showReports()
         }
-        mainOption("INVENTARIO SENE", "Último inventario recibido, organizado por producto") {
-            showSeneInventory()
-        }
-        mainOption("PEGAR REPORTES DE WHATSAPP", "Importar reportes enviados por tus trabajadores") {
+        mainOption("PEGAR REPORTES DE WHATSAPP", "Importar reportes enviados por tus trabajadores", 0xFF218A57.toInt()) {
             showPasteDialog()
         }
-        mainOption("AJUSTES", "PIN de acceso y clave de cifrado") {
+        mainOption("AJUSTES", "Configuración protegida", 0xFFE7A0A0.toInt()) {
             showSettings()
         }
         setContentView(ScrollView(this).apply { addView(root) })
