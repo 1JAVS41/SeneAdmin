@@ -245,10 +245,10 @@ object OwnerPayrollStore {
         val p=profile(c,r.workerId)?:return true
         if(p.weeklySalaryCents<=0L||p.hours<=0)return true
         val effectiveStart=payrollStartDate(p)
-        val shiftDate=SimpleDateFormat("yyyy-MM-dd",Locale.US).format(Date(start))
-        if(effectiveStart.isNotBlank() && shiftDate<effectiveStart)return true
         val start=parseReportTimestamp(reportValue(lines,"HORA DE ENTRADA"))
         val closed=parseReportTimestamp(reportValue(lines,"HORA DE SALIDA"))
+        val shiftDate=if(start>0L) SimpleDateFormat("yyyy-MM-dd",Locale.US).format(Date(start)) else ""
+        if(effectiveStart.isNotBlank() && shiftDate.isNotBlank() && shiftDate<effectiveStart)return true
         if(start<=0L||closed<=0L||closed<=start)return true
         val scheduledEnd=start+p.hours*3600000L
         val missingMillis=(scheduledEnd-closed).coerceAtLeast(0L)
@@ -411,7 +411,6 @@ object OwnerPayrollStore {
             return payrolls(c,profileId).first { it.period==week }
         }
         val payrollId=existing?.optString("id")?.takeIf{it.isNotBlank()}?:UUID.randomUUID().toString()
-        val effectiveStart=payrollStartDate(p)
         val relevant=entries(c,profileId).filter {
             val entryDate=isoDate(it.date)
             val onOrAfterStart=effectiveStart.isBlank() || entryDate.isNotBlank() && entryDate>=effectiveStart
