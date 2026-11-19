@@ -129,7 +129,7 @@ object OwnerPayrollStore {
 
     private fun importDailyAttendance(c:Context,r:SeneReport,lines:List<String>):Boolean {
         val type=r.type.uppercase(Locale.ROOT)
-        val isClosing=type.contains("CIERRE") || type.contains("FIN_TURNO") || type.contains("CLOSE")
+        val isClosing=type=="EARLY_EXIT" || type.contains("CIERRE") || type.contains("FIN_TURNO") || type.contains("CLOSE")
         val isStarting=type.contains("INICIO") || type.contains("PERIOD") || type.contains("START")
         if(!isClosing && !isStarting)return true
         val entry=reportValue(lines,"HORA DE ENTRADA")
@@ -137,7 +137,7 @@ object OwnerPayrollStore {
         val day=isoDate(entry).takeIf { entry.isNotBlank() }?.takeIf { it.length==10 } ?: isoDate(r.date)
         if(day.isBlank())return true
         val closingType=reportValue(lines,"TIPO DE CIERRE").trim().uppercase(Locale.ROOT)
-        val status=if(isStarting) "WORKING" else if(closingType=="EARLY_EXIT" || closingType=="EARLY EXIT") "EARLY_EXIT" else "WORKED"
+        val status=if(isStarting) "WORKING" else if(closingType=="EARLY_EXIT" || closingType=="EARLY EXIT" || type=="EARLY_EXIT") "EARLY_EXIT" else "WORKED"
         val all=try{JSONObject(prefs(c).getString("attendance_days","{}")?:"{}")}catch(_:Exception){JSONObject()}
         val worker=all.optJSONObject(r.workerId) ?: JSONObject()
         val previous=worker.optJSONObject(day) ?: JSONObject()
@@ -199,7 +199,7 @@ object OwnerPayrollStore {
         val summary=try{JSONObject(prefs(c).getString("attendance_summary","{}")?:"{}")}catch(_:Exception){JSONObject()}
         summary.put(r.workerId,JSONObject().put("period",period).put("workedDays",worked?:0).put("absences",absences?:0)
             .put("closingType",reportValue(lines,"TIPO DE CIERRE")).put("closingReason",reportValue(lines,"MOTIVO DE CIERRE"))
-            .put("started",reportValue(lines,"HORA DE ENTRADA")).put("closed",reportValue(lines,"HORA DE SALIDA").ifBlank { if(r.type.contains("CIERRE",true) || r.type.contains("FIN_TURNO",true) || r.type.contains("CLOSE",true)) r.date+" "+r.time else "" }))
+            .put("started",reportValue(lines,"HORA DE ENTRADA")).put("closed",reportValue(lines,"HORA DE SALIDA").ifBlank { if(r.type.equals("EARLY_EXIT",true) || r.type.contains("CIERRE",true) || r.type.contains("FIN_TURNO",true) || r.type.contains("CLOSE",true)) r.date+" "+r.time else "" }))
         if(!prefs(c).edit().putString("attendance_summary",summary.toString()).commit())return false
 
         val count=absences?:return prefs(c).edit().putString(stampKey,stamp).commit()
