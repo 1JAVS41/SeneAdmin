@@ -200,7 +200,7 @@ object SharedInventoryManager {
             .sortedByDescending { sortKey(it.first) }
         // Nunca limpiar si no se pudo comprobar la clave de todos los respaldos cifrados existentes.
         // Los TXT heredados se conservan intactos; una clave incorrecta no autoriza ninguna eliminación.
-        val valid = files.all { (_, _, uri) ->
+        val valid = files.all { (name, _, uri) ->
             try {
                 val raw = c.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return@all false
                 if (dirName == "REPORTES") {
