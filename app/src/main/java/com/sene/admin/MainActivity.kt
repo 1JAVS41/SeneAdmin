@@ -247,8 +247,12 @@ class MainActivity : Activity() {
             askOwnerKey()
             return
         }
-        val chunks = raw.split(Regex("(?m)(?=^SENE-ADMIN-REPORT\\|1\\s*$)"))
-            .map { it.trim() }.filter { it.isNotBlank() }
+        // WhatsApp puede anteponer fecha, remitente o espacios al copiar el mensaje.
+        // Se localiza cada cabecera donde aparezca y se entrega al lector desde su primera línea real.
+        val normalized = raw.replace("\\r\\n", "\\n").replace("\\r", "\\n")
+        val chunks = normalized.split(Regex("(?=SENE-ADMIN-REPORT\\\\|1)"))
+            .map { it.trim() }
+            .filter { it.startsWith("SENE-ADMIN-REPORT|1") }
         var imported = 0
         var duplicates = 0
         val errors = mutableListOf<String>()
