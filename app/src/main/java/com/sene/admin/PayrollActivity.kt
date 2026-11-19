@@ -71,49 +71,50 @@ class PayrollActivity : Activity() {
         val pay = try { OwnerPayrollStore.createOrGetPayroll(this, id) } catch (_: Exception) { null }
         val entries = OwnerPayrollStore.entries(this, id)
         val allPayrolls = OwnerPayrollStore.payrolls(this, id).sortedByDescending { it.createdAt }
-        val detail = buildString {
-            append("TRABAJADOR: ").append(p.name)
-            append("\nTELÉFONO: ").append(p.phone.ifBlank { "No indicado" })
-            append("\nDÍAS LABORALES: ").append(p.workDays.ifBlank { "Sin configurar" })
-            OwnerPayrollStore.attendanceSummary(this@PayrollActivity, id)?.let { summary ->
-                append("\n\nASISTENCIA DEL ÚLTIMO CIERRE")
-                append("\nPeríodo: ").append(summary.period)
-                append("\nDías trabajados: ").append(summary.workedDays)
-                append("\nDías de falta: ").append(summary.absences)
-                append("\nTipo de cierre: ").append(summary.closingType.ifBlank { "No indicado" })
-                append("\nEntrada: ").append(summary.started.ifBlank { "No indicada" })
-                append("\nSalida: ").append(summary.closed.ifBlank { "No indicada" })
-                if (summary.closingReason.isNotBlank()) append("\nMotivo: ").append(summary.closingReason)
-            }
-            append("\nDÍA DE PAGO: ").append(p.payDay.ifBlank { "Sin configurar" })
-            append("\nSUELDO SEMANAL: ").append(OwnerPayrollStore.money(p.weeklySalaryCents))
-            if (pay != null) {
-                append("\n\nDESGLOSE DE LA SEMANA")
-                append("\nSueldo base: ").append(OwnerPayrollStore.money(pay.grossCents))
-                append("\nDescuento por faltas: ").append(OwnerPayrollStore.money(pay.absenceCents))
-                append("\nPréstamos: ").append(OwnerPayrollStore.money(pay.loanCents))
-                append("\nConsumos: ").append(OwnerPayrollStore.money(pay.consumptionCents))
-                append("\nTOTAL NETO: ").append(OwnerPayrollStore.money(pay.netCents))
-                append("\nESTADO: ").append(pay.status)
-            } else append("\n\nTodavía falta configurar el sueldo semanal para generar nómina.")
-            append("\n\nMOVIMIENTOS REGISTRADOS:")
-            if (entries.isEmpty()) append("\nTodavía no hay movimientos.")
-            entries.sortedByDescending { it.date }.forEach {
-                append("\n").append(it.date).append(" · ").append(it.type)
-                    .append(" · ").append(OwnerPayrollStore.money(it.amountCents))
-                    .append(" · ").append(it.description)
-            }
-            append("\n\nHISTORIAL DE NÓMINA:")
-            if (allPayrolls.isEmpty()) append("\nTodavía no hay nóminas.")
-            allPayrolls.forEach {
-                append("\n").append(it.period).append(" · ").append(it.status)
-                    .append(" · Neto ").append(OwnerPayrollStore.money(it.netCents))
-            }
+        val box = LinearLayout(this).apply { orientation = 1; setPadding(16, 12, 16, 12); setBackgroundColor(0xFFF4F7FB.toInt()) }
+        fun tag(label:String,value:String,accent:Int=0xFFE8F1FB.toInt()) {
+            val chip=LinearLayout(this).apply { orientation=1; setPadding(14,10,14,10); background=android.graphics.drawable.GradientDrawable().apply { setColor(accent); cornerRadius=18f } }
+            chip.addView(TextView(this).apply { text=label.uppercase(Locale.ROOT); textSize=10f; setTextColor(0xFF54708D.toInt()); typeface=android.graphics.Typeface.DEFAULT_BOLD })
+            chip.addView(TextView(this).apply { text=value; textSize=15f; setTextColor(0xFF173C65.toInt()); typeface=android.graphics.Typeface.DEFAULT_BOLD; setPadding(0,3,0,0) })
+            val lp=LinearLayout.LayoutParams(-1,-2); lp.bottomMargin=8; box.addView(chip,lp)
         }
-        val box = LinearLayout(this).apply { orientation = 1; setPadding(18, 8, 18, 8) }
-        box.addView(TextView(this).apply {
-            text = detail; textSize = 13f; setTextColor(0xFF26364F.toInt())
-        })
+        tag("TRABAJADOR",p.name,0xFFDCEBFA.toInt())
+        tag("TELÉFONO",p.phone.ifBlank{"No indicado"})
+        tag("DÍA DE PAGO",p.payDay.ifBlank{"Sin configurar"})
+        tag("SUELDO SEMANAL",OwnerPayrollStore.money(p.weeklySalaryCents))
+        tag("DÍAS LABORALES",p.workDays.ifBlank{"Sin configurar"})
+        tag("HORAS DE JORNADA",p.hours.toString()+" horas")
+        OwnerPayrollStore.attendanceSummary(this,id)?.let { summary ->
+            tag("ÚLTIMO PERÍODO",summary.period)
+            tag("DÍAS TRABAJADOS / FALTAS",summary.workedDays.toString()+" trabajados · "+summary.absences+" faltas")
+            tag("TURNO",summary.started.ifBlank{"—"}+" a "+summary.closed.ifBlank{"En curso"})
+            if(summary.closingType.isNotBlank())tag("TIPO DE CIERRE",summary.closingType)
+            if(summary.closingReason.isNotBlank())tag("MOTIVO",summary.closingReason)
+        }
+        if(pay!=null) {
+            tag("SUELDO BASE",OwnerPayrollStore.money(pay.grossCents))
+            tag("DESCUENTO POR FALTAS",OwnerPayrollStore.money(pay.absenceCents))
+            tag("PRÉSTAMOS",OwnerPayrollStore.money(pay.loanCents))
+            tag("CONSUMOS",OwnerPayrollStore.money(pay.consumptionCents))
+            tag("TOTAL NETO",OwnerPayrollStore.money(pay.netCents),0xFFDDF4E5.toInt())
+            tag("ESTADO DE NÓMINA",pay.status,if(pay.status=="PAGADA")0xFFDDF4E5.toInt() else 0xFFFFF1D6.toInt())
+        } else tag("NÓMINA","Falta configurar el sueldo semanal")
+        val attendanceTitle=TextView(this).apply { text="ASISTENCIA DE LA SEMANA"; textSize=14f; typeface=android.graphics.Typeface.DEFAULT_BOLD; setTextColor(0xFF123B68.toInt()); setPadding(2,12,2,8) }
+        box.addView(attendanceTitle)
+        OwnerPayrollStore.weekAttendance(this,p).forEach { day ->
+            val symbol=when(day.status){"WORKED"->"🟢";"NOT_WORKED"->"❌️";"WORKING"->"🔁";else->"—"}
+            val bg=when(day.status){"WORKED"->0xFFDDF4E5.toInt();"NOT_WORKED"->0xFFFFE4E6.toInt();"WORKING"->0xFFFFF1D6.toInt();else->0xFFE8EDF3.toInt()}
+            val chip=TextView(this).apply { text=day.day+" - ["+symbol+"]"; textSize=13f; typeface=android.graphics.Typeface.DEFAULT_BOLD; setTextColor(0xFF26364F.toInt()); setPadding(14,9,14,9); background=android.graphics.drawable.GradientDrawable().apply{setColor(bg);cornerRadius=14f} }
+            val lp=LinearLayout.LayoutParams(-1,-2);lp.bottomMargin=5;box.addView(chip,lp)
+        }
+        val movementTitle=TextView(this).apply { text="MOVIMIENTOS REGISTRADOS"; textSize=14f; typeface=android.graphics.Typeface.DEFAULT_BOLD; setTextColor(0xFF123B68.toInt()); setPadding(2,14,2,8) }
+        box.addView(movementTitle)
+        if(entries.isEmpty())tag("MOVIMIENTOS","Todavía no hay movimientos.")
+        entries.sortedByDescending { it.date }.forEach { tag(it.type+" · "+it.date,OwnerPayrollStore.money(it.amountCents)+" · "+it.description) }
+        val historyTitle=TextView(this).apply { text="HISTORIAL DE NÓMINA"; textSize=14f; typeface=android.graphics.Typeface.DEFAULT_BOLD; setTextColor(0xFF123B68.toInt()); setPadding(2,14,2,8) }
+        box.addView(historyTitle)
+        if(allPayrolls.isEmpty())tag("HISTORIAL","Todavía no hay nóminas.")
+        allPayrolls.forEach { tag(it.period+" · "+it.status, "Neto "+OwnerPayrollStore.money(it.netCents)) }
         lateinit var dialog: AlertDialog
         fun option(label: String, action: () -> Unit) {
             box.addView(Button(this).apply {
@@ -151,6 +152,12 @@ class PayrollActivity : Activity() {
         }
     }
     private fun payroll(p:OwnerPayrollStore.Profile){
+        if(!OwnerPayrollStore.isPayDay(p)) {
+            AlertDialog.Builder(this).setTitle("PAGO NO DISPONIBLE")
+                .setMessage("La nómina solo se puede pagar el día establecido: "+p.payDay.ifBlank{"Sin configurar"}+". Hoy no está permitido registrar el pago.")
+                .setPositiveButton("ACEPTAR",null).show()
+            return
+        }
         try{
             val pay=OwnerPayrollStore.createOrGetPayroll(this,p.id)
             val reminder=if(OwnerPayrollStore.isPayDay(p))"\n\nRECUERDA: Revisa SENE VENTAS antes de pagar." else ""
@@ -162,6 +169,11 @@ class PayrollActivity : Activity() {
         }catch(e:Exception){AlertDialog.Builder(this).setTitle("NÓMINA").setMessage(e.message?: "No se pudo generar la nómina").setPositiveButton("ACEPTAR",null).show()}
     }
     private fun confirmSalesPayroll(pay: OwnerPayrollStore.Payroll) {
+        val profile=OwnerPayrollStore.profile(this,pay.profileId)
+        if(profile==null || !OwnerPayrollStore.isPayDay(profile)) {
+            Toast.makeText(this,"El pago solo está permitido el día establecido.",Toast.LENGTH_LONG).show()
+            return
+        }
         val amount = field("Total neto que aparece en SENE VENTAS", true)
         val message = "Abre SENE VENTAS > SOY PATRÓN > NÓMINA.\n\nComprueba que coincidan trabajador, período, sueldo base, faltas, préstamos, consumos y TOTAL NETO.\n\nTotal esperado en SENE ADMIN: " + OwnerPayrollStore.money(pay.netCents) + "\n\nSolo continúa si todos los conceptos coinciden."
         val dialog = AlertDialog.Builder(this).setTitle("COMPROBACIÓN DE NÓMINA")
