@@ -33,36 +33,153 @@ object OwnerPayrollStore {
     }
     private fun profileJson(p:Profile)=JSONObject().put("id",p.id).put("name",p.name).put("phone",p.phone).put("salary",p.weeklySalaryCents).put("payDay",p.payDay).put("workDays",p.workDays).put("hours",p.hours)
 
-    fun importProfile(c:Context,r:SeneReport){
-        val stamp = r.date + " " + r.time
-        val stampKey = "profile_import_" + r.workerId
-        val last = prefs(c).getString(stampKey, null)
-        if (last != null && stamp <= last) return
-        val lines=r.body.lines()
-        fun value(label:String)=lines.firstOrNull{it.trim().startsWith(label,true)}?.substringAfter(":")?.trim().orEmpty()
-        val name=value("Trabajador").ifBlank{r.workerId}
-        val phone=value("Número del trabajador")
-        val salaryText=value("Sueldo semanal").replace("$","").replace(",","").trim()
-        val salary=(salaryText.toDoubleOrNull()?.times(100.0))?.toLong()
-        val day=value("Día de pago")
-        val days=value("Días laborales")
-        val hours=value("Horas de jornada").toIntOrNull()?:8
-        val worked=value("DÍAS TRABAJADOS REGISTRADOS").toIntOrNull()
-        val absences=value("FALTAS REGISTRADAS HASTA EL CIERRE").toIntOrNull()
-        if(worked!=null||absences!=null){
-            try{
-                val summaries=JSONObject(prefs(c).getString("attendance_summary","{}")?:"{}")
-                summaries.put(r.workerId,JSONObject().put("period",value("PERÍODO DESDE"))
-                    .put("workedDays",worked?:0).put("absences",absences?:0)
-                    .put("closingType",value("TIPO DE CIERRE")).put("closingReason",value("MOTIVO DE CIERRE"))
-                    .put("started",value("HORA DE ENTRADA")).put("closed",value("HORA DE SALIDA")))
-                prefs(c).edit().putString("attendance_summary",summaries.toString()).commit()
-            }catch(_:Exception){}
+    private fun reportValue(lines:List<String>,vararg labels:String):String {
+        val line=lines.firstOrNull { raw ->
+            val value=raw.trim()
+            labels.any { label -> value.startsWith("$label:",true) }
+        } ?: return ""
+        return line.substringAfter(":").trim()
+    }
+
+    private fun parseMoneyCents(raw:String):Long? {
+        var value=raw.trim().replace("$","").replace(" ","").replace("\u00A0","")
+        if(value.isBlank())return null
+        val comma=value.lastIndexOf(',')
+        val dot=value.lastIndexOf('.')
+        value=when {
+            comma>=0 && dot>=0 && comma>dot -> value.replace(".","").replace(',','.')
+            comma>=0 && dot>=0 -> value.replace(",","")
+            comma>=0 -> if(value.length-comma-1 in 1..2)value.replace(',','.') else value.replace(",","")
+            else -> value
         }
-        val old=profile(c,r.workerId)
-        if(upsertProfile(c,Profile(r.workerId,name,phone.ifBlank{old?.phone.orEmpty()},salary?:old?.weeklySalaryCents?:0L,
-            day.ifBlank{old?.payDay.orEmpty()},days.ifBlank{old?.workDays.orEmpty()},hours)))
-            prefs(c).edit().putString(stampKey,stamp).apply()
+        return value.toBigDecimalOrNull()?.movePointRight(2)?.toLong()
+    }
+
+    private fun isoDate(raw:String):String {
+        val value=raw.trim()
+        val patterns=listOf("yyyy-MM-dd","yyyy-MM-dd HH:mm:ss","dd/MM/yyyy","dd/MM/yyyy HH:mm","dd/MM/yyyy HH:mm:ss")
+        for(pattern in patterns)try{
+            val parsed=SimpleDateFormat(pattern,Locale("es","MX")).apply{isLenient=false}.parse(value)?:continue
+            return SimpleDateFormat("yyyy-MM-dd",Locale.US).format(parsed)
+        }catch(_:Exception){}
+        return value.take(10)
+    }
+
+    private fun payDayNumber(value:String):Int=when(value.trim().lowercase(Locale("es","MX"))){
+        "domingo"->Calendar.SUNDAY
+        "lunes"->Calendar.MONDAY
+        "martes"->Calendar.TUESDAY
+        "miércoles","miercoles"->Calendar.WEDNESDAY
+        "jueves"->Calendar.THURSDAY
+        "viernes"->Calendar.FRIDAY
+        "sábado","sabado"->Calendar.SATURDAY
+        else->Calendar.MONDAY
+    }
+
+    /** Importa el perfil y, en los reportes de cierre, la asistencia y las solicitudes de nómina. */
+    fun importProfile(c:Context,r:SeneReport):Boolean {
+        val lines=r.body.replace("\r","").lines()
+        val stamp=r.date+" "+r.time
+        val stampKey="profile_import_"+r.workerId
+        val last=prefs(c).getString(stampKey,null)
+        if(last==null||stamp>last){
+            val old=profile(c,r.workerId)
+            val name=reportValue(lines,"TRABAJADOR","Trabajador").ifBlank{old?.name?:r.workerId}
+            val phone=reportValue(lines,"TELÉFONO","TELEFONO","Número del trabajador").ifBlank{old?.phone.orEmpty()}
+            val salary=parseMoneyCents(reportValue(lines,"SUELDO SEMANAL"))?:old?.weeklySalaryCents?:0L
+            val payDay=reportValue(lines,"DÍA DE PAGO","DIA DE PAGO").ifBlank{old?.payDay.orEmpty()}
+            val workDays=reportValue(lines,"DÍAS LABORALES","DIAS LABORALES").ifBlank{old?.workDays.orEmpty()}
+            val hours=Regex("\\d+").find(reportValue(lines,"HORAS DE JORNADA"))?.value?.toIntOrNull()?.coerceIn(1,24)?:old?.hours?:8
+            if(!upsertProfile(c,Profile(r.workerId,name,phone,salary,payDay,workDays,hours)))return false
+            if(!prefs(c).edit().putString(stampKey,stamp).commit())return false
+        }
+        return importAttendance(c,r,lines,stamp) && importPayrollRequests(c,r,lines)
+    }
+
+    private fun importAttendance(c:Context,r:SeneReport,lines:List<String>,stamp:String):Boolean {
+        val worked=reportValue(lines,"DÍAS TRABAJADOS REGISTRADOS","DIAS TRABAJADOS REGISTRADOS").toIntOrNull()
+        val absences=reportValue(lines,"FALTAS REGISTRADAS HASTA EL CIERRE").toIntOrNull()
+        val period=isoDate(reportValue(lines,"PERÍODO DESDE","PERIODO DESDE"))
+        if((worked==null&&absences==null)||period.isBlank())return true
+        val stampKey="attendance_import_"+r.workerId
+        val last=prefs(c).getString(stampKey,null)
+        if(last!=null&&stamp<=last)return true
+        val summary=try{JSONObject(prefs(c).getString("attendance_summary","{}")?:"{}")}catch(_:Exception){JSONObject()}
+        summary.put(r.workerId,JSONObject().put("period",period).put("workedDays",worked?:0).put("absences",absences?:0)
+            .put("closingType",reportValue(lines,"TIPO DE CIERRE")).put("closingReason",reportValue(lines,"MOTIVO DE CIERRE"))
+            .put("started",reportValue(lines,"HORA DE ENTRADA")).put("closed",reportValue(lines,"HORA DE SALIDA")))
+        if(!prefs(c).edit().putString("attendance_summary",summary.toString()).putString(stampKey,stamp).commit())return false
+
+        val count=absences?:return true
+        val p=profile(c,r.workerId)?:return true
+        val daysPerWeek=reportValue(lines,"DÍAS LABORABLES POR SEMANA","DIAS LABORABLES POR SEMANA").toIntOrNull()
+            ?:p.workDays.split(",").map{it.trim()}.filter{it.isNotBlank()}.size
+        if(daysPerWeek<=0||p.weeklySalaryCents<=0L)return true
+        val payDay=payDayNumber(p.payDay)
+        val payrollPeriod=periodForDate(period,payDay)
+        if(payrolls(c,r.workerId).any{it.period==payrollPeriod&&it.status=="PAGADA"})return true
+        val amount=(p.weeklySalaryCents/daysPerWeek*count).coerceAtMost(p.weeklySalaryCents)
+        val id="attendance-absence-"+r.workerId+"-"+payrollPeriod
+        val a=array(c,ENTRIES)
+        val index=(0 until a.length()).firstOrNull{a.optJSONObject(it)?.optString("id")==id}
+        val oldEntry=index?.let{a.optJSONObject(it)}
+        val entry=JSONObject().put("id",id).put("profileId",r.workerId).put("type","FALTA")
+            .put("date",payrollPeriod).put("description","Faltas reportadas por SENE VENTAS: $count")
+            .put("amount",amount).put("payrollId",oldEntry?.optString("payrollId").orEmpty())
+        if(index==null)a.put(entry)else a.put(index,entry)
+        return saveArray(c,ENTRIES,a)
+    }
+
+    private fun importPayrollRequests(c:Context,r:SeneReport,lines:List<String>):Boolean {
+        val marker=lines.indexOfFirst{it.trim().equals("ETIQUETA: SOLICITUDES DE NÓMINA PENDIENTES",true)}
+        if(marker<0)return true
+        val profileId=r.workerId
+        val existing=entries(c,profileId)
+        val pending=mutableListOf<Entry>()
+        var kind=""
+        var amount=0L
+        var date=""
+        var reason=""
+        var description=""
+        var status=""
+        fun flush(){
+            if(kind.isBlank()||amount<=0L||status.equals("LIQUIDADO",true))return
+            val type=if(kind.contains("PRÉSTAMO",true)||kind.contains("PRESTAMO",true))"PRESTAMO" else "CONSUMO"
+            val day=isoDate(date)
+            if(day.isBlank())return
+            val details=listOf(reason.takeIf{it.isNotBlank()}?.let{"Motivo: $it"},description.takeIf{it.isNotBlank()}?.let{"Descripción: $it"}).filterNotNull().joinToString(" · ")
+            val duplicate=existing.any{old->
+                old.type==type&&old.amountCents==amount&&isoDate(old.date)==day&&
+                    (old.description==details||old.description==description||description.isNotBlank()&&old.description.contains(description,true))
+            }||pending.any{old->old.type==type&&old.amountCents==amount&&old.date==day&&old.description==details}
+            if(!duplicate){
+                val identity=listOf(profileId,type,date,amount.toString(),reason,description).joinToString("|")
+                val id="report-request-"+UUID.nameUUIDFromBytes(identity.toByteArray(Charsets.UTF_8)).toString()
+                val payrollPeriod=periodForDate(day,payDayNumber(profile(c,profileId)?.payDay.orEmpty()))
+                if(!payrolls(c,profileId).any{it.period==payrollPeriod&&it.status=="PAGADA"})
+                    pending.add(Entry(id,profileId,type,day,details,amount,""))
+            }
+        }
+        for(line in lines.drop(marker+1)){
+            val value=line.trim()
+            if(value.startsWith("ETIQUETA:",true))break
+            val upper=value.uppercase(Locale("es","MX"))
+            if(upper.startsWith("PRÉSTAMO |")||upper.startsWith("PRESTAMO |")||upper.startsWith("CONSUMO |")){
+                flush()
+                kind=value.substringBefore("|").trim()
+                amount=parseMoneyCents(value.substringAfter("|"))?:0L
+                date="";reason="";description="";status=""
+            }else if(value.startsWith("FECHA:",true))date=value.substringAfter(":").trim()
+            else if(value.startsWith("MOTIVO:",true))reason=value.substringAfter(":").trim()
+            else if(value.startsWith("DESCRIPCIÓN:",true)||value.startsWith("DESCRIPCION:",true))description=value.substringAfter(":").trim()
+            else if(value.startsWith("ESTADO:",true))status=value.substringAfter(":").trim()
+        }
+        flush()
+        if(pending.isEmpty())return true
+        val a=array(c,ENTRIES)
+        pending.forEach{entry->a.put(JSONObject().put("id",entry.id).put("profileId",entry.profileId).put("type",entry.type)
+            .put("date",entry.date).put("description",entry.description).put("amount",entry.amountCents).put("payrollId",entry.payrollId))}
+        return saveArray(c,ENTRIES,a)
     }
 
     data class AttendanceSummary(val period:String,val workedDays:Int,val absences:Int,val closingType:String,val closingReason:String,val started:String,val closed:String)
