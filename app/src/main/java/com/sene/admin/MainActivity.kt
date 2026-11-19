@@ -29,7 +29,9 @@ class MainActivity : AppCompatActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        handleIncoming(intent)
+        if (!OwnerKeyStore.hasKey(this)) askOwnerKey()
+        else if (!AccessPinStore.hasPin(this)) askCreatePin()
+        else handleIncoming(intent)
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
