@@ -90,7 +90,7 @@ class PayrollActivity : Activity() {
             tag("ÚLTIMO PERÍODO",summary.period)
             tag("DÍAS TRABAJADOS / FALTAS",summary.workedDays.toString()+" trabajados · "+summary.absences+" faltas")
             tag("TURNO",summary.started.ifBlank{"—"}+" · Finalizó: "+summary.closed.ifBlank{"Por definir"})
-            if(summary.closingType.isNotBlank())tag("TIPO DE CIERRE",if(summary.closingType=="EARLY_EXIT")"CIERRE DE TURNO ANTICIPADO" else summary.closingType)
+            if(summary.closingType.isNotBlank())tag("TIPO DE CIERRE",when(summary.closingType){"EARLY_EXIT"->"CIERRE DE TURNO ANTICIPADO";"ADMIN_FORCED","ADMINISTRATIVE"->"CIERRE ADMINISTRATIVO";else->summary.closingType})
             if(summary.closingReason.isNotBlank())tag("MOTIVO",summary.closingReason)
         }
         if(pay!=null) {
