@@ -104,8 +104,7 @@ class MainActivity : AppCompatActivity() {
                         .firstOrNull { it.trim().startsWith("TRABAJADOR:", true) }
                         ?.substringAfter(":")?.trim().orEmpty().ifBlank { workerId }
                     workerId to name
-                }.filterNot { (workerId, _) -> OwnerPayrollStore.profile(this@MainActivity, workerId) != null }
-                    .sortedBy { it.second.lowercase(Locale.ROOT) }
+                }.sortedBy { it.second.lowercase(Locale.ROOT) }
 
                 runOnUiThread {
                     progress.dismiss()
@@ -190,8 +189,9 @@ class MainActivity : AppCompatActivity() {
                 } catch (e: Exception) {
                     errors.add(e.message ?: "No se pudo preparar la nómina.")
                 }
-
+                restoredProfiles = OwnerPayrollStore.profiles(this@MainActivity).size
                 runOnUiThread {
+                    if (!isFinishing && !isDestroyed) updateProgress(total, "Finalizando la recuperación...")
                     progress.dismiss()
                     if (isFinishing || isDestroyed) return@runOnUiThread
                     if (errors.isEmpty()) {
