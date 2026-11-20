@@ -58,11 +58,21 @@ object SharedInventoryManager {
     }
 
     private fun folder(c: Context, tree: Uri, name: String, create: Boolean): Uri? {
-        val existing = children(c, tree, root(c, tree)).firstOrNull {
+        val selectedRoot = root(c, tree)
+        // Si el usuario seleccionó la propia carpeta INVENTARIO-SENE, esa carpeta ES
+        // el destino compartido; nunca crear otra INVENTARIO-SENE dentro de ella.
+        if (name.equals("INVENTARIO-SENE", true)) {
+            val selectedName = c.contentResolver.query(selectedRoot,
+                arrayOf(DocumentsContract.Document.COLUMN_DISPLAY_NAME), null, null, null)?.use { cur ->
+                if (cur.moveToFirst()) cur.getString(0) else null
+            }
+            if (selectedName.equals("INVENTARIO-SENE", true)) return selectedRoot
+        }
+        val existing = children(c, tree, selectedRoot).firstOrNull {
             it.first.equals(name, true) && it.second == DocumentsContract.Document.MIME_TYPE_DIR
         }?.third
         if (existing != null || !create) return existing
-        return DocumentsContract.createDocument(c.contentResolver, root(c, tree),
+        return DocumentsContract.createDocument(c.contentResolver, selectedRoot,
             DocumentsContract.Document.MIME_TYPE_DIR, name)
     }
 
