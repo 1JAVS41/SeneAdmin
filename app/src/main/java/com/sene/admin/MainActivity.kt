@@ -302,15 +302,13 @@ class MainActivity : AppCompatActivity() {
                 "Antes de continuar, el dueño debe preparar una carpeta compartida o sincronizada " +
                 "a la que tengan acceso los dos teléfonos. Si está en la nube, compártela también " +
                 "con la cuenta que se utiliza en el otro teléfono.\n\n" +
-                "1. Pulsa CONTINUAR y busca esa carpeta en el selector de archivos de Android.\n" +
-                "2. Selecciona la carpeta principal compartida (no crees ni elijas las subcarpetas internas de SENE).\n" +
+                "1. Pulsa CONTINUAR y busca la carpeta compartida en el selector de archivos de Android.\n" +
+                "2. Puedes seleccionar la carpeta principal compartida; si ya existe una carpeta llamada INVENTARIO-SENE, también puedes seleccionarla directamente.\n" +
                 "3. Pulsa «Usar esta carpeta» y después «Permitir», si Android lo solicita.\n" +
-                "4. Repite la vinculación en SENE VENTAS y SENE ADMIN, en sus respectivos teléfonos, " +
-                "seleccionando exactamente la misma carpeta compartida.\n" +
+                "4. Repite la vinculación en SENE VENTAS y SENE ADMIN, en sus respectivos teléfonos, seleccionando exactamente la misma carpeta.\n" +
                 "5. Introduce en ambas aplicaciones la misma clave del propietario.\n\n" +
-                "SENE organizará dentro de esa carpeta INVENTARIO-SENE, INVENTARIO-MAESTRO y REPORTES. " +
-                "No borres ni renombres esas carpetas. Si cambias la carpeta vinculada, los archivos " +
-                "que estén en la carpeta anterior no se trasladan automáticamente."
+                "SENE organizará INVENTARIO-SENE, INVENTARIO-MAESTRO y REPORTES. Si seleccionas directamente INVENTARIO-SENE, la aplicación utilizará esa carpeta como destino y no creará otra carpeta igual dentro. " +
+                "No borres ni renombres esas carpetas. Si cambias la carpeta vinculada, los archivos que estén en la carpeta anterior no se trasladan automáticamente."
             )
             .setPositiveButton("CONTINUAR") { _, _ -> SharedInventoryManager.chooseFolder(this) }
             .setNegativeButton("CANCELAR", null)
