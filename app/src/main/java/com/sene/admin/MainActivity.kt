@@ -396,57 +396,79 @@ class MainActivity : AppCompatActivity() {
         val key = OwnerKeyStore.read(this)
         if (key == null) { askOwnerKey(); return }
         if (SharedInventoryManager.savedTree(this) == null) { explainSharedFolder(); return }
-        try {
-            val snapshots = SharedInventoryManager.list(this, key, category)
-            val latest = snapshots.firstOrNull()
-            val title = if (category == "INVENTARIO_MAESTRO") "INVENTARIO MAESTRO" else "INVENTARIO SENE"
-            if (latest == null) {
-                info(title, "Todavía no hay respaldos disponibles de este inventario. Se actualizará al incorporar reportes válidos de SENE VENTAS.")
-                return
-            }
-            val content = LinearLayout(this).apply {
-                orientation = LinearLayout.VERTICAL
-                setPadding(14, 12, 14, 12)
-                setBackgroundColor(0xFFF4F7FB.toInt())
-            }
-            addLabel(content, "Última actualización", latest.updated, 0xFFDCEBFA.toInt())
-            addLabel(content, "Productos registrados", latest.items.size.toString(), 0xFFDDF4E5.toInt())
-            addLabel(content, "Respaldos disponibles", snapshots.size.toString(), 0xFFE8E5FA.toInt())
-            if (latest.legacy) addLabel(content, "Formato anterior", "Inventario TXT heredado. Se conserva el archivo original.", 0xFFFFF0D9.toInt())
-            latest.items.sortedBy { it.name.lowercase(Locale.ROOT) }.forEach { item ->
-                val card = LinearLayout(this).apply {
-                    orientation = LinearLayout.VERTICAL
-                    setPadding(14, 12, 14, 12)
-                    background = android.graphics.drawable.GradientDrawable().apply {
-                        setColor(-1)
-                        cornerRadius = 18f
-                    }
-                    elevation = 1f
+
+        val title = if (category == "INVENTARIO_MAESTRO") "INVENTARIO MAESTRO" else "INVENTARIO SENE"
+        val (progress, updateProgress) = createProcessingDialog(3)
+        updateProgress(0, "Preparando la revisión del inventario...")
+
+        // Dar oportunidad a Android de dibujar el diálogo antes de iniciar la lectura.
+        progress.window?.decorView?.post {
+            Thread {
+                var snapshots: List<SharedInventoryManager.InventorySnapshot>? = null
+                var failure: String? = null
+                try {
+                    runOnUiThread { if (!isFinishing && !isDestroyed) updateProgress(1, "Buscando los respaldos disponibles...") }
+                    snapshots = SharedInventoryManager.list(this@MainActivity, key, category)
+                    runOnUiThread { if (!isFinishing && !isDestroyed) updateProgress(2, "Leyendo y preparando los productos...") }
+                } catch (e: Exception) {
+                    failure = e.message ?: "Verifica la clave y los permisos. El archivo original permanece intacto."
                 }
-                card.addView(TextView(this).apply {
-                    text = item.name
-                    textSize = 16f
-                    typeface = Typeface.DEFAULT_BOLD
-                    setTextColor(0xFF123B68.toInt())
-                    setPadding(0, 0, 0, 7)
-                })
-                addLabel(card, "Código", item.code, 0xFFE8F1FB.toInt())
-                addLabel(card, "Precio", OwnerPayrollStore.money((item.price * 100.0).toLong()), 0xFFE8F1FB.toInt())
-                addLabel(card, "Existencia", item.stock.toString(), if (item.stock > 0) 0xFFDDF4E5.toInt() else 0xFFFFE8E5.toInt())
-                if (item.aisle.isNotBlank()) addLabel(card, "Pasillo", item.aisle)
-                if (item.shelf.isNotBlank()) addLabel(card, "Estante", item.shelf)
-                val lp = LinearLayout.LayoutParams(-1, -2)
-                lp.bottomMargin = 10
-                content.addView(card, lp)
-            }
-            AlertDialog.Builder(this).setTitle(title)
-                .setView(ScrollView(this).apply { addView(content) })
-                .setPositiveButton("CERRAR", null).show()
-        } catch (e: Exception) {
-            info("NO SE PUDO ABRIR EL INVENTARIO", e.message ?: "Verifica la clave y los permisos. El archivo original permanece intacto.")
+                runOnUiThread {
+                    progress.dismiss()
+                    if (isFinishing || isDestroyed) return@runOnUiThread
+                    if (failure != null) {
+                        info("NO SE PUDO ABRIR EL INVENTARIO", failure!!)
+                        return@runOnUiThread
+                    }
+                    val available = snapshots.orEmpty()
+                    val latest = available.firstOrNull()
+                    if (latest == null) {
+                        info(title, "Todavía no hay respaldos disponibles de este inventario. Se actualizará al incorporar reportes válidos de SENE VENTAS.")
+                        return@runOnUiThread
+                    }
+                    val content = LinearLayout(this@MainActivity).apply {
+                        orientation = LinearLayout.VERTICAL
+                        setPadding(14, 12, 14, 12)
+                        setBackgroundColor(0xFFF4F7FB.toInt())
+                    }
+                    addLabel(content, "Última actualización", latest.updated, 0xFFDCEBFA.toInt())
+                    addLabel(content, "Productos registrados", latest.items.size.toString(), 0xFFDDF4E5.toInt())
+                    addLabel(content, "Respaldos disponibles", available.size.toString(), 0xFFE8E5FA.toInt())
+                    if (latest.legacy) addLabel(content, "Formato anterior", "Inventario TXT heredado. Se conserva el archivo original.", 0xFFFFF0D9.toInt())
+                    latest.items.sortedBy { it.name.lowercase(Locale.ROOT) }.forEach { item ->
+                        val card = LinearLayout(this@MainActivity).apply {
+                            orientation = LinearLayout.VERTICAL
+                            setPadding(14, 12, 14, 12)
+                            background = android.graphics.drawable.GradientDrawable().apply {
+                                setColor(-1)
+                                cornerRadius = 18f
+                            }
+                            elevation = 1f
+                        }
+                        card.addView(TextView(this@MainActivity).apply {
+                            text = item.name
+                            textSize = 16f
+                            typeface = Typeface.DEFAULT_BOLD
+                            setTextColor(0xFF123B68.toInt())
+                            setPadding(0, 0, 0, 7)
+                        })
+                        addLabel(card, "Código", item.code, 0xFFE8F1FB.toInt())
+                        addLabel(card, "Precio", OwnerPayrollStore.money((item.price * 100.0).toLong()), 0xFFE8F1FB.toInt())
+                        addLabel(card, "Existencia", item.stock.toString(), if (item.stock > 0) 0xFFDDF4E5.toInt() else 0xFFFFE8E5.toInt())
+                        if (item.aisle.isNotBlank()) addLabel(card, "Pasillo", item.aisle)
+                        if (item.shelf.isNotBlank()) addLabel(card, "Estante", item.shelf)
+                        val lp = LinearLayout.LayoutParams(-1, -2)
+                        lp.bottomMargin = 10
+                        content.addView(card, lp)
+                    }
+                    updateProgress(3, "Inventario revisado")
+                    AlertDialog.Builder(this@MainActivity).setTitle(title)
+                        .setView(ScrollView(this@MainActivity).apply { addView(content) })
+                        .setPositiveButton("CERRAR", null).show()
+                }
+            }.start()
         }
     }
-
 
     private fun createProcessingDialog(totalSteps: Int): Pair<AlertDialog, (Int, String) -> Unit> {
         val total = totalSteps.coerceAtLeast(1)
@@ -548,6 +570,8 @@ class MainActivity : AppCompatActivity() {
         val (progress, updateProgress) = createProcessingDialog(progressTotal)
         updateProgress(0, "Preparando los reportes...")
 
+        // Esperar a que el diálogo se dibuje; así permanece visible durante el trabajo.
+        progress.window?.decorView?.post {
         Thread {
             fun publishProgress(completed: Int, message: String) {
                 runOnUiThread {
@@ -624,6 +648,7 @@ class MainActivity : AppCompatActivity() {
                     .setPositiveButton("ACEPTAR", null).show()
             }
         }.start()
+        }
     }
 
     private fun processReport(report: SeneReport, message: String, key: String) {
