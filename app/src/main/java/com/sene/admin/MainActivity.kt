@@ -12,6 +12,7 @@ import android.text.InputType
 import android.view.ViewGroup
 import android.widget.EditText
 import android.widget.LinearLayout
+import android.widget.ProgressBar
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
@@ -446,6 +447,75 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+
+    private fun createProcessingDialog(totalSteps: Int): Pair<AlertDialog, (Int, String) -> Unit> {
+        val total = totalSteps.coerceAtLeast(1)
+        val panel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(24, 22, 24, 20)
+            background = android.graphics.drawable.GradientDrawable().apply {
+                setColor(android.graphics.Color.WHITE)
+                cornerRadius = 24f
+                setStroke(1, 0xFFDCE7F3.toInt())
+            }
+        }
+        panel.addView(TextView(this).apply {
+            text = "SENE ADMIN"
+            textSize = 11f
+            letterSpacing = 0.12f
+            typeface = Typeface.DEFAULT_BOLD
+            setTextColor(0xFF2374C6.toInt())
+        })
+        panel.addView(TextView(this).apply {
+            text = "Organizando tu información"
+            textSize = 19f
+            typeface = Typeface.DEFAULT_BOLD
+            setTextColor(0xFF173C65.toInt())
+            setPadding(0, 5, 0, 4)
+        })
+        panel.addView(TextView(this).apply {
+            text = "Estamos trabajando. No cierres la aplicación."
+            textSize = 13f
+            setTextColor(0xFF64748B.toInt())
+            setPadding(0, 0, 0, 18)
+        })
+        val bar = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
+            max = 1000
+            progress = 0
+            progressTintList = android.content.res.ColorStateList.valueOf(0xFF2383D1.toInt())
+            progressBackgroundTintList = android.content.res.ColorStateList.valueOf(0xFFE6EDF5.toInt())
+        }
+        panel.addView(bar, LinearLayout.LayoutParams(-1, (10 * resources.displayMetrics.density).toInt()))
+        val status = TextView(this).apply {
+            text = "Preparando..."
+            textSize = 13f
+            typeface = Typeface.DEFAULT_BOLD
+            setTextColor(0xFF31516F.toInt())
+            setPadding(0, 14, 0, 3)
+        }
+        panel.addView(status)
+        val counter = TextView(this).apply {
+            text = "0 de $total pasos"
+            textSize = 12f
+            setTextColor(0xFF7A8A9B.toInt())
+        }
+        panel.addView(counter)
+        val dialog = AlertDialog.Builder(this)
+            .setView(panel)
+            .setCancelable(false)
+            .create()
+        dialog.show()
+        dialog.window?.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT))
+        dialog.window?.setLayout((resources.displayMetrics.widthPixels * 0.88f).toInt(), -2)
+        val update: (Int, String) -> Unit = { completed, message ->
+            val safe = completed.coerceIn(0, total)
+            bar.progress = (safe * 1000) / total
+            status.text = message
+            counter.text = "$safe de $total pasos"
+        }
+        return dialog to update
+    }
+
     private fun importReports(raw: String) {
         if (reportImportRunning) {
             Toast.makeText(this, "Ya se está procesando un reporte. Espera a que termine.", Toast.LENGTH_LONG).show()
@@ -473,14 +543,17 @@ class MainActivity : AppCompatActivity() {
             return
         }
         reportImportRunning = true
-        val progress = AlertDialog.Builder(this)
-            .setTitle("PROCESANDO REPORTES")
-            .setMessage("Estamos leyendo, organizando y guardando la información. No cierres SENE ADMIN.")
-            .setCancelable(false)
-            .create()
-        progress.show()
+        val expectedReports = Regex("SENE-ADMIN-REPORT\\|1").findAll(raw).count()
+        val progressTotal = (expectedReports + 1).coerceAtLeast(1)
+        val (progress, updateProgress) = createProcessingDialog(progressTotal)
+        updateProgress(0, "Preparando los reportes...")
 
         Thread {
+            fun publishProgress(completed: Int, message: String) {
+                runOnUiThread {
+                    if (!isFinishing && !isDestroyed) updateProgress(completed, message)
+                }
+            }
             var imported = 0
             var duplicates = 0
             val errors = mutableListOf<String>()
@@ -499,6 +572,7 @@ class MainActivity : AppCompatActivity() {
                 if (chunks.isEmpty()) errors.add("No se encontraron reportes SENE válidos. Pega el mensaje completo de WhatsApp.")
                 val knownIds = SeneAdminStore.reports(this@MainActivity).map { it.id }.toMutableSet()
                 chunks.forEachIndexed { index, message ->
+                    publishProgress(index, "Leyendo y organizando reporte ${index + 1} de ${chunks.size}...")
                     try {
                         val report = SeneReportReader.read(message, key)
                         if (!knownIds.add(report.id)) duplicates++
@@ -509,11 +583,14 @@ class MainActivity : AppCompatActivity() {
                     } catch (e: Exception) {
                         errors.add("Reporte " + (index + 1) + ": " + (e.message ?: "formato no válido"))
                     }
+                    publishProgress(index + 1, "Reporte ${index + 1} de ${chunks.size} revisado")
                 }
                 // Crear o actualizar la nómina solo después de procesar el lote completo.
+                publishProgress(expectedReports, "Actualizando la información de nómina...")
                 OwnerPayrollStore.profiles(this@MainActivity).filter { it.weeklySalaryCents > 0L }.forEach { profile ->
                     try { OwnerPayrollStore.createOrGetPayroll(this@MainActivity, profile.id) } catch (_: Exception) { }
                 }
+                publishProgress(progressTotal, "Preparando el resumen...")
             } catch (e: Exception) {
                 fatalError = e.message ?: "No se pudo completar la importación."
             }
