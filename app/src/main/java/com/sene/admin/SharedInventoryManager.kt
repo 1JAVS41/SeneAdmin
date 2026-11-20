@@ -58,11 +58,21 @@ object SharedInventoryManager {
     }
 
     private fun folder(c: Context, tree: Uri, name: String, create: Boolean): Uri? {
-        val existing = children(c, tree, root(c, tree)).firstOrNull {
+        val selectedRoot = root(c, tree)
+        // Si el usuario seleccionó la propia carpeta INVENTARIO-SENE, esa carpeta ES
+        // el destino compartido; nunca crear otra INVENTARIO-SENE dentro de ella.
+        if (name.equals("INVENTARIO-SENE", true)) {
+            val selectedName = c.contentResolver.query(selectedRoot,
+                arrayOf(DocumentsContract.Document.COLUMN_DISPLAY_NAME), null, null, null)?.use { cur ->
+                if (cur.moveToFirst()) cur.getString(0) else null
+            }
+            if (selectedName.equals("INVENTARIO-SENE", true)) return selectedRoot
+        }
+        val existing = children(c, tree, selectedRoot).firstOrNull {
             it.first.equals(name, true) && it.second == DocumentsContract.Document.MIME_TYPE_DIR
         }?.third
         if (existing != null || !create) return existing
-        return DocumentsContract.createDocument(c.contentResolver, root(c, tree),
+        return DocumentsContract.createDocument(c.contentResolver, selectedRoot,
             DocumentsContract.Document.MIME_TYPE_DIR, name)
     }
 
@@ -122,13 +132,29 @@ object SharedInventoryManager {
         val tree = savedTree(c) ?: throw IllegalStateException("Primero selecciona la carpeta INVENTARIO SENE.")
         val dirName = if (category == "INVENTARIO_MAESTRO") "INVENTARIO-MAESTRO" else "INVENTARIO-SENE"
         val dir = folder(c, tree, dirName, false) ?: return emptyList()
-        return children(c, tree, dir).filter { it.first.endsWith(".sene", true) || it.first.endsWith(".txt", true) }
-            .sortedByDescending { sortKey(it.first) }.mapNotNull { (name, _, uri) ->
-                try {
-                    val bytes = c.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return@mapNotNull null
-                    decode(c, bytes, ownerKey, category, name)
-                } catch (_: Exception) { null }
+        // Leer también las carpetas INVENTARIO-SENE anidadas por versiones anteriores.
+        // Así los respaldos existentes siguen visibles; no se mueven ni se eliminan.
+        val files = mutableListOf<Triple<String, String, Uri>>()
+        val visited = mutableSetOf<String>()
+        fun collect(parent: Uri, depth: Int) {
+            if (depth > 8) return
+            val parentId = DocumentsContract.getDocumentId(parent)
+            if (!visited.add(parentId)) return
+            for ((name, mime, uri) in children(c, tree, parent)) {
+                if (mime == DocumentsContract.Document.MIME_TYPE_DIR) {
+                    if (name.equals(dirName, true)) collect(uri, depth + 1)
+                } else if (name.endsWith(".sene", true) || name.endsWith(".txt", true)) {
+                    files.add(Triple(name, mime, uri))
+                }
             }
+        }
+        collect(dir, 0)
+        return files.sortedByDescending { sortKey(it.first) }.mapNotNull { (name, _, uri) ->
+            try {
+                val bytes = c.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return@mapNotNull null
+                decode(c, bytes, ownerKey, category, name)
+            } catch (_: Exception) { null }
+        }
     }
 
     fun save(c: Context, ownerKey: String, category: String, items: List<Item>, updatedOverride: String? = null): String {
