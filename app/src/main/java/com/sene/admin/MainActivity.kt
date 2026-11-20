@@ -20,6 +20,7 @@ import java.util.Locale
 class MainActivity : AppCompatActivity() {
     private lateinit var root: LinearLayout
     @Volatile private var reportImportRunning = false
+    private var pendingImportRaw: String? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -44,6 +45,11 @@ class MainActivity : AppCompatActivity() {
                 SharedInventoryManager.acceptFolder(this, uri)
                 Toast.makeText(this, "Carpeta INVENTARIO SENE vinculada", Toast.LENGTH_LONG).show()
                 showHome()
+                val pending = pendingImportRaw
+                if (!pending.isNullOrBlank()) {
+                    pendingImportRaw = null
+                    importReports(pending)
+                }
             } catch (e: Exception) {
                 info("NO SE PUDO VINCULAR", e.message ?: "Android no concedió acceso a la carpeta.")
             }
@@ -450,6 +456,16 @@ class MainActivity : AppCompatActivity() {
             askOwnerKey()
             return
         }
+        if (SharedInventoryManager.savedTree(this) == null) {
+            pendingImportRaw = raw
+            AlertDialog.Builder(this)
+                .setTitle("VINCULA LA CARPETA COMPARTIDA")
+                .setMessage("Para organizar automáticamente el reporte, guardar su respaldo cifrado y actualizar los inventarios, primero selecciona la carpeta compartida que utilizan SENE VENTAS y SENE ADMIN. El reporte quedará pendiente y se procesará al terminar.")
+                .setPositiveButton("VINCULAR CARPETA") { _, _ -> explainSharedFolder() }
+                .setNegativeButton("CANCELAR", null)
+                .show()
+            return
+        }
         reportImportRunning = true
         val progress = AlertDialog.Builder(this)
             .setTitle("PROCESANDO REPORTES")
@@ -467,9 +483,13 @@ class MainActivity : AppCompatActivity() {
                 // WhatsApp puede anteponer fecha, remitente o espacios al copiar el mensaje.
                 // Se localiza cada cabecera y se procesa el lote fuera del hilo de pantalla.
                 val normalized = raw.replace("\r\n", "\n").replace("\r", "\n")
-                val chunks = normalized.split(Regex("(?=SENE-ADMIN-REPORT\\|1)"))
-                    .map { it.trim() }
-                    .filter { it.startsWith("SENE-ADMIN-REPORT|1") }
+                // No descartar el primer reporte cuando WhatsApp antepone fecha o remitente.
+                // Extraer cada mensaje desde su cabecera real hasta la siguiente cabecera.
+                val headers = Regex("SENE-ADMIN-REPORT\\|1").findAll(normalized).toList()
+                val chunks = headers.mapIndexed { index, match ->
+                    val end = headers.getOrNull(index + 1)?.range?.first ?: normalized.length
+                    normalized.substring(match.range.first, end).trim()
+                }
                 val knownIds = SeneAdminStore.reports(this@MainActivity).map { it.id }.toMutableSet()
                 chunks.forEachIndexed { index, message ->
                     try {
@@ -531,11 +551,13 @@ class MainActivity : AppCompatActivity() {
 
         // El inventario del reporte se consulta desde el historial local y se muestra
         // automáticamente en INVENTARIO SENE; no requiere que el dueño lo separe.
-        if (SharedInventoryManager.savedTree(this) != null) {
-            try { SharedInventoryManager.saveReport(this, report, message, key) } catch (_: Exception) { }
-            try { SharedInventoryManager.updateMasterFromReport(this, key, report.body, report.date + " " + report.time) }
-            catch (_: Exception) { }
+        // La importación solo se confirma cuando el reporte cifrado quedó respaldado
+        // en la carpeta compartida y el inventario maestro pudo actualizarse si corresponde.
+        check(SharedInventoryManager.savedTree(this) != null) {
+            "Vincula la carpeta compartida antes de importar reportes."
         }
+        SharedInventoryManager.saveReport(this, report, message, key)
+        SharedInventoryManager.updateMasterFromReport(this, key, report.body, report.date + " " + report.time)
         check(SeneAdminStore.saveReport(this, report)) { "No se pudo registrar el reporte importado." }
     }
 
