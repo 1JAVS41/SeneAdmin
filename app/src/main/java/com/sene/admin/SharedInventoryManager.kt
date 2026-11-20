@@ -191,7 +191,10 @@ object SharedInventoryManager {
         val timePart = report.time.replace(":", "").take(6).padEnd(6, '0')
         val safeWorker = report.workerId.replace(Regex("[^A-Za-z0-9_-]"), "_").take(30)
         val name = "reporte-$datePart-$timePart-$safeWorker-${report.number}-${report.id.take(8)}.sene"
-        val uri = DocumentsContract.createDocument(c.contentResolver, dir, "application/octet-stream", name)
+        // El nombre incluye el ID único del reporte: reutilizarlo hace idempotente
+        // un reintento si falló otra parte de la importación después de guardar el archivo.
+        val existing = children(c, tree, dir).firstOrNull { it.first.equals(name, true) }?.third
+        val uri = existing ?: DocumentsContract.createDocument(c.contentResolver, dir, "application/octet-stream", name)
             ?: throw IllegalStateException("No se pudo crear el respaldo del reporte.")
         c.contentResolver.openOutputStream(uri, "w")?.use { it.write(encryptedMessage.toByteArray(Charsets.UTF_8)) }
             ?: throw IllegalStateException("No se pudo escribir el respaldo del reporte.")
