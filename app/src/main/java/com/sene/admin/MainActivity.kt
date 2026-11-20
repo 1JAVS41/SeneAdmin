@@ -47,11 +47,174 @@ class MainActivity : AppCompatActivity() {
                 SharedInventoryManager.acceptFolder(this, uri)
                 Toast.makeText(this, "Carpeta INVENTARIO SENE vinculada", Toast.LENGTH_LONG).show()
                 showHome()
-                val pending = pendingImportRaw ?: getSharedPreferences("sene_admin_pending_import", MODE_PRIVATE).getString("raw", null)
-                if (!pending.isNullOrBlank()) importReports(pending)
+                checkForWorkerRecovery {
+                    val pending = pendingImportRaw ?: getSharedPreferences("sene_admin_pending_import", MODE_PRIVATE).getString("raw", null)
+                    if (!pending.isNullOrBlank()) importReports(pending)
+                }
             } catch (e: Exception) {
                 info("NO SE PUDO VINCULAR", e.message ?: "Android no concedió acceso a la carpeta.")
             }
+        }
+    }
+
+    /**
+     * En un teléfono nuevo, ofrece recuperar los trabajadores y su historial desde
+     * los reportes cifrados que ya existen en la carpeta compartida. Nunca modifica
+     * ni elimina los archivos de origen.
+     */
+    private fun checkForWorkerRecovery(after: () -> Unit = {}) {
+        val migrationPrefs = getSharedPreferences("sene_admin_worker_recovery", MODE_PRIVATE)
+        if (migrationPrefs.getBoolean("completed", false)) {
+            after()
+            return
+        }
+        val key = OwnerKeyStore.read(this)
+        if (key.isNullOrBlank() || SharedInventoryManager.savedTree(this) == null) {
+            after()
+            return
+        }
+
+        val (progress, updateProgress) = createProcessingDialog(3)
+        updateProgress(0, "Buscando respaldos de trabajadores...")
+        progress.window?.decorView?.post {
+            Thread {
+                var reports: List<SeneReport> = emptyList()
+                var failure: String? = null
+                try {
+                    reports = SharedInventoryManager.archivedReports(this@MainActivity, key)
+                        .distinctBy { it.id }
+                    runOnUiThread {
+                        if (!isFinishing && !isDestroyed) updateProgress(2, "Identificando los perfiles disponibles...")
+                    }
+                } catch (e: Exception) {
+                    failure = e.message ?: "No se pudieron revisar los respaldos."
+                }
+
+                val workerReports = reports.filter { report ->
+                    !report.body.startsWith("SENE-ORDER|1") &&
+                        report.body.replace("\r", "").lines().any {
+                            it.trim().startsWith("TRABAJADOR:", true)
+                        }
+                }
+                val candidates = workerReports.groupBy { it.workerId }.mapNotNull { (workerId, items) ->
+                    val latest = items.maxWithOrNull(
+                        compareBy<SeneReport> { it.date }.thenBy { it.time }.thenBy { it.number }
+                    ) ?: return@mapNotNull null
+                    val name = latest.body.replace("\r", "").lines()
+                        .firstOrNull { it.trim().startsWith("TRABAJADOR:", true) }
+                        ?.substringAfter(":")?.trim().orEmpty().ifBlank { workerId }
+                    workerId to name
+                }.filterNot { (workerId, _) -> OwnerPayrollStore.profile(this@MainActivity, workerId) != null }
+                    .sortedBy { it.second.lowercase(Locale.ROOT) }
+
+                runOnUiThread {
+                    progress.dismiss()
+                    if (isFinishing || isDestroyed) return@runOnUiThread
+                    if (failure != null) {
+                        info("NO SE PUDIERON REVISAR LOS RESPALDOS", failure!!)
+                        after()
+                        return@runOnUiThread
+                    }
+                    if (candidates.isEmpty()) {
+                        after()
+                        return@runOnUiThread
+                    }
+
+                    val names = candidates.joinToString("\n") { "• " + it.second }
+                    AlertDialog.Builder(this@MainActivity)
+                        .setTitle("RECUPERAR TRABAJADORES")
+                        .setMessage(
+                            "Encontramos estos perfiles en los reportes guardados de INVENTARIO SENE:\n\n" +
+                                names +
+                                "\n\n¿Reconoces a estos trabajadores? Si respondes SÍ, SENE ADMIN recuperará sus perfiles, " +
+                                "asistencias, solicitudes y movimientos de nómina que estén disponibles en los reportes, " +
+                                "además del historial de reportes. Los archivos originales no se modificarán."
+                        )
+                        .setPositiveButton("SÍ, LOS RECONOZCO") { _, _ ->
+                            restoreArchivedWorkerHistory(reports, after)
+                        }
+                        .setNegativeButton("NO LOS RECONOZCO") { _, _ ->
+                            migrationPrefs.edit().putBoolean("completed", true).commit()
+                            after()
+                        }
+                        .setCancelable(false)
+                        .show()
+                }
+            }.start()
+        }
+    }
+
+    /** Reproduce localmente los reportes en orden cronológico para reconstruir los datos disponibles. */
+    private fun restoreArchivedWorkerHistory(reports: List<SeneReport>, after: () -> Unit = {}) {
+        val ordered = reports.sortedWith(
+            compareBy<SeneReport> { it.date }.thenBy { it.time }.thenBy { it.number }
+        )
+        val total = (ordered.size + 1).coerceAtLeast(1)
+        val (progress, updateProgress) = createProcessingDialog(total)
+        updateProgress(0, "Preparando la recuperación...")
+        progress.window?.decorView?.post {
+            Thread {
+                var restoredProfiles = 0
+                var restoredReports = 0
+                val errors = mutableListOf<String>()
+                ordered.forEachIndexed { index, report ->
+                    try {
+                        val ok = if (report.body.startsWith("SENE-ORDER|1")) {
+                            OwnerPayrollStore.importOrder(this@MainActivity, report)
+                        } else {
+                            OwnerPayrollStore.importProfile(this@MainActivity, report)
+                        }
+                        if (!ok) {
+                            errors.add("No se pudieron recuperar los datos de ${report.workerId}.")
+                        } else {
+                            if (!report.body.startsWith("SENE-ORDER|1")) restoredProfiles++
+                            if (SeneAdminStore.saveReport(this@MainActivity, report)) restoredReports++
+                            else errors.add("No se pudo guardar localmente el reporte ${report.number}.")
+                        }
+                    } catch (e: Exception) {
+                        errors.add("Reporte ${report.number}: " + (e.message ?: "error de recuperación"))
+                    }
+                    val completed = index + 1
+                    runOnUiThread {
+                        if (!isFinishing && !isDestroyed) {
+                            updateProgress(completed, "Recuperando historial ${completed} de ${ordered.size}...")
+                        }
+                    }
+                }
+                try {
+                    OwnerPayrollStore.profiles(this@MainActivity)
+                        .filter { it.weeklySalaryCents > 0L }
+                        .forEach { profile ->
+                            OwnerPayrollStore.createOrGetPayroll(this@MainActivity, profile.id)
+                        }
+                } catch (e: Exception) {
+                    errors.add(e.message ?: "No se pudo preparar la nómina.")
+                }
+
+                runOnUiThread {
+                    progress.dismiss()
+                    if (isFinishing || isDestroyed) return@runOnUiThread
+                    if (errors.isEmpty()) {
+                        getSharedPreferences("sene_admin_worker_recovery", MODE_PRIVATE)
+                            .edit().putBoolean("completed", true).commit()
+                    }
+                    showHome()
+                    val summary = buildString {
+                        append("Perfiles y datos de trabajadores procesados: ").append(restoredProfiles)
+                        append("\nReportes recuperados: ").append(restoredReports)
+                        if (errors.isNotEmpty()) {
+                            append("\n\nAlgunos datos no se pudieron recuperar:")
+                            errors.take(6).forEach { append("\n• ").append(it) }
+                            if (errors.size > 6) append("\nY ").append(errors.size - 6).append(" más.")
+                            append("\n\nPuedes volver a vincular la carpeta para reintentar. Los reportes ya recuperados no se duplicarán.")
+                        } else {
+                            append("\n\nLa recuperación terminó. Los respaldos originales permanecen intactos.")
+                        }
+                    }
+                    AlertDialog.Builder(this@MainActivity).setTitle("RECUPERACIÓN TERMINADA")
+                        .setMessage(summary).setPositiveButton("ACEPTAR") { _, _ -> after() }.show()
+                }
+            }.start()
         }
     }
 
