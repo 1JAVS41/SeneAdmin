@@ -1,7 +1,7 @@
 name: Compilar APK SENE ADMIN
 on:
   push:
-    branches: [main, work/sene-admin-foundation, work/payroll-dashboard-v2]
+    branches: [main, work/sene-admin-foundation, work/payroll-dashboard-v2, fix/no-nested-inventario-sene-payroll]
   pull_request:
     branches: [main]
   workflow_dispatch:
