@@ -400,7 +400,7 @@ class MainActivity : AppCompatActivity() {
             val latest = snapshots.firstOrNull()
             val title = if (category == "INVENTARIO_MAESTRO") "INVENTARIO MAESTRO" else "INVENTARIO SENE"
             if (latest == null) {
-                info(title, "Todavía no hay productos registrados en el inventario maestro. Se actualizará al incorporar reportes válidos de SENE VENTAS.")
+                info(title, "Todavía no hay respaldos disponibles de este inventario. Se actualizará al incorporar reportes válidos de SENE VENTAS.")
                 return
             }
             val content = LinearLayout(this).apply {
