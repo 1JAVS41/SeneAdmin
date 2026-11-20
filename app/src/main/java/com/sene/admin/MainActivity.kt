@@ -19,6 +19,7 @@ import java.util.Locale
 
 class MainActivity : AppCompatActivity() {
     private lateinit var root: LinearLayout
+    @Volatile private var reportImportRunning = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -439,46 +440,82 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun importReports(raw: String) {
+        if (reportImportRunning) {
+            Toast.makeText(this, "Ya se está procesando un reporte. Espera a que termine.", Toast.LENGTH_LONG).show()
+            return
+        }
         val key = OwnerKeyStore.read(this)
         if (key == null) {
             info("CONFIGURA TU CLAVE", "Primero introduce la clave del propietario para leer estos reportes.")
             askOwnerKey()
             return
         }
-        // WhatsApp puede anteponer fecha, remitente o espacios al copiar el mensaje.
-        // Se localiza cada cabecera donde aparezca y se entrega al lector desde su primera línea real.
-        val normalized = raw.replace("\r\n", "\n").replace("\r", "\n")
-        val chunks = normalized.split(Regex("(?=SENE-ADMIN-REPORT\\|1)"))
-            .map { it.trim() }
-            .filter { it.startsWith("SENE-ADMIN-REPORT|1") }
-        var imported = 0
-        var duplicates = 0
-        val errors = mutableListOf<String>()
-        chunks.forEachIndexed { index, message ->
+        reportImportRunning = true
+        val progress = AlertDialog.Builder(this)
+            .setTitle("PROCESANDO REPORTES")
+            .setMessage("Estamos leyendo, organizando y guardando la información. No cierres SENE ADMIN.")
+            .setCancelable(false)
+            .create()
+        progress.show()
+
+        Thread {
+            var imported = 0
+            var duplicates = 0
+            val errors = mutableListOf<String>()
+            var fatalError: String? = null
             try {
-                val report = SeneReportReader.read(message, key)
-                if (SeneAdminStore.reports(this).any { it.id == report.id }) duplicates++
-                else { processReport(report, message, key); imported++ }
+                // WhatsApp puede anteponer fecha, remitente o espacios al copiar el mensaje.
+                // Se localiza cada cabecera y se procesa el lote fuera del hilo de pantalla.
+                val normalized = raw.replace("\r\n", "\n").replace("\r", "\n")
+                val chunks = normalized.split(Regex("(?=SENE-ADMIN-REPORT\\|1)"))
+                    .map { it.trim() }
+                    .filter { it.startsWith("SENE-ADMIN-REPORT|1") }
+                val knownIds = SeneAdminStore.reports(this@MainActivity).map { it.id }.toMutableSet()
+                chunks.forEachIndexed { index, message ->
+                    try {
+                        val report = SeneReportReader.read(message, key)
+                        if (!knownIds.add(report.id)) duplicates++
+                        else {
+                            processReport(report, message, key)
+                            imported++
+                        }
+                    } catch (e: Exception) {
+                        errors.add("Reporte " + (index + 1) + ": " + (e.message ?: "formato no válido"))
+                    }
+                }
+                // Crear o actualizar la nómina solo después de procesar el lote completo.
+                OwnerPayrollStore.profiles(this@MainActivity).filter { it.weeklySalaryCents > 0L }.forEach { profile ->
+                    try { OwnerPayrollStore.createOrGetPayroll(this@MainActivity, profile.id) } catch (_: Exception) { }
+                }
             } catch (e: Exception) {
-                errors.add("Reporte " + (index + 1) + ": " + (e.message ?: "formato no válido"))
+                fatalError = e.message ?: "No se pudo completar la importación."
             }
-        }
-        // Crear o actualizar la nómina solo después de procesar el lote completo.
-        OwnerPayrollStore.profiles(this).filter { it.weeklySalaryCents > 0L }.forEach { profile ->
-            try { OwnerPayrollStore.createOrGetPayroll(this, profile.id) } catch (_: Exception) { }
-        }
-        showHome()
-        val summary = buildString {
-            append("Nuevos reportes: ").append(imported)
-            append("\nDuplicados omitidos: ").append(duplicates)
-            if (errors.isNotEmpty()) {
-                append("\n\nNo se pudieron leer:")
-                errors.take(8).forEach { append("\n• ").append(it) }
-                if (errors.size > 8) append("\nY ").append(errors.size - 8).append(" más.")
+
+            runOnUiThread {
+                reportImportRunning = false
+                if (isFinishing || isDestroyed) {
+                    progress.dismiss()
+                    return@runOnUiThread
+                }
+                progress.dismiss()
+                if (fatalError != null) {
+                    info("NO SE COMPLETÓ LA IMPORTACIÓN", fatalError!!)
+                    return@runOnUiThread
+                }
+                showHome()
+                val summary = buildString {
+                    append("Nuevos reportes: ").append(imported)
+                    append("\nDuplicados omitidos: ").append(duplicates)
+                    if (errors.isNotEmpty()) {
+                        append("\n\nNo se pudieron leer:")
+                        errors.take(8).forEach { append("\n• ").append(it) }
+                        if (errors.size > 8) append("\nY ").append(errors.size - 8).append(" más.")
+                    }
+                }
+                AlertDialog.Builder(this@MainActivity).setTitle("IMPORTACIÓN TERMINADA").setMessage(summary)
+                    .setPositiveButton("ACEPTAR", null).show()
             }
-        }
-        AlertDialog.Builder(this).setTitle("IMPORTACIÓN TERMINADA").setMessage(summary)
-            .setPositiveButton("ACEPTAR", null).show()
+        }.start()
     }
 
     private fun processReport(report: SeneReport, message: String, key: String) {
