@@ -404,7 +404,7 @@ class MainActivity : AppCompatActivity() {
         // Dar oportunidad a Android de dibujar el diálogo antes de iniciar la lectura.
         progress.window?.decorView?.post {
             Thread {
-                var snapshots: List<SharedInventoryManager.InventorySnapshot>? = null
+                var snapshots: List<SharedInventoryManager.Snapshot>? = null
                 var failure: String? = null
                 try {
                     runOnUiThread { if (!isFinishing && !isDestroyed) updateProgress(1, "Buscando los respaldos disponibles...") }
