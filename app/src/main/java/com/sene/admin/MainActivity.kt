@@ -24,6 +24,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        pendingImportRaw = getSharedPreferences("sene_admin_pending_import", MODE_PRIVATE).getString("raw", null)
         showHome()
         OwnerKeyStore.read(this)?.let { SharedInventoryManager.cleanupAllIfDue(this, it) }
         if (!OwnerKeyStore.hasKey(this)) askOwnerKey() else if (!AccessPinStore.hasPin(this)) askCreatePin() else handleIncoming(intent)
@@ -45,11 +46,8 @@ class MainActivity : AppCompatActivity() {
                 SharedInventoryManager.acceptFolder(this, uri)
                 Toast.makeText(this, "Carpeta INVENTARIO SENE vinculada", Toast.LENGTH_LONG).show()
                 showHome()
-                val pending = pendingImportRaw
-                if (!pending.isNullOrBlank()) {
-                    pendingImportRaw = null
-                    importReports(pending)
-                }
+                val pending = pendingImportRaw ?: getSharedPreferences("sene_admin_pending_import", MODE_PRIVATE).getString("raw", null)
+                if (!pending.isNullOrBlank()) importReports(pending)
             } catch (e: Exception) {
                 info("NO SE PUDO VINCULAR", e.message ?: "Android no concedió acceso a la carpeta.")
             }
@@ -69,56 +67,61 @@ class MainActivity : AppCompatActivity() {
             setBackgroundColor(0xFFF4F7FB.toInt())
         }
         root.addView(TextView(this).apply {
-            text = "SENE ADMIN"; textSize = 25f
+            text = "SENE ADMIN"; textSize = 26f
             typeface = Typeface.DEFAULT_BOLD; setTextColor(0xFF123B68.toInt())
         })
         root.addView(TextView(this).apply {
-            text = "Control automático de nómina y reportes."
-            textSize = 14f; setTextColor(0xFF526579.toInt()); setPadding(0, 6, 0, 22)
+            text = "Todo tu negocio, organizado en cinco accesos."
+            textSize = 14f; setTextColor(0xFF526579.toInt()); setPadding(0, 6, 0, 20)
         })
-        fun mainOption(label: String, subtitle: String, color: Int = 0xFF1769AA.toInt(), action: () -> Unit) {
+        fun mainOption(label: String, subtitle: String, action: () -> Unit) {
             val card = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
-                gravity = android.view.Gravity.CENTER
-                setPadding(18, 26, 18, 26)
-                setBackgroundColor(color)
-                elevation = 4f
+                gravity = android.view.Gravity.CENTER_VERTICAL
+                setPadding(20, 18, 20, 18)
+                background = android.graphics.drawable.GradientDrawable().apply {
+                    setColor(-1); cornerRadius = 18f; setStroke(1, 0xFFDCE5F2.toInt())
+                }
+                elevation = 2f
                 isClickable = true
                 isFocusable = true
                 setOnClickListener { action() }
             }
             card.addView(TextView(this).apply {
-                text = label; textSize = 21f; typeface = Typeface.DEFAULT_BOLD
-                gravity = android.view.Gravity.CENTER; setTextColor(-1)
+                text = label; textSize = 18f; typeface = Typeface.DEFAULT_BOLD
+                setTextColor(0xFF173C65.toInt())
             })
             card.addView(TextView(this).apply {
                 text = subtitle; textSize = 13f
-                gravity = android.view.Gravity.CENTER; setTextColor(0xFFE7F2FF.toInt())
-                setPadding(0, 8, 0, 0)
+                setTextColor(0xFF64748B.toInt()); setPadding(0, 5, 0, 0)
             })
             val lp = LinearLayout.LayoutParams(-1, ViewGroup.LayoutParams.WRAP_CONTENT)
-            lp.bottomMargin = 16
+            lp.bottomMargin = 11
             root.addView(card, lp)
         }
-        mainOption("NÓMINA", "Perfiles de trabajadores y pagos") {
-            startActivity(Intent(this, PayrollActivity::class.java))
+        mainOption("NÓMINA", "Consultar pagos y administrar trabajadores") {
+            AlertDialog.Builder(this).setTitle("NÓMINA")
+                .setItems(arrayOf("VER NÓMINA", "ADMINISTRAR TRABAJADORES")) { _, which ->
+                    if (which == 0) startActivity(Intent(this, PayrollActivity::class.java))
+                    else showWorkerAdministration()
+                }.setNegativeButton("CERRAR", null).show()
         }
-        mainOption("ADMINISTRAR TRABAJADORES", "Seleccionar y eliminar un perfil") {
-            showWorkerAdministration()
+        mainOption("OTROS REPORTES", "Ventas, caja y pendientes de inventario") {
+            AlertDialog.Builder(this).setTitle("OTROS REPORTES")
+                .setItems(arrayOf("REPORTES DE TRABAJADORES", "REVISAR PENDIENTES")) { _, which ->
+                    if (which == 0) showReports() else showPendingReviews()
+                }.setNegativeButton("CERRAR", null).show()
         }
-        mainOption("REPORTES", "Ventas, caja y actividad importante") {
-            showReports()
+        mainOption("INVENTARIO SENE", "Consultar inventario recibido e inventario maestro") {
+            AlertDialog.Builder(this).setTitle("INVENTARIOS")
+                .setItems(arrayOf("INVENTARIO SENE", "INVENTARIO MAESTRO")) { _, which ->
+                    showInventory(if (which == 0) "INVENTARIO_SENE" else "INVENTARIO_MAESTRO")
+                }.setNegativeButton("CERRAR", null).show()
         }
-        mainOption("INVENTARIO", "Consultar el inventario maestro actualizado", 0xFF218A57.toInt()) {
-            showInventory("INVENTARIO_MAESTRO")
-        }
-        mainOption("PEGAR REPORTES DE WHATSAPP", "Importar reportes enviados por tus trabajadores", 0xFF218A57.toInt()) {
+        mainOption("PEGAR REPORTES DE WHATSAPP", "Pega el mensaje completo y pulsa PROCESAR") {
             showPasteDialog()
         }
-        mainOption("REVISAR PENDIENTES", "Productos sin stock y productos dañados", 0xFFB66A24.toInt()) {
-            showPendingReviews()
-        }
-        mainOption("AJUSTES", "Configuración protegida", 0xFFE7A0A0.toInt()) {
+        mainOption("AJUSTES", "Clave, huella y carpeta compartida") {
             showSettings()
         }
         root.addView(TextView(this).apply {
@@ -456,6 +459,11 @@ class MainActivity : AppCompatActivity() {
         }
         if (SharedInventoryManager.savedTree(this) == null) {
             pendingImportRaw = raw
+            val saved = getSharedPreferences("sene_admin_pending_import", MODE_PRIVATE).edit().putString("raw", raw).commit()
+            if (!saved) {
+                info("NO SE PUDO CONSERVAR EL REPORTE", "No se pudo guardar temporalmente el texto. Vuelve a pegar el reporte antes de vincular la carpeta.")
+                return
+            }
             AlertDialog.Builder(this)
                 .setTitle("VINCULA LA CARPETA COMPARTIDA")
                 .setMessage("Para organizar automáticamente el reporte, guardar su respaldo cifrado y actualizar los inventarios, primero selecciona la carpeta compartida que utilizan SENE VENTAS y SENE ADMIN. El reporte quedará pendiente y se procesará al terminar.")
@@ -488,6 +496,7 @@ class MainActivity : AppCompatActivity() {
                     val end = headers.getOrNull(index + 1)?.range?.first ?: normalized.length
                     normalized.substring(match.range.first, end).trim()
                 }
+                if (chunks.isEmpty()) errors.add("No se encontraron reportes SENE válidos. Pega el mensaje completo de WhatsApp.")
                 val knownIds = SeneAdminStore.reports(this@MainActivity).map { it.id }.toMutableSet()
                 chunks.forEachIndexed { index, message ->
                     try {
@@ -521,6 +530,10 @@ class MainActivity : AppCompatActivity() {
                     return@runOnUiThread
                 }
                 showHome()
+                if (errors.isEmpty() && (imported > 0 || duplicates > 0)) {
+                    getSharedPreferences("sene_admin_pending_import", MODE_PRIVATE).edit().remove("raw").commit()
+                    pendingImportRaw = null
+                }
                 val summary = buildString {
                     append("Nuevos reportes: ").append(imported)
                     append("\nDuplicados omitidos: ").append(duplicates)
