@@ -137,7 +137,7 @@ object OwnerPayrollStore {
         val day=isoDate(entry).takeIf { entry.isNotBlank() }?.takeIf { it.length==10 } ?: isoDate(r.date)
         if(day.isBlank())return true
         val closingType=reportValue(lines,"TIPO DE CIERRE").trim().uppercase(Locale.ROOT)
-        val status=if(isStarting) "WORKING" else if(closingType=="EARLY_EXIT" || closingType=="EARLY EXIT" || type=="EARLY_EXIT") "EARLY_EXIT" else "WORKED"
+        val status=if(isStarting) "WORKING" else if(closingType=="EARLY_EXIT" || closingType=="EARLY EXIT" || type=="EARLY_EXIT") "EARLY_EXIT" else if(closingType=="ADMIN_FORCED" || closingType=="ADMINISTRATIVE") "ADMIN_CLOSED" else "WORKED"
         val all=try{JSONObject(prefs(c).getString("attendance_days","{}")?:"{}")}catch(_:Exception){JSONObject()}
         val worker=all.optJSONObject(r.workerId) ?: JSONObject()
         val previous=worker.optJSONObject(day) ?: JSONObject()
@@ -180,6 +180,7 @@ object OwnerPayrollStore {
             val status=when {
                 stored=="EARLY_EXIT" -> "EARLY_EXIT"
                 stored=="WORKED" -> "WORKED"
+                stored=="ADMIN_CLOSED" -> "ADMIN_CLOSED"
                 stored=="WORKING" -> "WORKING"
                 key>todayKey || !isScheduled -> "FUTURE"
                 else -> if (createdDate.isNotBlank() && key < createdDate) "NO_RECORD" else "NOT_WORKED"
@@ -283,19 +284,23 @@ object OwnerPayrollStore {
         var reason=""
         var description=""
         var status=""
+        var requestId=""
         fun flush(){
             if(kind.isBlank()||amount<=0L||status.equals("LIQUIDADO",true))return
             val type=if(kind.contains("PRÉSTAMO",true)||kind.contains("PRESTAMO",true))"PRESTAMO" else "CONSUMO"
             val day=isoDate(date)
             if(day.isBlank())return
             val details=listOf(reason.takeIf{it.isNotBlank()}?.let{"Motivo: $it"},description.takeIf{it.isNotBlank()}?.let{"Descripción: $it"}).filterNotNull().joinToString(" · ")
+            // El ID compartido con la orden de WhatsApp hace idempotente la importación:
+            // si la orden ya llegó, el reporte de cierre actualiza el mismo movimiento y no crea otro.
             val duplicate=existing.any{old->
-                old.type==type&&old.amountCents==amount&&isoDate(old.date)==day&&
-                    (old.description==details||old.description==description||description.isNotBlank()&&old.description.contains(description,true))
-            }||pending.any{old->old.type==type&&old.amountCents==amount&&old.date==day&&old.description==details}
+                (requestId.isNotBlank()&&old.id==requestId) ||
+                    (old.type==type&&old.amountCents==amount&&isoDate(old.date)==day&&
+                    (old.description==details||old.description==description||description.isNotBlank()&&old.description.contains(description,true)))
+            }||pending.any{old->(requestId.isNotBlank()&&old.id==requestId)||old.type==type&&old.amountCents==amount&&old.date==day&&old.description==details}
             if(!duplicate){
                 val identity=listOf(profileId,type,date,amount.toString(),reason,description).joinToString("|")
-                val id="report-request-"+UUID.nameUUIDFromBytes(identity.toByteArray(Charsets.UTF_8)).toString()
+                val id=requestId.ifBlank{"report-request-"+UUID.nameUUIDFromBytes(identity.toByteArray(Charsets.UTF_8)).toString()}
                 val payrollPeriod=periodForDate(day,payDayNumber(profile(c,profileId)?.payDay.orEmpty()))
                 if(!payrolls(c,profileId).any{it.period==payrollPeriod&&it.status=="PAGADA"})
                     pending.add(Entry(id,profileId,type,day,details,amount,""))
@@ -309,8 +314,9 @@ object OwnerPayrollStore {
                 flush()
                 kind=value.substringBefore("|").trim()
                 amount=parseMoneyCents(value.substringAfter("|"))?:0L
-                date="";reason="";description="";status=""
-            }else if(value.startsWith("FECHA:",true))date=value.substringAfter(":").trim()
+                date="";reason="";description="";status="";requestId=""
+            }else if(value.startsWith("SOLICITUD_ID:",true))requestId=value.substringAfter(":").trim()
+            else if(value.startsWith("FECHA:",true))date=value.substringAfter(":").trim()
             else if(value.startsWith("MOTIVO:",true))reason=value.substringAfter(":").trim()
             else if(value.startsWith("DESCRIPCIÓN:",true)||value.startsWith("DESCRIPCION:",true))description=value.substringAfter(":").trim()
             else if(value.startsWith("ESTADO:",true))status=value.substringAfter(":").trim()
