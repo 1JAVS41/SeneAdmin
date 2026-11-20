@@ -475,12 +475,23 @@ object OwnerPayrollStore {
         val profileId = fields["WORKER_ID"].orEmpty().ifBlank { report.workerId }
         val type = when (fields["ORDER_TYPE"]) { "CONSUMO" -> "CONSUMO"; "PRESTAMO" -> "PRESTAMO"; else -> return false }
         val cents = fields["AMOUNT_CENTS"]?.toLongOrNull()?.takeIf { it > 0 } ?: return false
-        if (orderId.isBlank() || entries(c, profileId).any { it.id == orderId }) return true
+        if (orderId.isBlank()) return false
+        val orderDate = fields["DATE"].orEmpty()
+        val orderDescription = fields["DESCRIPTION"].orEmpty().trim()
+        val currentEntries = entries(c, profileId)
+        if (currentEntries.any { it.id == orderId }) return true
+        // También cubre el orden inverso: si primero se pegó el reporte de cierre,
+        // no se vuelve a crear el mismo movimiento cuando después llega la orden.
+        val alreadyInClosingReport = currentEntries.any { old ->
+            old.type == type && old.amountCents == cents && isoDate(old.date) == isoDate(orderDate) &&
+                orderDescription.isNotBlank() &&
+                (old.description.equals(orderDescription, true) || old.description.contains(orderDescription, true))
+        }
+        if (alreadyInClosingReport) return true
         val name = fields["WORKER_NAME"].orEmpty().ifBlank { profileId }
         val old = profile(c, profileId)
         if (old == null) upsertProfile(c, Profile(profileId, name, "", 0L, "", "", 8))
-        val entry = Entry(orderId, profileId, type, fields["DATE"].orEmpty(), fields["DESCRIPTION"].orEmpty(),
-            cents, "")
+        val entry = Entry(orderId, profileId, type, orderDate, orderDescription, cents, "")
         val a = array(c, ENTRIES)
         a.put(JSONObject().put("id", entry.id).put("profileId", entry.profileId).put("type", entry.type)
             .put("date", entry.date).put("description", entry.description).put("amount", entry.amountCents).put("payrollId", ""))
