@@ -16,6 +16,13 @@ class PayrollDateRulesTest {
         assertEquals("2026-11-16",PayrollDateRules.mondayStartDate("2026-11-22"))
     }
 
+    @Test fun weeklySalaryAbsenceAndEarlyExitCalculationsMatch() {
+        assertEquals(42_000L,PayrollDateRules.proratedGross(70_000L,3,5))
+        assertEquals(14_000L,PayrollDateRules.absenceDeduction(70_000L,5,1))
+        assertEquals(3_500L,PayrollDateRules.earlyExitDeduction(70_000L,5,8,2L*60L*60L*1000L))
+        assertEquals(19_500L,PayrollDateRules.netPay(42_000L,14_000L,3_500L,3_000L,2_000L))
+    }
+
     @Test fun attendanceStatesRemainDistinct() {
         assertEquals("EARLY_EXIT",PayrollDateRules.attendanceStatus("EARLY_EXIT","2026-11-18","2026-11-18",true,"2026-11-01"))
         assertEquals("ADMIN_CLOSED",PayrollDateRules.attendanceStatus("ADMIN_CLOSED","2026-11-18","2026-11-18",true,"2026-11-01"))
