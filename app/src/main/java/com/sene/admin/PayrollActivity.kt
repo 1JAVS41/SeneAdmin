@@ -151,7 +151,7 @@ class PayrollActivity : Activity() {
                     if(amount==null||amount<=0L){salary.error="Sueldo semanal inválido";valid=false}
                     if(payDay.isBlank()){day.error="Día de pago obligatorio";valid=false}
                     if(workDays.isBlank()){days.error="Días laborales obligatorios";valid=false}
-                    if(workHours !in 1..24){hours.error="Indica entre 1 y 24 horas";valid=false}
+                    if(workHours==null||workHours !in 1..24){hours.error="Indica entre 1 y 24 horas";valid=false}
                     if(!valid)return@setOnClickListener
                     val ok=OwnerPayrollStore.upsertProfile(this,OwnerPayrollStore.Profile(workerId,workerName,cleanPhone,amount!!,payDay,workDays,workHours!!))
                     if(!ok){Toast.makeText(this,"No se pudo guardar el perfil",Toast.LENGTH_LONG).show();return@setOnClickListener}
