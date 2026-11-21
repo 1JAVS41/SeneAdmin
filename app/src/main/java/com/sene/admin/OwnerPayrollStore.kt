@@ -428,7 +428,7 @@ object OwnerPayrollStore {
             val onOrAfterStart=effectiveStart.isBlank() || entryDate.isNotBlank() && entryDate>=effectiveStart
             val belongsToPeriod=periodForDate(it.date,payDay)==week
             onOrAfterStart && it.payrollId !in paidPayrollIds &&
-                (belongsToPeriod || it.payrollId==payrollId || it.payrollId in pendingPayrollIds && entryDate.isNotBlank() && entryDate<=week)
+                (belongsToPeriod || it.payrollId==payrollId || it.payrollId in pendingPayrollIds && entryDate>=weekStart && entryDate<=week)
         }
         val absence=relevant.filter{it.type=="FALTA"}.sumOf{it.amountCents}
         val earlyExit=relevant.filter{it.type=="SALIDA_ANTICIPADA"}.sumOf{it.amountCents}
