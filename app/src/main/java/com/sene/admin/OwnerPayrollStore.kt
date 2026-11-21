@@ -435,7 +435,10 @@ object OwnerPayrollStore {
 
     fun createOrGetPayroll(c:Context,profileId:String):Payroll{
         val p=profile(c,profileId)?:throw IllegalStateException("Perfil no encontrado")
+        require(p.name.isNotBlank()) { "Falta el nombre del trabajador" }
+        require(p.phone.filter{it.isDigit()}.length in 10..15) { "Configura el celular del trabajador antes de generar la nómina" }
         require(p.weeklySalaryCents>0L) { "El perfil todavía no tiene sueldo semanal configurado" }
+        require(p.hours in 1..24) { "Configura las horas de jornada antes de generar la nómina" }
         require(p.workDays.isNotBlank()) { "Configura los días laborales antes de generar la nómina" }
         val payDay = when (p.payDay.trim().lowercase(Locale("es","MX"))) {
             "domingo" -> Calendar.SUNDAY
@@ -455,6 +458,7 @@ object OwnerPayrollStore {
         val effectiveStart=payrollStartDate(p)
         val payableStart=if(effectiveStart.isBlank()||effectiveStart<weekStart)weekStart else effectiveStart
         val payableDays=scheduledDayCount(payableStart,week,p.workDays)
+        require(payableDays>0) { "Configura días laborales válidos antes de generar la nómina" }
         val configuredDays=p.workDays.split(Regex("[,;|]")).map{it.trim().lowercase(Locale("es","MX"))
             .replace("á","a").replace("é","e").replace("í","i").replace("ó","o").replace("ú","u")}
             .filter{it.isNotBlank()}.distinct().size
