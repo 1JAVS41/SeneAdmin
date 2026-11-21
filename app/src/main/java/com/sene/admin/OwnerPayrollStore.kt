@@ -399,8 +399,8 @@ object OwnerPayrollStore {
             else -> throw IllegalStateException("Configura un día de pago válido")
         }
         val week=Calendar.getInstance().apply {
-            val delta=(get(Calendar.DAY_OF_WEEK)-payDay+7)%7
-            add(Calendar.DAY_OF_YEAR,-delta)
+            val delta=(payDay-get(Calendar.DAY_OF_WEEK)+7)%7
+            add(Calendar.DAY_OF_YEAR,delta)
         }.let{SimpleDateFormat("yyyy-MM-dd",Locale.US).format(it.time)}
         val weekStart=try{val d=SimpleDateFormat("yyyy-MM-dd",Locale.US).parse(week)!!;Calendar.getInstance().apply{time=d;add(Calendar.DAY_OF_YEAR,-6)}.let{SimpleDateFormat("yyyy-MM-dd",Locale.US).format(it.time)}}catch(_:Exception){week}
         val effectiveStart=payrollStartDate(p)
@@ -447,8 +447,8 @@ object OwnerPayrollStore {
     private fun periodForDate(value:String,payDay:Int):String {
         val date = try { SimpleDateFormat("yyyy-MM-dd",Locale.US).apply { isLenient=false }.parse(value) } catch (_:Exception) { null } ?: return ""
         val cal = Calendar.getInstance().apply { time = date }
-        val delta=(cal.get(Calendar.DAY_OF_WEEK)-payDay+7)%7
-        cal.add(Calendar.DAY_OF_YEAR,-delta)
+        val delta=(payDay-cal.get(Calendar.DAY_OF_WEEK)+7)%7
+        cal.add(Calendar.DAY_OF_YEAR,delta)
         return SimpleDateFormat("yyyy-MM-dd",Locale.US).format(cal.time)
     }
     private fun payrollJson(p:Payroll)=JSONObject().put("id",p.id).put("profileId",p.profileId).put("period",p.period)
