@@ -418,10 +418,17 @@ object OwnerPayrollStore {
             return payrolls(c,profileId).first { it.period==week }
         }
         val payrollId=existing?.optString("id")?.takeIf{it.isNotBlank()}?:UUID.randomUUID().toString()
+        // Las nóminas pendientes creadas por la versión anterior pueden tener
+        // movimientos ligados al periodo equivocado. Se vuelven a asociar por fecha
+        // al periodo semanal correcto, pero nunca se toman movimientos ya pagados.
+        val paidPayrollIds=payrolls(c,profileId).filter{it.status=="PAGADA"}.map{it.id}.toSet()
+        val pendingPayrollIds=payrolls(c,profileId).filter{it.status!="PAGADA"}.map{it.id}.toSet()
         val relevant=entries(c,profileId).filter {
             val entryDate=isoDate(it.date)
             val onOrAfterStart=effectiveStart.isBlank() || entryDate.isNotBlank() && entryDate>=effectiveStart
-            onOrAfterStart && ((it.payrollId==payrollId) || (it.payrollId.isBlank() && periodForDate(it.date,payDay)==week))
+            val belongsToPeriod=periodForDate(it.date,payDay)==week
+            onOrAfterStart && it.payrollId !in paidPayrollIds &&
+                (belongsToPeriod || it.payrollId==payrollId || it.payrollId in pendingPayrollIds && entryDate.isNotBlank() && entryDate<=week)
         }
         val absence=relevant.filter{it.type=="FALTA"}.sumOf{it.amountCents}
         val earlyExit=relevant.filter{it.type=="SALIDA_ANTICIPADA"}.sumOf{it.amountCents}
@@ -438,7 +445,7 @@ object OwnerPayrollStore {
         val relevantIds=relevant.map{it.id}.toSet()
         for(i in 0 until entryArray.length()){
             val item=entryArray.optJSONObject(i)?:continue
-            if(item.optString("profileId")==profileId && item.optString("id") in relevantIds && item.optString("payrollId").isBlank())
+            if(item.optString("profileId")==profileId && item.optString("id") in relevantIds)
                 item.put("payrollId",payrollId)
         }
         check(saveArray(c,ENTRIES,entryArray)){"No se pudieron asociar los movimientos a la nómina"}
