@@ -1,4 +1,5 @@
 name: Compilar APK SENE ADMIN
+# Ejecuta primero pruebas de periodo, asistencia y cálculo de nómina.
 on:
   push:
     branches: [main, work/sene-admin-foundation, work/payroll-dashboard-v2, fix/no-nested-inventario-sene-payroll, fix/payroll-zero-net-modern-ui, fix/payroll-attendance-consistency]
