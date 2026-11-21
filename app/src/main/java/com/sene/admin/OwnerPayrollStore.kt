@@ -118,7 +118,7 @@ object OwnerPayrollStore {
             val salary=parseMoneyCents(reportValue(lines,"SUELDO SEMANAL"))?:old?.weeklySalaryCents?:0L
             val payDay=reportValue(lines,"DÍA DE PAGO","DIA DE PAGO").ifBlank{old?.payDay.orEmpty()}
             val workDays=reportValue(lines,"DÍAS LABORALES","DIAS LABORALES").ifBlank{old?.workDays.orEmpty()}
-            val hours=Regex("\\d+").find(reportValue(lines,"HORAS DE JORNADA"))?.value?.toIntOrNull()?.coerceIn(1,24)?:old?.hours?:0
+            val hours=Regex("\\d+").find(reportValue(lines,"HORAS DE JORNADA"))?.value?.toIntOrNull()?.takeIf{it in 1..24}?:old?.hours?:0
             val createdAt=reportValue(lines,"FECHA Y HORA DE CREACIÓN DEL PERFIL","FECHA Y HORA DE CREACION DEL PERFIL").ifBlank{old?.createdAt.orEmpty()}
             val firstShiftAt=reportValue(lines,"FECHA Y HORA DEL PRIMER INICIO DE TURNO").ifBlank{old?.firstShiftAt.orEmpty()}
             if(!upsertProfile(c,Profile(r.workerId,name,phone,salary,payDay,workDays,hours,createdAt,firstShiftAt)))return false
