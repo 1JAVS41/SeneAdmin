@@ -137,7 +137,13 @@ object OwnerPayrollStore {
         val day=isoDate(entry).takeIf { entry.isNotBlank() }?.takeIf { it.length==10 } ?: isoDate(r.date)
         if(day.isBlank())return true
         val closingType=reportValue(lines,"TIPO DE CIERRE").trim().uppercase(Locale.ROOT)
-        val status=if(isStarting) "WORKING" else if(closingType=="EARLY_EXIT" || closingType=="EARLY EXIT" || type=="EARLY_EXIT") "EARLY_EXIT" else if(closingType=="ADMIN_FORCED" || closingType=="ADMINISTRATIVE") "ADMIN_CLOSED" else "WORKED"
+            .replace(' ','_').replace('-','_')
+        val status=when {
+            isStarting -> "WORKING"
+            closingType in setOf("ADMIN_FORCED","ADMINISTRATIVE","ADMIN_CLOSED") -> "ADMIN_CLOSED"
+            closingType in setOf("EARLY_EXIT","EARLY") || type=="EARLY_EXIT" -> "EARLY_EXIT"
+            else -> "WORKED"
+        }
         val all=try{JSONObject(prefs(c).getString("attendance_days","{}")?:"{}")}catch(_:Exception){JSONObject()}
         val worker=all.optJSONObject(r.workerId) ?: JSONObject()
         val previous=worker.optJSONObject(day) ?: JSONObject()
@@ -160,39 +166,29 @@ object OwnerPayrollStore {
     fun weekAttendance(c:Context,p:Profile):List<DayAttendance> {
         val all=try{JSONObject(prefs(c).getString("attendance_days","{}")?:"{}")}catch(_:Exception){JSONObject()}
         val worker=all.optJSONObject(p.id) ?: JSONObject()
-        val createdDate=payrollStartDate(p)
-        val today=Calendar.getInstance()
-        val payDay=payDayNumber(p.payDay)
-        val weekEnd=Calendar.getInstance().apply {
-            val delta=(payDay-get(Calendar.DAY_OF_WEEK)+7)%7
-            add(Calendar.DAY_OF_YEAR,delta)
-        }
-        val weekStart=Calendar.getInstance().apply {
-            timeInMillis=weekEnd.timeInMillis
-            add(Calendar.DAY_OF_YEAR,-6)
-        }
+        val effectiveStart=payrollStartDate(p)
+        val todayKey=SimpleDateFormat("yyyy-MM-dd",Locale.US).format(Date())
+        val mondayKey=PayrollDateRules.mondayStartDate(todayKey)
+        val monday=try {
+            Calendar.getInstance().apply {
+                time=SimpleDateFormat("yyyy-MM-dd",Locale.US).apply{isLenient=false}.parse(mondayKey)?:Date()
+            }
+        } catch(_:Exception) { Calendar.getInstance() }
         val scheduled=p.workDays.split(Regex("[,;|]")).map{it.trim().lowercase(Locale("es","MX"))
             .replace("á","a").replace("é","e").replace("í","i").replace("ó","o").replace("ú","u")}
             .filter{it.isNotBlank()}.toSet()
         return (0..6).map { index ->
-            val date=Calendar.getInstance().apply { timeInMillis=weekStart.timeInMillis; add(Calendar.DAY_OF_YEAR,index) }
+            val date=Calendar.getInstance().apply { timeInMillis=monday.timeInMillis; add(Calendar.DAY_OF_YEAR,index) }
             val dayName=when(date.get(Calendar.DAY_OF_WEEK)) {
                 Calendar.SUNDAY->"domingo";Calendar.MONDAY->"lunes";Calendar.TUESDAY->"martes"
                 Calendar.WEDNESDAY->"miercoles";Calendar.THURSDAY->"jueves";Calendar.FRIDAY->"viernes";else->"sabado"
             }
             val key=SimpleDateFormat("yyyy-MM-dd",Locale.US).format(date.time)
             val record=worker.optJSONObject(key) ?: JSONObject()
-            val stored=record.optString("status")
-            val isScheduled=scheduled.isEmpty() || dayName in scheduled
-            val todayKey=SimpleDateFormat("yyyy-MM-dd",Locale.US).format(today.time)
-            val status=when {
-                stored=="EARLY_EXIT" -> "EARLY_EXIT"
-                stored=="WORKED" -> "WORKED"
-                stored=="ADMIN_CLOSED" -> "ADMIN_CLOSED"
-                stored=="WORKING" -> "WORKING"
-                key>todayKey || !isScheduled -> "FUTURE"
-                else -> if (createdDate.isNotBlank() && key < createdDate) "NO_RECORD" else "NOT_WORKED"
-            }
+            val isScheduled=dayName in scheduled
+            val status=PayrollDateRules.attendanceStatus(
+                record.optString("status"),key,todayKey,isScheduled,effectiveStart
+            )
             DayAttendance(dayName.uppercase(Locale("es","MX")),status,record.optString("started"),record.optString("closed"))
         }
     }
@@ -406,10 +402,9 @@ object OwnerPayrollStore {
             "sábado", "sabado" -> Calendar.SATURDAY
             else -> throw IllegalStateException("Configura un día de pago válido")
         }
-        val week=Calendar.getInstance().apply {
-            val delta=(payDay-get(Calendar.DAY_OF_WEEK)+7)%7
-            add(Calendar.DAY_OF_YEAR,delta)
-        }.let{SimpleDateFormat("yyyy-MM-dd",Locale.US).format(it.time)}
+        // Mismo anclaje que SENE VENTAS: el periodo se identifica por el último día de pago.
+        val week=PayrollDateRules.periodEndForDate(SimpleDateFormat("yyyy-MM-dd",Locale.US).format(Date()),payDay)
+        require(week.isNotBlank()) { "No se pudo determinar el periodo de pago" }
         val weekStart=try{val d=SimpleDateFormat("yyyy-MM-dd",Locale.US).parse(week)!!;Calendar.getInstance().apply{time=d;add(Calendar.DAY_OF_YEAR,-6)}.let{SimpleDateFormat("yyyy-MM-dd",Locale.US).format(it.time)}}catch(_:Exception){week}
         val effectiveStart=payrollStartDate(p)
         val payableStart=if(effectiveStart.isBlank()||effectiveStart<weekStart)weekStart else effectiveStart
@@ -473,13 +468,8 @@ object OwnerPayrollStore {
         check(saveArray(c,ENTRIES,entryArray)){"No se pudieron asociar los movimientos a la nómina"}
         return payroll
     }
-    private fun periodForDate(value:String,payDay:Int):String {
-        val date = try { SimpleDateFormat("yyyy-MM-dd",Locale.US).apply { isLenient=false }.parse(value) } catch (_:Exception) { null } ?: return ""
-        val cal = Calendar.getInstance().apply { time = date }
-        val delta=(payDay-cal.get(Calendar.DAY_OF_WEEK)+7)%7
-        cal.add(Calendar.DAY_OF_YEAR,delta)
-        return SimpleDateFormat("yyyy-MM-dd",Locale.US).format(cal.time)
-    }
+    private fun periodForDate(value:String,payDay:Int):String =
+        PayrollDateRules.periodEndForDate(isoDate(value),payDay)
     private fun payrollJson(p:Payroll)=JSONObject().put("id",p.id).put("profileId",p.profileId).put("period",p.period)
         .put("gross",p.grossCents).put("absence",p.absenceCents).put("earlyExit",p.earlyExitCents).put("loan",p.loanCents).put("consumption",p.consumptionCents)
         .put("net",p.netCents).put("status",p.status).put("createdAt",p.createdAt).put("paidAt",p.paidAt).put("delivered",p.deliveredCents)
