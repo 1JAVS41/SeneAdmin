@@ -190,7 +190,7 @@ object OwnerPayrollStore {
                 stored=="WORKED" -> "WORKED"
                 stored=="ADMIN_CLOSED" -> "ADMIN_CLOSED"
                 stored=="WORKING" -> "WORKING"
-                key>todayKey || !isScheduled -> "FUTURE"
+                key>=todayKey || !isScheduled -> "FUTURE"
                 else -> if (createdDate.isNotBlank() && key < createdDate) "NO_RECORD" else "NOT_WORKED"
             }
             DayAttendance(dayName.uppercase(Locale("es","MX")),status,record.optString("started"),record.optString("closed"))
@@ -392,6 +392,47 @@ object OwnerPayrollStore {
         return count
     }
 
+    private fun syncUnrecordedAbsences(c:Context,p:Profile,periodEnd:String,periodStart:String) {
+        if(payrolls(c,p.id).any{it.period==periodEnd&&it.status=="PAGADA"})return
+        val effective=payrollStartDate(p)
+        val start=if(effective.isNotBlank()&&effective>periodStart)effective else periodStart
+        val today=SimpleDateFormat("yyyy-MM-dd",Locale.US).format(Date())
+        val yesterday=SimpleDateFormat("yyyy-MM-dd",Locale.US).format(Calendar.getInstance().apply{add(Calendar.DAY_OF_YEAR,-1)}.time)
+        val end=if(today<=periodEnd) minOf(periodEnd,yesterday) else periodEnd
+        val scheduled=p.workDays.split(Regex("[,;|]")).map{it.trim().lowercase(Locale("es","MX"))
+            .replace("á","a").replace("é","e").replace("í","i").replace("ó","o").replace("ú","u")}
+            .filter{it.isNotBlank()}.toSet()
+        val worker=try{JSONObject(prefs(c).getString("attendance_days","{}")?: "{}").optJSONObject(p.id)?:JSONObject()}catch(_:Exception){JSONObject()}
+        var missing=0
+        if(start.isNotBlank()&&start<=end&&scheduled.isNotEmpty()){
+            val cal=Calendar.getInstance().apply{time=SimpleDateFormat("yyyy-MM-dd",Locale.US).parse(start)?:return}
+            val last=SimpleDateFormat("yyyy-MM-dd",Locale.US).parse(end)?:return
+            while(!cal.time.after(last)){
+                val day=when(cal.get(Calendar.DAY_OF_WEEK)){
+                    Calendar.MONDAY->"lunes";Calendar.TUESDAY->"martes";Calendar.WEDNESDAY->"miercoles"
+                    Calendar.THURSDAY->"jueves";Calendar.FRIDAY->"viernes";Calendar.SATURDAY->"sabado";else->"domingo"
+                }
+                if(day in scheduled){
+                    val key=SimpleDateFormat("yyyy-MM-dd",Locale.US).format(cal.time)
+                    val status=worker.optJSONObject(key)?.optString("status").orEmpty()
+                    if(status !in setOf("WORKING","WORKED","EARLY_EXIT","ADMIN_CLOSED"))missing++
+                }
+                cal.add(Calendar.DAY_OF_YEAR,1)
+            }
+        }
+        val daysPerWeek=scheduled.size
+        val amount=if(daysPerWeek>0)(p.weeklySalaryCents/daysPerWeek*missing).coerceAtMost(p.weeklySalaryCents) else 0L
+        val id="attendance-absence-"+p.id+"-"+periodEnd
+        val a=array(c,ENTRIES)
+        val index=(0 until a.length()).firstOrNull{a.optJSONObject(it)?.optString("id")==id}
+        val old=index?.let{a.optJSONObject(it)}
+        val entry=JSONObject().put("id",id).put("profileId",p.id).put("type","FALTA")
+            .put("date",periodEnd).put("description","Días laborales sin registro de asistencia: $missing")
+            .put("amount",amount).put("payrollId",old?.optString("payrollId").orEmpty())
+        if(index==null)a.put(entry)else a.put(index,entry)
+        check(saveArray(c,ENTRIES,a)){"No se pudieron sincronizar las faltas de asistencia"}
+    }
+
     fun createOrGetPayroll(c:Context,profileId:String):Payroll{
         val p=profile(c,profileId)?:throw IllegalStateException("Perfil no encontrado")
         require(p.weeklySalaryCents>0L) { "El perfil todavía no tiene sueldo semanal configurado" }
@@ -419,6 +460,8 @@ object OwnerPayrollStore {
             .filter{it.isNotBlank()}.distinct().size
         val proratedGross=if(configuredDays>0)(p.weeklySalaryCents*payableDays/configuredDays).coerceAtMost(p.weeklySalaryCents) else 0L
         val payrollArray=array(c,PAYROLLS)
+        // Sincroniza faltas desde el calendario diario antes de calcular los descuentos.
+        syncUnrecordedAbsences(c,p,week,weekStart)
         val profileEntries=entries(c,profileId)
         val currentPeriodIndex=(0 until payrollArray.length()).firstOrNull {
             val item=payrollArray.optJSONObject(it)
