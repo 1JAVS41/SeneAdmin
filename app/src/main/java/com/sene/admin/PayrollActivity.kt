@@ -131,15 +131,29 @@ class PayrollActivity : Activity() {
     }
     private fun addProfile() {
         val name=field("Nombre del trabajador"); val id=field("ID único del trabajador"); val phone=field("Teléfono")
-        val salary=field("Sueldo semanal",true); val day=field("Día de pago (ej. Viernes)"); val days=field("Días laborales")
-        val box=LinearLayout(this).apply { orientation=1;setPadding(20,8,20,4);listOf(name,id,phone,salary,day,days).forEach{addView(it)} }
-        AlertDialog.Builder(this).setTitle("NUEVO PERFIL").setMessage("Usa un ID estable para relacionar reportes y nóminas.")
+        val salary=field("Sueldo semanal",true); val day=field("Día de pago (ej. Viernes)")
+        val days=field("Días laborales (ej. Lunes, Martes, Miércoles)")
+        val hours=field("Horas por jornada",true)
+        val box=LinearLayout(this).apply { orientation=1;setPadding(20,8,20,4);listOf(name,id,phone,salary,day,days,hours).forEach{addView(it)} }
+        AlertDialog.Builder(this).setTitle("NUEVO PERFIL").setMessage("Completa todos los datos obligatorios. Las horas de jornada no se asignan automáticamente.")
             .setView(ScrollView(this).apply{addView(box)}).setPositiveButton("GUARDAR",null).setNegativeButton("CANCELAR",null).create().also{d->
                 d.setOnShowListener{d.getButton(-1).setOnClickListener{
                     val workerId=id.text.toString().trim();val workerName=name.text.toString().trim()
+                    val cleanPhone=phone.text.toString().filter{it.isDigit()}
                     val amount=moneyToCents(salary.text.toString())
-                    if(workerId.isBlank()||workerName.isBlank()||amount==null){id.error="ID requerido";if(workerName.isBlank())name.error="Nombre requerido";if(amount==null)salary.error="Sueldo inválido";return@setOnClickListener}
-                    val ok=OwnerPayrollStore.upsertProfile(this,OwnerPayrollStore.Profile(workerId,workerName,phone.text.toString().trim(),amount,day.text.toString().trim(),days.text.toString().trim(),8))
+                    val workHours=hours.text.toString().trim().toIntOrNull()
+                    val payDay=day.text.toString().trim()
+                    val workDays=days.text.toString().trim()
+                    var valid=true
+                    if(workerId.isBlank()){id.error="ID requerido";valid=false}
+                    if(workerName.isBlank()){name.error="Nombre requerido";valid=false}
+                    if(cleanPhone.length !in 10..15){phone.error="Teléfono obligatorio, con 10 a 15 dígitos";valid=false}
+                    if(amount==null||amount<=0L){salary.error="Sueldo semanal inválido";valid=false}
+                    if(payDay.isBlank()){day.error="Día de pago obligatorio";valid=false}
+                    if(workDays.isBlank()){days.error="Días laborales obligatorios";valid=false}
+                    if(workHours !in 1..24){hours.error="Indica entre 1 y 24 horas";valid=false}
+                    if(!valid)return@setOnClickListener
+                    val ok=OwnerPayrollStore.upsertProfile(this,OwnerPayrollStore.Profile(workerId,workerName,cleanPhone,amount!!,payDay,workDays,workHours!!))
                     if(!ok){Toast.makeText(this,"No se pudo guardar el perfil",Toast.LENGTH_LONG).show();return@setOnClickListener}
                     d.dismiss();render()
                 }}
