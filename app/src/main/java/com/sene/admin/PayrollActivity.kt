@@ -193,7 +193,7 @@ class PayrollActivity : Activity() {
                 "WORKING" -> "En curso"
                 "WORKED" -> "Jornada completada"
                 "ADMIN_CLOSED" -> "Cierre administrativo"
-                "NOT_WORKED" -> "Sin asistencia"
+                "NOT_WORKED" -> "Sin registro de asistencia"
                 else -> ""
             }
             val times=listOf(day.started.takeIf{it.isNotBlank()}?.let{"Entrada: $it"},day.closed.takeIf{it.isNotBlank()}?.let{"Salida: $it"}).filterNotNull().joinToString(" · ")
