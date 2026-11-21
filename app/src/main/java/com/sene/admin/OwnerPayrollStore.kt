@@ -221,7 +221,7 @@ object OwnerPayrollStore {
         val count=reportedCount.coerceAtMost(eligibleDays)
         if(payrolls(c,r.workerId).any{it.period==payrollPeriod&&it.status=="PAGADA"})
             return prefs(c).edit().putString(stampKey,stamp).commit()
-        val amount=(p.weeklySalaryCents/daysPerWeek*count).coerceAtMost(p.weeklySalaryCents)
+        val amount=PayrollDateRules.absenceDeduction(p.weeklySalaryCents,daysPerWeek,count)
         val id="attendance-absence-"+r.workerId+"-"+payrollPeriod
         val a=array(c,ENTRIES)
         val index=(0 until a.length()).firstOrNull{a.optJSONObject(it)?.optString("id")==id}
@@ -262,8 +262,7 @@ object OwnerPayrollStore {
         if(daysPerWeek<=0)return true
         val period=periodForDate(SimpleDateFormat("yyyy-MM-dd",Locale.US).format(Date(start)),payDayNumber(p.payDay))
         if(period.isBlank()||payrolls(c,r.workerId).any{it.period==period&&it.status=="PAGADA"})return true
-        val amount=(p.weeklySalaryCents.toDouble()/daysPerWeek/p.hours*(missingMillis/3600000.0)).toLong()
-            .coerceAtMost(p.weeklySalaryCents)
+        val amount=PayrollDateRules.earlyExitDeduction(p.weeklySalaryCents,daysPerWeek,p.hours,missingMillis)
         if(amount<=0L)return true
         val id="early-exit-"+r.id
         val a=array(c,ENTRIES)
@@ -412,7 +411,7 @@ object OwnerPayrollStore {
         val configuredDays=p.workDays.split(Regex("[,;|]")).map{it.trim().lowercase(Locale("es","MX"))
             .replace("á","a").replace("é","e").replace("í","i").replace("ó","o").replace("ú","u")}
             .filter{it.isNotBlank()}.distinct().size
-        val proratedGross=if(configuredDays>0)(p.weeklySalaryCents*payableDays/configuredDays).coerceAtMost(p.weeklySalaryCents) else 0L
+        val proratedGross=PayrollDateRules.proratedGross(p.weeklySalaryCents,payableDays,configuredDays)
         val payrollArray=array(c,PAYROLLS)
         val profileEntries=entries(c,profileId)
         val currentPeriodIndex=(0 until payrollArray.length()).firstOrNull {
@@ -451,9 +450,9 @@ object OwnerPayrollStore {
         val earlyExit=relevant.filter{it.type=="SALIDA_ANTICIPADA"}.sumOf{it.amountCents}
         val loan=relevant.filter{it.type=="PRESTAMO"}.sumOf{it.amountCents}
         val consumption=relevant.filter{it.type=="CONSUMO"}.sumOf{it.amountCents}
+        val net=PayrollDateRules.netPay(proratedGross,absence,earlyExit,loan,consumption)
         val allowedAbsence=absence.coerceAtMost(proratedGross)
         val allowedEarlyExit=earlyExit.coerceAtMost((proratedGross-allowedAbsence).coerceAtLeast(0L))
-        val net=(proratedGross-allowedAbsence-allowedEarlyExit-loan-consumption).coerceAtLeast(0L)
         val payroll=Payroll(payrollId,profileId,week,proratedGross,allowedAbsence,allowedEarlyExit,loan,consumption,net,"PENDIENTE",
             existing?.optString("createdAt")?.takeIf{it.isNotBlank()}?:SimpleDateFormat("yyyy-MM-dd HH:mm:ss",Locale.US).format(Date()),"",0L)
         if(existingIndex==null) payrollArray.put(payrollJson(payroll)) else payrollArray.put(existingIndex,payrollJson(payroll))
