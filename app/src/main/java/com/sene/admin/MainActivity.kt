@@ -225,81 +225,121 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showHome() {
+        fun dp(value: Int) = (value * resources.displayMetrics.density + 0.5f).toInt()
+        val navy = 0xFF173A78.toInt()
+        val blue = 0xFF3478D4.toInt()
+        val pale = 0xFFF1F5FB.toInt()
         root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(22, 24, 22, 24)
-            setBackgroundColor(0xFFF4F7FB.toInt())
+            setPadding(dp(18), dp(18), dp(18), dp(28))
+            setBackgroundColor(pale)
         }
-        root.addView(TextView(this).apply {
-            text = "SENE ADMIN"; textSize = 26f
-            typeface = Typeface.DEFAULT_BOLD; setTextColor(0xFF123B68.toInt())
+        val hero = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(22), dp(22), dp(22), dp(22))
+            background = android.graphics.drawable.GradientDrawable(
+                android.graphics.drawable.GradientDrawable.Orientation.TL_BR,
+                intArrayOf(navy, blue, 0xFF69A6F2.toInt())
+            ).apply { cornerRadius = dp(25).toFloat() }
+            elevation = dp(5).toFloat()
+        }
+        hero.addView(TextView(this).apply {
+            text = "SENE / ADMIN"; textSize = 13f; letterSpacing = .16f
+            typeface = Typeface.DEFAULT_BOLD; setTextColor(0xFFDCEBFF.toInt())
         })
-        root.addView(TextView(this).apply {
-            text = "Todo tu negocio, organizado en cinco accesos."
-            textSize = 14f; setTextColor(0xFF526579.toInt()); setPadding(0, 6, 0, 20)
+        hero.addView(TextView(this).apply {
+            text = "Tu negocio,\nbajo control."; textSize = 29f
+            typeface = Typeface.create("sans-serif", Typeface.BOLD)
+            setTextColor(-1); setPadding(0, dp(8), 0, dp(5))
         })
-        fun mainOption(label: String, subtitle: String, action: () -> Unit) {
+        hero.addView(TextView(this).apply {
+            text = "Administración, trabajadores e inventario en un solo lugar."
+            textSize = 13f; setTextColor(0xFFE5EEFF.toInt())
+        })
+        root.addView(hero, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(20) })
+
+        root.addView(TextView(this).apply {
+            text = "ACCESOS PRINCIPALES"; textSize = 12f; letterSpacing = .12f
+            typeface = Typeface.DEFAULT_BOLD; setTextColor(0xFF60738F.toInt())
+            setPadding(dp(3), 0, 0, dp(10))
+        })
+
+        fun mainOption(icon: String, label: String, subtitle: String, action: () -> Unit) {
             val card = LinearLayout(this).apply {
-                orientation = LinearLayout.VERTICAL
+                orientation = LinearLayout.HORIZONTAL
                 gravity = android.view.Gravity.CENTER_VERTICAL
-                setPadding(20, 18, 20, 18)
+                setPadding(dp(15), dp(15), dp(16), dp(15))
                 background = android.graphics.drawable.GradientDrawable().apply {
-                    setColor(-1); cornerRadius = 18f; setStroke(1, 0xFFDCE5F2.toInt())
+                    setColor(-1); cornerRadius = dp(19).toFloat()
+                    setStroke(dp(1), 0xFFDCE6F3.toInt())
                 }
-                elevation = 2f
-                isClickable = true
-                isFocusable = true
+                elevation = dp(2).toFloat()
+                isClickable = true; isFocusable = true
                 setOnClickListener { action() }
             }
-            card.addView(TextView(this).apply {
-                text = label; textSize = 18f; typeface = Typeface.DEFAULT_BOLD
-                setTextColor(0xFF173C65.toInt())
+            val symbol = TextView(this).apply {
+                text = icon; textSize = 23f; gravity = android.view.Gravity.CENTER
+                setTextColor(navy)
+                background = android.graphics.drawable.GradientDrawable().apply {
+                    setColor(0xFFEAF2FD.toInt()); cornerRadius = dp(15).toFloat()
+                }
+            }
+            card.addView(symbol, LinearLayout.LayoutParams(dp(52), dp(52)))
+            val labels = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(13), 0, dp(6), 0)
+            }
+            labels.addView(TextView(this).apply {
+                text = label; textSize = 15f; typeface = Typeface.DEFAULT_BOLD
+                setTextColor(0xFF193B68.toInt())
             })
-            card.addView(TextView(this).apply {
-                text = subtitle; textSize = 13f
-                setTextColor(0xFF64748B.toInt()); setPadding(0, 5, 0, 0)
+            labels.addView(TextView(this).apply {
+                text = subtitle; textSize = 12f; setTextColor(0xFF687B96.toInt())
+                setPadding(0, dp(4), 0, 0)
             })
-            val lp = LinearLayout.LayoutParams(-1, ViewGroup.LayoutParams.WRAP_CONTENT)
-            lp.bottomMargin = 11
-            root.addView(card, lp)
+            card.addView(labels, LinearLayout.LayoutParams(0, -2, 1f))
+            card.addView(TextView(this).apply {
+                text = "›"; textSize = 28f; setTextColor(0xFF4777B9.toInt())
+            })
+            root.addView(card, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(10) })
         }
-        mainOption("NÓMINA", "Consultar pagos y administrar trabajadores") {
-            AlertDialog.Builder(this).setTitle("NÓMINA")
-                .setItems(arrayOf("VER NÓMINA", "ADMINISTRAR TRABAJADORES")) { _, which ->
-                    if (which == 0) startActivity(Intent(this, PayrollActivity::class.java))
-                    else showWorkerAdministration()
-                }.setNegativeButton("CERRAR", null).show()
+
+        mainOption("₱", "NÓMINA", "Consultar pagos y revisar asistencia") {
+            startActivity(Intent(this, PayrollActivity::class.java))
         }
-        mainOption("OTROS REPORTES", "Ventas, caja y pendientes de inventario") {
-            AlertDialog.Builder(this).setTitle("OTROS REPORTES")
-                .setItems(arrayOf("REPORTES DE TRABAJADORES", "REVISAR PENDIENTES")) { _, which ->
-                    if (which == 0) showReports() else showPendingReviews()
-                }.setNegativeButton("CERRAR", null).show()
+        mainOption("♙", "ADMINISTRAR TRABAJADORES", "Crear, editar y consultar perfiles") {
+            showWorkerAdministration()
         }
-        mainOption("INVENTARIO SENE", "Consultar inventario recibido e inventario maestro") {
+        mainOption("▤", "REPORTES", "Reportes de trabajadores, ventas y caja") {
+            showReports()
+        }
+        mainOption("▦", "INVENTARIO SENE", "Consultar inventario recibido y maestro") {
             AlertDialog.Builder(this).setTitle("INVENTARIOS")
                 .setItems(arrayOf("INVENTARIO SENE", "INVENTARIO MAESTRO")) { _, which ->
                     showInventory(if (which == 0) "INVENTARIO_SENE" else "INVENTARIO_MAESTRO")
                 }.setNegativeButton("CERRAR", null).show()
         }
-        mainOption("PEGAR REPORTES DE WHATSAPP", "Pega el mensaje completo y pulsa PROCESAR") {
+        mainOption("⌁", "PEGAR REPORTES DE WHATSAPP", "Importar asistencia y movimientos") {
             showPasteDialog()
         }
-        mainOption("AJUSTES", "Clave, huella y carpeta compartida") {
+        mainOption("!", "REVISAR PENDIENTES", "Productos sin stock y productos dañados") {
+            showPendingReviews()
+        }
+        mainOption("⚙", "AJUSTES", "Clave, huella y carpeta compartida") {
             showSettings()
         }
+
         root.addView(TextView(this).apply {
-            text = "NO OLVIDES AGREGAR LOS REPORTES DE TUS TRABAJADORES"
-            textSize = 13f
-            typeface = Typeface.DEFAULT_BOLD
-            setTextColor(0xFFB42318.toInt())
-            isSingleLine = true
-            ellipsize = android.text.TextUtils.TruncateAt.MARQUEE
-            marqueeRepeatLimit = -1
-            isSelected = true
-            setPadding(4, 10, 4, 4)
+            text = "RECUERDA PEGAR LOS REPORTES DE TUS TRABAJADORES"
+            textSize = 11f; letterSpacing = .04f; typeface = Typeface.DEFAULT_BOLD
+            setTextColor(0xFF9B3B37.toInt())
+            setPadding(dp(5), dp(12), dp(5), dp(4))
         })
-        setContentView(ScrollView(this).apply { addView(root) })
+        setContentView(ScrollView(this).apply {
+            isFillViewport = true
+            clipToPadding = false
+            addView(root)
+        })
     }
 
     private fun showPendingReviews() {
