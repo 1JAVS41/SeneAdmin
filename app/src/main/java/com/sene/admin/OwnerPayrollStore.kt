@@ -414,7 +414,9 @@ object OwnerPayrollStore {
         val effectiveStart=payrollStartDate(p)
         val payableStart=if(effectiveStart.isBlank()||effectiveStart<weekStart)weekStart else effectiveStart
         val payableDays=scheduledDayCount(payableStart,week,p.workDays)
-        val configuredDays=p.workDays.split(Regex("[,;|]")).map{it.trim()}.filter{it.isNotBlank()}.distinct().size
+        val configuredDays=p.workDays.split(Regex("[,;|]")).map{it.trim().lowercase(Locale("es","MX"))
+            .replace("á","a").replace("é","e").replace("í","i").replace("ó","o").replace("ú","u")}
+            .filter{it.isNotBlank()}.distinct().size
         val proratedGross=if(configuredDays>0)(p.weeklySalaryCents*payableDays/configuredDays).coerceAtMost(p.weeklySalaryCents) else 0L
         val payrollArray=array(c,PAYROLLS)
         val profileEntries=entries(c,profileId)
