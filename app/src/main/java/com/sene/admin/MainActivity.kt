@@ -264,7 +264,7 @@ class MainActivity : AppCompatActivity() {
             setPadding(dp(3), 0, 0, dp(10))
         })
 
-        fun mainOption(icon: String, label: String, subtitle: String, action: () -> Unit, green: Boolean = false) {
+        fun mainOption(icon: String, label: String, subtitle: String, green: Boolean = false, action: () -> Unit) {
             val card = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = android.view.Gravity.CENTER_VERTICAL
@@ -321,9 +321,9 @@ class MainActivity : AppCompatActivity() {
                     showInventory(if (which == 0) "INVENTARIO_SENE" else "INVENTARIO_MAESTRO")
                 }.setNegativeButton("CERRAR", null).show()
         }
-        mainOption("⌁", "PEGAR REPORTES DE WHATSAPP", "Importar asistencia y movimientos", {
+        mainOption("⌁", "PEGAR REPORTES DE WHATSAPP", "Importar asistencia y movimientos", green = true) {
             showPasteDialog()
-        }, green = true)
+        }
         mainOption("!", "REVISAR PENDIENTES", "Productos sin stock y productos dañados") {
             showPendingReviews()
         }
