@@ -264,14 +264,15 @@ class MainActivity : AppCompatActivity() {
             setPadding(dp(3), 0, 0, dp(10))
         })
 
-        fun mainOption(icon: String, label: String, subtitle: String, action: () -> Unit) {
+        fun mainOption(icon: String, label: String, subtitle: String, action: () -> Unit, green: Boolean = false) {
             val card = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = android.view.Gravity.CENTER_VERTICAL
                 setPadding(dp(15), dp(15), dp(16), dp(15))
                 background = android.graphics.drawable.GradientDrawable().apply {
-                    setColor(-1); cornerRadius = dp(19).toFloat()
-                    setStroke(dp(1), 0xFFDCE6F3.toInt())
+                    setColor(if (green) 0xFF168A4A.toInt() else -1)
+                    cornerRadius = dp(19).toFloat()
+                    setStroke(dp(1), if (green) 0xFF168A4A.toInt() else 0xFFDCE6F3.toInt())
                 }
                 elevation = dp(2).toFloat()
                 isClickable = true; isFocusable = true
@@ -279,9 +280,10 @@ class MainActivity : AppCompatActivity() {
             }
             val symbol = TextView(this).apply {
                 text = icon; textSize = 23f; gravity = android.view.Gravity.CENTER
-                setTextColor(navy)
+                setTextColor(if (green) -1 else navy)
                 background = android.graphics.drawable.GradientDrawable().apply {
-                    setColor(0xFFEAF2FD.toInt()); cornerRadius = dp(15).toFloat()
+                    setColor(if (green) 0xFF0F713B.toInt() else 0xFFEAF2FD.toInt())
+                    cornerRadius = dp(15).toFloat()
                 }
             }
             card.addView(symbol, LinearLayout.LayoutParams(dp(52), dp(52)))
@@ -291,15 +293,15 @@ class MainActivity : AppCompatActivity() {
             }
             labels.addView(TextView(this).apply {
                 text = label; textSize = 15f; typeface = Typeface.DEFAULT_BOLD
-                setTextColor(0xFF193B68.toInt())
+                setTextColor(if (green) -1 else 0xFF193B68.toInt())
             })
             labels.addView(TextView(this).apply {
-                text = subtitle; textSize = 12f; setTextColor(0xFF687B96.toInt())
+                text = subtitle; textSize = 12f; setTextColor(if (green) 0xFFE2F5E9.toInt() else 0xFF687B96.toInt())
                 setPadding(0, dp(4), 0, 0)
             })
             card.addView(labels, LinearLayout.LayoutParams(0, -2, 1f))
             card.addView(TextView(this).apply {
-                text = "›"; textSize = 28f; setTextColor(0xFF4777B9.toInt())
+                text = "›"; textSize = 28f; setTextColor(if (green) -1 else 0xFF4777B9.toInt())
             })
             root.addView(card, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(10) })
         }
@@ -319,9 +321,9 @@ class MainActivity : AppCompatActivity() {
                     showInventory(if (which == 0) "INVENTARIO_SENE" else "INVENTARIO_MAESTRO")
                 }.setNegativeButton("CERRAR", null).show()
         }
-        mainOption("⌁", "PEGAR REPORTES DE WHATSAPP", "Importar asistencia y movimientos") {
+        mainOption("⌁", "PEGAR REPORTES DE WHATSAPP", "Importar asistencia y movimientos", {
             showPasteDialog()
-        }
+        }, green = true)
         mainOption("!", "REVISAR PENDIENTES", "Productos sin stock y productos dañados") {
             showPendingReviews()
         }
