@@ -133,9 +133,14 @@ object OwnerPayrollStore {
         val isClosing=type=="EARLY_EXIT" || type.contains("CIERRE") || type.contains("FIN_TURNO") || type.contains("CLOSE")
         val isStarting=type.contains("INICIO") || type.contains("PERIOD") || type.contains("START")
         if(!isClosing && !isStarting)return true
-        val entry=reportValue(lines,"HORA DE ENTRADA")
-        val exit=reportValue(lines,"HORA DE SALIDA").ifBlank { if(isClosing) r.date+" "+r.time else "" }
-        val day=isoDate(entry).takeIf { entry.isNotBlank() }?.takeIf { it.length==10 } ?: isoDate(r.date)
+        val entry=reportValue(lines,"HORA DE ENTRADA").takeUnless {
+            it.equals("No indicada",true) || it.equals("Por definir",true)
+        }.orEmpty()
+        val reportedExit=reportValue(lines,"HORA DE SALIDA").takeUnless {
+            it.equals("No indicada",true) || it.equals("Por definir",true)
+        }.orEmpty()
+        val exit=reportedExit.ifBlank { if(isClosing) r.date+" "+r.time else "" }
+        val day=isoDate(entry).takeIf { it.isNotBlank() } ?: isoDate(r.date)
         if(day.isBlank())return true
         val closingType=reportValue(lines,"TIPO DE CIERRE").trim().uppercase(Locale.ROOT)
             .replace(' ','_').replace('-','_')
