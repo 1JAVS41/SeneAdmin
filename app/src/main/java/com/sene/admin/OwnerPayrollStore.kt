@@ -409,10 +409,22 @@ object OwnerPayrollStore {
         val configuredDays=p.workDays.split(Regex("[,;|]")).map{it.trim()}.filter{it.isNotBlank()}.distinct().size
         val proratedGross=if(configuredDays>0)(p.weeklySalaryCents*payableDays/configuredDays).coerceAtMost(p.weeklySalaryCents) else 0L
         val payrollArray=array(c,PAYROLLS)
-        val existingIndex=(0 until payrollArray.length()).firstOrNull {
+        val profileEntries=entries(c,profileId)
+        val currentPeriodIndex=(0 until payrollArray.length()).firstOrNull {
             val item=payrollArray.optJSONObject(it)
             item != null && item.optString("profileId")==profileId && item.optString("period")==week
         }
+        // Migra una nómina pendiente creada con el periodo anterior si ya tenía
+        // movimientos de esta semana asociados; evita dejar un registro $0 duplicado.
+        val legacyPendingIndex=if(currentPeriodIndex!=null)null else (0 until payrollArray.length()).firstOrNull { index ->
+            val item=payrollArray.optJSONObject(index) ?: return@firstOrNull false
+            val oldId=item.optString("id")
+            item.optString("profileId")==profileId && item.optString("status")!="PAGADA" && oldId.isNotBlank() &&
+                profileEntries.any { entry ->
+                    entry.payrollId==oldId && isoDate(entry.date)>=weekStart && isoDate(entry.date)<=week
+                }
+        }
+        val existingIndex=currentPeriodIndex?:legacyPendingIndex
         val existing=existingIndex?.let { payrollArray.optJSONObject(it) }
         if(existing?.optString("status")=="PAGADA") {
             return payrolls(c,profileId).first { it.period==week }
@@ -423,12 +435,12 @@ object OwnerPayrollStore {
         // al periodo semanal correcto, pero nunca se toman movimientos ya pagados.
         val paidPayrollIds=payrolls(c,profileId).filter{it.status=="PAGADA"}.map{it.id}.toSet()
         val pendingPayrollIds=payrolls(c,profileId).filter{it.status!="PAGADA"}.map{it.id}.toSet()
-        val relevant=entries(c,profileId).filter {
+        val relevant=profileEntries.filter {
             val entryDate=isoDate(it.date)
             val onOrAfterStart=effectiveStart.isBlank() || entryDate.isNotBlank() && entryDate>=effectiveStart
             val belongsToPeriod=periodForDate(it.date,payDay)==week
             onOrAfterStart && it.payrollId !in paidPayrollIds &&
-                (belongsToPeriod || it.payrollId==payrollId || it.payrollId in pendingPayrollIds && entryDate>=weekStart && entryDate<=week)
+                (belongsToPeriod || it.payrollId in pendingPayrollIds && entryDate>=weekStart && entryDate<=week)
         }
         val absence=relevant.filter{it.type=="FALTA"}.sumOf{it.amountCents}
         val earlyExit=relevant.filter{it.type=="SALIDA_ANTICIPADA"}.sumOf{it.amountCents}
