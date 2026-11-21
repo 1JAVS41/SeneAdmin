@@ -24,26 +24,106 @@ class PayrollActivity : Activity() {
         } else render()
     }
     private fun render() {
-        root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(22, 24, 22, 24); setBackgroundColor(0xFFF4F7FB.toInt()) }
-        root.addView(TextView(this).apply { text = "PERSONAL Y NÓMINA"; textSize = 23f; setTextColor(0xFF123B68.toInt()); typeface = android.graphics.Typeface.DEFAULT_BOLD })
-        root.addView(TextView(this).apply { text = "Los datos de sueldo y jornada se pueden completar automáticamente al recibir el reporte de inicio de turno."; textSize = 13f; setTextColor(0xFF64748B.toInt()); setPadding(0, 6, 0, 16) })
+        fun dp(value: Int) = (value * resources.displayMetrics.density + 0.5f).toInt()
+        root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(18), dp(18), dp(18), dp(28))
+            setBackgroundColor(0xFFF1F5FB.toInt())
+        }
+        val hero = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(21), dp(21), dp(21), dp(21))
+            background = android.graphics.drawable.GradientDrawable(
+                android.graphics.drawable.GradientDrawable.Orientation.TL_BR,
+                intArrayOf(0xFF173A78.toInt(), 0xFF3478D4.toInt(), 0xFF69A6F2.toInt())
+            ).apply { cornerRadius = dp(24).toFloat() }
+            elevation = dp(4).toFloat()
+        }
+        hero.addView(TextView(this).apply {
+            text = "SENE / ADMIN"; textSize = 11f; letterSpacing = .14f
+            typeface = android.graphics.Typeface.DEFAULT_BOLD; setTextColor(0xFFDCEBFF.toInt())
+        })
+        hero.addView(TextView(this).apply {
+            text = "PERSONAL Y NÓMINA"; textSize = 25f
+            typeface = android.graphics.Typeface.create("sans-serif", android.graphics.Typeface.BOLD)
+            setTextColor(-1); setPadding(0, dp(7), 0, dp(5))
+        })
+        hero.addView(TextView(this).apply {
+            text = "Asistencia, sueldo, descuentos y pagos de cada trabajador."
+            textSize = 12f; setTextColor(0xFFE5EEFF.toInt())
+        })
+        root.addView(hero, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(17) })
+        root.addView(TextView(this).apply {
+            text = "TRABAJADORES REGISTRADOS"; textSize = 12f; letterSpacing = .1f
+            typeface = android.graphics.Typeface.DEFAULT_BOLD; setTextColor(0xFF60738F.toInt())
+            setPadding(dp(2), 0, 0, dp(10))
+        })
         val profiles = OwnerPayrollStore.profiles(this).sortedBy { it.name.lowercase(Locale.ROOT) }
         if (profiles.isEmpty()) {
-            root.addView(TextView(this).apply {
-                text = "Los perfiles aparecerán automáticamente cuando SENE ADMIN reciba los reportes de inicio de turno."
-                textSize = 14f; setTextColor(0xFF64748B.toInt()); setPadding(4, 16, 4, 16)
+            val empty = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL; setPadding(dp(18), dp(18), dp(18), dp(18))
+                background = android.graphics.drawable.GradientDrawable().apply {
+                    setColor(-1); cornerRadius = dp(18).toFloat()
+                    setStroke(dp(1), 0xFFDCE6F3.toInt())
+                }
+            }
+            empty.addView(TextView(this).apply {
+                text = "Aún no hay trabajadores"; textSize = 17f
+                typeface = android.graphics.Typeface.DEFAULT_BOLD; setTextColor(0xFF193B68.toInt())
             })
+            empty.addView(TextView(this).apply {
+                text = "Los perfiles aparecerán al recibir reportes de inicio de turno desde SENE VENTAS."
+                textSize = 13f; setTextColor(0xFF687B96.toInt()); setPadding(0, dp(5), 0, 0)
+            })
+            root.addView(empty)
         }
         profiles.forEach { p ->
-            addCard(p.name, "Sueldo semanal: ${OwnerPayrollStore.money(p.weeklySalaryCents)} · Pago: ${p.payDay.ifBlank { "Sin configurar" }}" + if (OwnerPayrollStore.isPayDay(p)) " · HOY: Revisa SENE VENTAS antes de pagar" else "") { showProfile(p.id) }
+            val subtitle = "Sueldo semanal: ${OwnerPayrollStore.money(p.weeklySalaryCents)} · Pago: ${p.payDay.ifBlank { "Sin configurar" }}" +
+                if (OwnerPayrollStore.isPayDay(p)) " · HOY: Revisa SENE VENTAS antes de pagar" else ""
+            addCard(p.name, subtitle) { showProfile(p.id) }
         }
-        setContentView(ScrollView(this).apply { addView(root) })
+        setContentView(ScrollView(this).apply {
+            isFillViewport = true; clipToPadding = false
+            addView(root)
+        })
     }
     private fun addCard(title: String, subtitle: String, action: () -> Unit) {
-        val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(16, 14, 16, 14); background = android.graphics.drawable.GradientDrawable().apply { setColor(0xFFE8F1FB.toInt()); cornerRadius=20f }; elevation = 2f }
-        box.addView(TextView(this).apply { text = title; textSize = 16f; typeface = android.graphics.Typeface.DEFAULT_BOLD; setTextColor(0xFF173C7B.toInt()) })
-        box.addView(TextView(this).apply { text = subtitle; textSize = 12f; setTextColor(0xFF64748B.toInt()); setPadding(0, 4, 0, 0) })
-        val lp = LinearLayout.LayoutParams(-1, -2); lp.bottomMargin = 10; root.addView(box, lp); box.setOnClickListener { action() }
+        val box = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+            setPadding(15, 14, 15, 14)
+            background = android.graphics.drawable.GradientDrawable().apply {
+                setColor(-1); cornerRadius = 19f; setStroke(1, 0xFFDCE6F3.toInt())
+            }
+            elevation = 2f; isClickable = true; isFocusable = true
+            setOnClickListener { action() }
+        }
+        val icon = TextView(this).apply {
+            text = "♙"; textSize = 22f; gravity = android.view.Gravity.CENTER
+            setTextColor(0xFF285A9A.toInt())
+            background = android.graphics.drawable.GradientDrawable().apply {
+                setColor(0xFFEAF2FD.toInt()); cornerRadius = 15f
+            }
+        }
+        box.addView(icon, LinearLayout.LayoutParams(48, 48))
+        val labels = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL; setPadding(12, 0, 5, 0)
+        }
+        labels.addView(TextView(this).apply {
+            text = title; textSize = 15f
+            typeface = android.graphics.Typeface.DEFAULT_BOLD; setTextColor(0xFF173C65.toInt())
+        })
+        labels.addView(TextView(this).apply {
+            text = subtitle; textSize = 12f; setTextColor(0xFF64748B.toInt())
+            setPadding(0, 4, 0, 0)
+        })
+        box.addView(labels, LinearLayout.LayoutParams(0, -2, 1f))
+        box.addView(TextView(this).apply {
+            text = "›"; textSize = 27f; setTextColor(0xFF4777B9.toInt())
+        })
+        val lp = LinearLayout.LayoutParams(-1, -2)
+        lp.bottomMargin = 10
+        root.addView(box, lp)
     }
     private fun field(hint: String, number: Boolean = false) = EditText(this).apply {
         this.hint = hint; setSingleLine(true); textSize = 15f
