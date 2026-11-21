@@ -33,6 +33,29 @@ internal object PayrollDateRules {
         return format(calendar.time)
     }
 
+
+    fun proratedGross(weeklySalaryCents:Long,eligibleDays:Int,configuredDays:Int):Long {
+        if(weeklySalaryCents<=0L||eligibleDays<=0||configuredDays<=0)return 0L
+        return (weeklySalaryCents*eligibleDays/configuredDays).coerceAtMost(weeklySalaryCents)
+    }
+
+    fun absenceDeduction(weeklySalaryCents:Long,daysPerWeek:Int,absences:Int):Long {
+        if(weeklySalaryCents<=0L||daysPerWeek<=0||absences<=0)return 0L
+        return (weeklySalaryCents/daysPerWeek*absences).coerceAtMost(weeklySalaryCents)
+    }
+
+    fun earlyExitDeduction(weeklySalaryCents:Long,daysPerWeek:Int,hoursPerDay:Int,missingMillis:Long):Long {
+        if(weeklySalaryCents<=0L||daysPerWeek<=0||hoursPerDay<=0||missingMillis<60_000L)return 0L
+        return (weeklySalaryCents.toDouble()/daysPerWeek.toDouble()/hoursPerDay.toDouble()*
+            (missingMillis/3_600_000.0)).toLong().coerceAtLeast(0L).coerceAtMost(weeklySalaryCents)
+    }
+
+    fun netPay(gross:Long,absence:Long,earlyExit:Long,loans:Long,consumption:Long):Long {
+        val allowedAbsence=absence.coerceAtMost(gross.coerceAtLeast(0L))
+        val allowedEarly=earlyExit.coerceAtMost((gross-allowedAbsence).coerceAtLeast(0L))
+        return (gross-allowedAbsence-allowedEarly-loans.coerceAtLeast(0L)-consumption.coerceAtLeast(0L)).coerceAtLeast(0L)
+    }
+
     fun attendanceStatus(
         stored:String,
         date:String,
