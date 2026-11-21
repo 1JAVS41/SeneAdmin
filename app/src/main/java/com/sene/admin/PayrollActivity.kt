@@ -179,7 +179,7 @@ class PayrollActivity : Activity() {
         tag("DÍA DE PAGO",p.payDay.ifBlank{"Sin configurar"})
         tag("SUELDO SEMANAL",OwnerPayrollStore.money(p.weeklySalaryCents))
         tag("DÍAS LABORALES",p.workDays.ifBlank{"Sin configurar"})
-        tag("HORAS DE JORNADA",p.hours.toString()+" horas")
+        tag("HORAS DE JORNADA",if(p.hours in 1..24)p.hours.toString()+" horas" else "Por definir")
         OwnerPayrollStore.attendanceSummary(this,id)?.let { summary ->
             tag("ÚLTIMO PERÍODO",summary.period)
             tag("DÍAS TRABAJADOS / FALTAS",summary.workedDays.toString()+" trabajados · "+summary.absences+" faltas")
