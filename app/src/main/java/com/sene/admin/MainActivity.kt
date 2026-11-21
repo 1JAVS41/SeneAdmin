@@ -304,7 +304,7 @@ class MainActivity : AppCompatActivity() {
             root.addView(card, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(10) })
         }
 
-        mainOption("$", "NÓMINA", "Consultar pagos y revisar asistencia") {
+        mainOption("N", "NÓMINA", "Consultar pagos y revisar asistencia") {
             startActivity(Intent(this, PayrollActivity::class.java))
         }
         mainOption("♙", "ADMINISTRAR TRABAJADORES", "Crear, editar y consultar perfiles") {
