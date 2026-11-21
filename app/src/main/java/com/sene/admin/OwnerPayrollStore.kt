@@ -162,20 +162,28 @@ object OwnerPayrollStore {
         val worker=all.optJSONObject(p.id) ?: JSONObject()
         val createdDate=payrollStartDate(p)
         val today=Calendar.getInstance()
-        val monday=Calendar.getInstance().apply {
-            val delta=(get(Calendar.DAY_OF_WEEK)-Calendar.MONDAY+7)%7
-            add(Calendar.DAY_OF_YEAR,-delta)
+        val payDay=payDayNumber(p.payDay)
+        val weekEnd=Calendar.getInstance().apply {
+            val delta=(payDay-get(Calendar.DAY_OF_WEEK)+7)%7
+            add(Calendar.DAY_OF_YEAR,delta)
         }
-        val scheduled=p.workDays.split(Regex("[,;|]")).map{it.trim().lowercase(Locale("es","MX"))}
+        val weekStart=Calendar.getInstance().apply {
+            timeInMillis=weekEnd.timeInMillis
+            add(Calendar.DAY_OF_YEAR,-6)
+        }
+        val scheduled=p.workDays.split(Regex("[,;|]")).map{it.trim().lowercase(Locale("es","MX"))
+            .replace("á","a").replace("é","e").replace("í","i").replace("ó","o").replace("ú","u")}
             .filter{it.isNotBlank()}.toSet()
-        val names=listOf("LUNES","MARTES","MIÉRCOLES","JUEVES","VIERNES","SÁBADO","DOMINGO")
         return (0..6).map { index ->
-            val date=Calendar.getInstance().apply { timeInMillis=monday.timeInMillis; add(Calendar.DAY_OF_YEAR,index) }
+            val date=Calendar.getInstance().apply { timeInMillis=weekStart.timeInMillis; add(Calendar.DAY_OF_YEAR,index) }
+            val dayName=when(date.get(Calendar.DAY_OF_WEEK)) {
+                Calendar.SUNDAY->"domingo";Calendar.MONDAY->"lunes";Calendar.TUESDAY->"martes"
+                Calendar.WEDNESDAY->"miercoles";Calendar.THURSDAY->"jueves";Calendar.FRIDAY->"viernes";else->"sabado"
+            }
             val key=SimpleDateFormat("yyyy-MM-dd",Locale.US).format(date.time)
             val record=worker.optJSONObject(key) ?: JSONObject()
             val stored=record.optString("status")
-            val workText=p.workDays.lowercase(Locale("es","MX")).replace("á","a").replace("é","e").replace("í","i").replace("ó","o").replace("ú","u")
-            val isScheduled=scheduled.isEmpty() || workText.contains(names[index].lowercase(Locale.ROOT).replace("é","e"))
+            val isScheduled=scheduled.isEmpty() || dayName in scheduled
             val todayKey=SimpleDateFormat("yyyy-MM-dd",Locale.US).format(today.time)
             val status=when {
                 stored=="EARLY_EXIT" -> "EARLY_EXIT"
@@ -185,7 +193,7 @@ object OwnerPayrollStore {
                 key>todayKey || !isScheduled -> "FUTURE"
                 else -> if (createdDate.isNotBlank() && key < createdDate) "NO_RECORD" else "NOT_WORKED"
             }
-            DayAttendance(names[index],status,record.optString("started"),record.optString("closed"))
+            DayAttendance(dayName.uppercase(Locale("es","MX")),status,record.optString("started"),record.optString("closed"))
         }
     }
 
