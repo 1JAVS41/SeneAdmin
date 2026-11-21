@@ -304,13 +304,13 @@ class MainActivity : AppCompatActivity() {
             root.addView(card, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(10) })
         }
 
-        mainOption("₱", "NÓMINA", "Consultar pagos y revisar asistencia") {
+        mainOption("$", "NÓMINA", "Consultar pagos y revisar asistencia") {
             startActivity(Intent(this, PayrollActivity::class.java))
         }
         mainOption("♙", "ADMINISTRAR TRABAJADORES", "Crear, editar y consultar perfiles") {
             showWorkerAdministration()
         }
-        mainOption("▤", "REPORTES", "Reportes de trabajadores, ventas y caja") {
+        mainOption("▤", "OTROS REPORTES", "Reportes de trabajadores, ventas y caja") {
             showReports()
         }
         mainOption("▦", "INVENTARIO SENE", "Consultar inventario recibido y maestro") {
