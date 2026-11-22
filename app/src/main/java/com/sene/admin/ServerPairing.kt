@@ -84,6 +84,7 @@ object AdminPayrollRequestSync {
     private const val PREFS="sene_admin_payroll_sync"
     private val running=AtomicBoolean(false)
     private const val ATTENDANCE_ACKS="attendance_acks"
+    private const val INVENTORY_ACKS="inventory_acks"
     private fun mergeAcks(p:android.content.SharedPreferences,ids:JSONArray) {
         val old=try{JSONArray(p.getString(ATTENDANCE_ACKS,"[]")?:"[]")}catch(_:Exception){JSONArray()}
         val set=linkedSetOf<String>()
@@ -98,6 +99,21 @@ object AdminPayrollRequestSync {
         val keep=JSONArray()
         for(i in 0 until old.length())old.optString(i).takeIf{it.isNotBlank()&&it !in remove}?.let(keep::put)
         p.edit().putString(ATTENDANCE_ACKS,keep.toString()).commit()
+    }
+    private fun mergeInventoryAcks(p:android.content.SharedPreferences,ids:JSONArray) {
+        val old=try{JSONArray(p.getString(INVENTORY_ACKS,"[]")?:"[]")}catch(_:Exception){JSONArray()}
+        val set=linkedSetOf<String>()
+        for(i in 0 until old.length())old.optString(i).takeIf{it.isNotBlank()}?.let(set::add)
+        for(i in 0 until ids.length())ids.optString(i).takeIf{it.isNotBlank()}?.let(set::add)
+        p.edit().putString(INVENTORY_ACKS,JSONArray(set.toList()).toString()).commit()
+    }
+    private fun clearInventoryAcks(p:android.content.SharedPreferences,ids:JSONArray) {
+        if(ids.length()==0)return
+        val remove=buildSet{for(i in 0 until ids.length())ids.optString(i).takeIf{it.isNotBlank()}?.let(::add)}
+        val old=try{JSONArray(p.getString(INVENTORY_ACKS,"[]")?:"[]")}catch(_:Exception){JSONArray()}
+        val keep=JSONArray()
+        for(i in 0 until old.length())old.optString(i).takeIf{it.isNotBlank()&&it !in remove}?.let{keep.put(it)}
+        p.edit().putString(INVENTORY_ACKS,keep.toString()).commit()
     }
     private fun wireMillis(value:Long):Long = if(value in 1L until 100000000000L) value*1000L else value
     private fun wireDate(value:Any?):String {
@@ -127,6 +143,7 @@ object AdminPayrollRequestSync {
                 val payload=JSONObject().put("v",SeneWireProtocol.VERSION).put("t",SeneWireProtocol.SYNC)
                     .put("a",token).put("c",p.getString("cursor","").orEmpty()).put("d",decisions)
                     .put("ha",try{JSONArray(p.getString(ATTENDANCE_ACKS,"[]")?:"[]")}catch(_:Exception){JSONArray()})
+                    .put("gi",try{JSONArray(p.getString(INVENTORY_ACKS,"[]")?:"[]")}catch(_:Exception){JSONArray()})
                 p.edit().putLong("last_attempt",now).commit()
                 val response=ServerPairing.post("/admin/payroll/requests/sync",payload)
                 if(response.optInt("_http_status",0) !in 200..299)return@Thread
@@ -168,6 +185,15 @@ object AdminPayrollRequestSync {
                 mergeAcks(p,acceptedAttendance)
                 val serverAck=response.optJSONArray("haa")?:response.optJSONArray("attendance_ack_acks")?:JSONArray()
                 clearAcks(p,serverAck)
+                val inventory=response.optJSONArray("g")?:response.optJSONArray("inventory")?:JSONArray()
+                val acceptedInventory=JSONArray()
+                for(i in 0 until inventory.length()) {
+                    val event=inventory.optJSONObject(i)?:continue
+                    if(SharedInventoryManager.applySyncedInventoryEvent(app,event))acceptedInventory.put(event.optString("e"))
+                }
+                mergeInventoryAcks(p,acceptedInventory)
+                val inventoryServerAck=response.optJSONArray("gaa")?:response.optJSONArray("inventory_ack_acks")?:JSONArray()
+                clearInventoryAcks(p,inventoryServerAck)
                 val cursor=response.optString("n",response.optString("next_cursor"))
                 if(cursor.isNotBlank())p.edit().putString("cursor",cursor).commit()
             } catch(_:Exception) {
