@@ -26,15 +26,29 @@ object OwnerPayrollStore {
     }
     fun profile(c:Context,id:String)=profiles(c).firstOrNull{it.id==id}
 
+    private const val DELETED_PROFILES="deleted_profile_ids"
+    fun isDeletedProfile(c:Context,id:String):Boolean =
+        id.isNotBlank() && prefs(c).getStringSet(DELETED_PROFILES, emptySet()).orEmpty().contains(id)
+
+    private fun rememberDeletedProfile(c:Context,id:String):Boolean {
+        val ids=prefs(c).getStringSet(DELETED_PROFILES, emptySet()).orEmpty().toMutableSet()
+        ids.add(id)
+        return prefs(c).edit().putStringSet(DELETED_PROFILES,ids).commit()
+    }
+
     /** Elimina el perfil y sus datos locales de nómina y asistencia, sin tocar reportes importados. */
     fun deleteProfile(c:Context,id:String):Boolean {
         if(profile(c,id)==null)return false
+        // Registrar la baja antes de borrar datos: los reportes históricos no podrán
+        // volver a crear accidentalmente este perfil durante una importación posterior.
+        if(!rememberDeletedProfile(c,id))return false
         val profileArray=JSONArray()
         profiles(c).filterNot{it.id==id}.forEach{profileArray.put(profileJson(it))}
         if(!saveArray(c,PROFILES,profileArray))return false
         val entryArray=JSONArray()
-        (0 until array(c,ENTRIES).length()).forEach{i->
-            val item=array(c,ENTRIES).optJSONObject(i)?:return@forEach
+        val oldEntries=array(c,ENTRIES)
+        (0 until oldEntries.length()).forEach{i->
+            val item=oldEntries.optJSONObject(i)?:return@forEach
             if(item.optString("profileId")!=id)entryArray.put(item)
         }
         if(!saveArray(c,ENTRIES,entryArray))return false
@@ -107,6 +121,9 @@ object OwnerPayrollStore {
 
     /** Importa el perfil y, en los reportes de cierre, la asistencia y las solicitudes de nómina. */
     fun importProfile(c:Context,r:SeneReport):Boolean {
+        // El reporte se conserva en el historial general, pero jamás reactiva un
+        // trabajador que el dueño dio de baja explícitamente.
+        if(isDeletedProfile(c,r.workerId))return true
         val lines=r.body.replace("\r","").lines()
         val stamp=r.date+" "+r.time
         val stampKey="profile_import_"+r.workerId
@@ -462,7 +479,18 @@ object OwnerPayrollStore {
         val configuredDays=p.workDays.split(Regex("[,;|]")).map{it.trim().lowercase(Locale("es","MX"))
             .replace("á","a").replace("é","e").replace("í","i").replace("ó","o").replace("ú","u")}
             .filter{it.isNotBlank()}.distinct().size
-        val proratedGross=if(configuredDays>0)(p.weeklySalaryCents*payableDays/configuredDays).coerceAtMost(p.weeklySalaryCents) else 0L
+        val periodMaximum=if(configuredDays>0)(p.weeklySalaryCents*payableDays/configuredDays).coerceAtMost(p.weeklySalaryCents) else 0L
+        // El sueldo ganado solo avanza por días laborales ya transcurridos.
+        // El día actual se incluye únicamente cuando la jornada ya fue cerrada.
+        val todayKey=SimpleDateFormat("yyyy-MM-dd",Locale.US).format(Date())
+        val todayStatus=try {
+            JSONObject(prefs(c).getString("attendance_days","{}")?:"{}")
+                .optJSONObject(profileId)?.optJSONObject(todayKey)?.optString("status").orEmpty()
+        } catch(_:Exception) { "" }
+        val accruedEnd=if(todayStatus=="WORKED"||todayStatus=="EARLY_EXIT") minOf(todayKey,week) else
+            SimpleDateFormat("yyyy-MM-dd",Locale.US).format(Calendar.getInstance().apply{add(Calendar.DAY_OF_YEAR,-1)}.time).let{minOf(it,week)}
+        val accruedDays=if(accruedEnd>=payableStart)scheduledDayCount(payableStart,accruedEnd,p.workDays) else 0
+        val accruedGross=if(configuredDays>0)(p.weeklySalaryCents*accruedDays/configuredDays).coerceAtMost(periodMaximum) else 0L
         val payrollArray=array(c,PAYROLLS)
         // Sincroniza faltas desde el calendario diario antes de calcular los descuentos.
         syncUnrecordedAbsences(c,p,week,weekStart)
@@ -503,10 +531,10 @@ object OwnerPayrollStore {
         val earlyExit=relevant.filter{it.type=="SALIDA_ANTICIPADA"}.sumOf{it.amountCents}
         val loan=relevant.filter{it.type=="PRESTAMO"}.sumOf{it.amountCents}
         val consumption=relevant.filter{it.type=="CONSUMO"}.sumOf{it.amountCents}
-        val allowedAbsence=absence.coerceAtMost(proratedGross)
-        val allowedEarlyExit=earlyExit.coerceAtMost((proratedGross-allowedAbsence).coerceAtLeast(0L))
-        val net=(proratedGross-allowedAbsence-allowedEarlyExit-loan-consumption).coerceAtLeast(0L)
-        val payroll=Payroll(payrollId,profileId,week,proratedGross,allowedAbsence,allowedEarlyExit,loan,consumption,net,"PENDIENTE",
+        val allowedAbsence=absence.coerceAtMost(accruedGross)
+        val allowedEarlyExit=earlyExit.coerceAtMost((accruedGross-allowedAbsence).coerceAtLeast(0L))
+        val net=(accruedGross-allowedAbsence-allowedEarlyExit-loan-consumption).coerceAtLeast(0L)
+        val payroll=Payroll(payrollId,profileId,week,accruedGross,allowedAbsence,allowedEarlyExit,loan,consumption,net,"PENDIENTE",
             existing?.optString("createdAt")?.takeIf{it.isNotBlank()}?:SimpleDateFormat("yyyy-MM-dd HH:mm:ss",Locale.US).format(Date()),"",0L)
         if(existingIndex==null) payrollArray.put(payrollJson(payroll)) else payrollArray.put(existingIndex,payrollJson(payroll))
         check(saveArray(c,PAYROLLS,payrollArray)){"No se pudo guardar la nómina"}
@@ -544,6 +572,9 @@ object OwnerPayrollStore {
     /** Importa órdenes cifradas recibidas desde la pantalla SOLICITA de SENE VENTAS. */
     fun importOrder(c:Context, report:SeneReport):Boolean {
         if (!report.body.startsWith("SENE-ORDER|1")) return false
+        // Las órdenes atrasadas tampoco deben resucitar perfiles eliminados ni
+        // incorporarles movimientos a una nómina nueva.
+        if(isDeletedProfile(c,report.workerId))return true
         val fields = report.body.lines().drop(1).mapNotNull { line ->
             val i = line.indexOf("="); if (i <= 0) null else line.substring(0, i) to line.substring(i + 1)
         }.toMap()
@@ -566,7 +597,7 @@ object OwnerPayrollStore {
         if (alreadyInClosingReport) return true
         val name = fields["WORKER_NAME"].orEmpty().ifBlank { profileId }
         val old = profile(c, profileId)
-        if (old == null) upsertProfile(c, Profile(profileId, name, "", 0L, "", "", 8))
+        if (old == null) upsertProfile(c, Profile(profileId, name, "", 0L, "", "", 0))
         val entry = Entry(orderId, profileId, type, orderDate, orderDescription, cents, "")
         val a = array(c, ENTRIES)
         a.put(JSONObject().put("id", entry.id).put("profileId", entry.profileId).put("type", entry.type)
