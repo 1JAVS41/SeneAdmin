@@ -34,7 +34,9 @@ object InventorySyncEngine {
                 if (key != null) try { SharedInventoryManager.list(c, key, category).firstOrNull() } catch (_: Exception) { null }
                 else null
             }
-        val items = base?.items?.toMutableList() ?: mutableListOf()
+        // Los eventos son deltas; sin una base completa no se confirma ni se muestra un inventario parcial.
+        if (base == null) return false
+        val items = base.items.toMutableList()
         var acceptedRows = 0
         for (i in 0 until rows.length()) {
             val row = rows.optJSONObject(i) ?: continue
