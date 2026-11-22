@@ -76,7 +76,8 @@ object ServerPairing {
     }
     fun claim(c:Context,code:String):JSONObject=post("/admin/pairing/claim",JSONObject()
         .put("pairing_code",code.trim().uppercase())
-        .put("admin_installation_id",installationId(c)))
+        .put("admin_installation_id",installationId(c))
+        .put("rp",ReportKeyPairStore.publicKeyBase64()))
 }
 
 /** Sincroniza solicitudes y decisiones en lotes; conserva la cola local cuando no hay red. */
@@ -145,6 +146,7 @@ object AdminPayrollRequestSync {
                     .put("ha",try{JSONArray(p.getString(ATTENDANCE_ACKS,"[]")?:"[]")}catch(_:Exception){JSONArray()})
                     .put("gi",try{JSONArray(p.getString(INVENTORY_ACKS,"[]")?:"[]")}catch(_:Exception){JSONArray()})
                     .put("ba",ReportInboxStore.pendingAcks(app))
+                    .put("rp",ReportKeyPairStore.publicKeyBase64())
                 p.edit().putLong("last_attempt",now).commit()
                 val response=ServerPairing.post("/admin/payroll/requests/sync",payload)
                 if(response.optInt("_http_status",0) !in 200..299)return@Thread
