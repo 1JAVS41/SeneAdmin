@@ -169,6 +169,12 @@ class MainActivity : AppCompatActivity() {
                         } else {
                             if (!report.body.startsWith("SENE-ORDER|1")) restoredProfiles++
                             restoredReportBatch.add(report)
+                            if(restoredReportBatch.size>=10) {
+                                if(SeneAdminStore.saveReports(this@MainActivity,restoredReportBatch)) {
+                                    restoredReports+=restoredReportBatch.distinctBy{it.id}.size
+                                    restoredReportBatch.clear()
+                                } else errors.add("No se pudo guardar un bloque del historial local.")
+                            }
                         }
                     } catch (e: Exception) {
                         errors.add("Reporte ${report.number}: " + (e.message ?: "error de recuperación"))
@@ -183,7 +189,7 @@ class MainActivity : AppCompatActivity() {
                 try {
                     if(!SeneAdminStore.saveReports(this@MainActivity,restoredReportBatch))
                         errors.add("No se pudo guardar el historial local de reportes.")
-                    else restoredReports=restoredReportBatch.distinctBy{it.id}.size
+                    else restoredReports+=restoredReportBatch.distinctBy{it.id}.size
                 } catch(e:Exception) {
                     errors.add(e.message ?: "No se pudo guardar el historial local de reportes.")
                 }
@@ -817,6 +823,11 @@ class MainActivity : AppCompatActivity() {
                             processReport(report, message, key)
                             reportBatch.add(report)
                             imported++
+                            if(reportBatch.size>=10) {
+                                if(!SeneAdminStore.saveReports(this@MainActivity,reportBatch))
+                                    throw IllegalStateException("No se pudo guardar un bloque del historial local.")
+                                reportBatch.clear()
+                            }
                         }
                     } catch (e: Exception) {
                         errors.add("Reporte " + (index + 1) + ": " + (e.message ?: "formato no válido"))
