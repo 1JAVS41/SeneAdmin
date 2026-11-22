@@ -417,6 +417,7 @@ object OwnerPayrollStore {
                 val movementType=if(old.type=="PRESTAMO")"PRESTAMO" else "CONSUMO"
                 if(!entries(c,old.profileId).any{it.id==old.id} &&
                     !addEntryWithId(c,old.id,old.profileId,movementType,old.amountCents,old.description,old.date))return false
+                return SharedInventoryManager.applyApprovedConsumption(c,old)
             }
             return true
         }
@@ -428,6 +429,7 @@ object OwnerPayrollStore {
         if(normalized=="APPROVED"){
             val movementType=if(old.type=="PRESTAMO")"PRESTAMO" else "CONSUMO"
             if(!addEntryWithId(c,old.id,old.profileId,movementType,old.amountCents,old.description,old.date))return false
+            if(!SharedInventoryManager.applyApprovedConsumption(c,updated))return false
         }
         return true
     }
