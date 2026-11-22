@@ -93,6 +93,7 @@ class PayrollActivity : Activity() {
         })
     }
     private fun showRequests() {
+        AdminPayrollRequestSync.sync(this,true)
         fun dp(value:Int)=(value*resources.displayMetrics.density+0.5f).toInt()
         val all=OwnerPayrollStore.requests(this)
         val content=LinearLayout(this).apply {
@@ -147,8 +148,10 @@ class PayrollActivity : Activity() {
                             .setTitle("AUTORIZAR $kind")
                             .setMessage("La autorización se enviará al servidor. El descuento de nómina y, en consumos, el movimiento de inventario solo se aplicarán cuando el servidor confirme la decisión.")
                             .setPositiveButton("CONFIRMAR") { _, _ ->
-                                if(OwnerPayrollStore.queueRequestDecision(this@PayrollActivity,request.id,true))
-                                    Toast.makeText(this@PayrollActivity,"Autorización guardada. Pendiente de sincronizar con el servidor.",Toast.LENGTH_LONG).show()
+                                if(OwnerPayrollStore.queueRequestDecision(this@PayrollActivity,request.id,true)) {
+                                    Toast.makeText(this@PayrollActivity,"Autorización guardada. Enviando decisión al servidor...",Toast.LENGTH_LONG).show()
+                                    AdminPayrollRequestSync.sync(this@PayrollActivity,true)
+                                }
                                 showRequests()
                             }.setNegativeButton("CANCELAR",null).show()
                     }
@@ -159,8 +162,10 @@ class PayrollActivity : Activity() {
                         val reason=EditText(this@PayrollActivity).apply{hint="Motivo (opcional)"}
                         AlertDialog.Builder(this@PayrollActivity).setTitle("RECHAZAR $kind").setView(reason)
                             .setPositiveButton("CONFIRMAR") { _, _ ->
-                                if(OwnerPayrollStore.queueRequestDecision(this@PayrollActivity,request.id,false,reason.text.toString()))
-                                    Toast.makeText(this@PayrollActivity,"Rechazo guardado. Pendiente de sincronizar con el servidor.",Toast.LENGTH_LONG).show()
+                                if(OwnerPayrollStore.queueRequestDecision(this@PayrollActivity,request.id,false,reason.text.toString())) {
+                                    Toast.makeText(this@PayrollActivity,"Rechazo guardado. Enviando decisión al servidor...",Toast.LENGTH_LONG).show()
+                                    AdminPayrollRequestSync.sync(this@PayrollActivity,true)
+                                }
                                 showRequests()
                             }.setNegativeButton("CANCELAR",null).show()
                     }
