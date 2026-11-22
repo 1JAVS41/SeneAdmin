@@ -356,6 +356,84 @@ object OwnerPayrollStore {
         return saveArray(c,ENTRIES,a)
     }
 
+    data class Request(
+        val id:String,val profileId:String,val type:String,val date:String,val description:String,
+        val amountCents:Long,val productCode:String="",val quantity:Int=0,val status:String="PENDING",
+        val decidedBy:String="",val decidedAt:Long=0L,val rejectionReason:String="",
+        val ownerDecision:String="",val ownerDecisionReason:String=""
+    )
+    private const val REQUESTS="server_payroll_requests"
+
+    private fun decodeRequest(o:JSONObject):Request? {
+        val id=o.optString("id");val profileId=o.optString("profileId")
+        if(id.isBlank()||profileId.isBlank())return null
+        return Request(id,profileId,o.optString("type"),o.optString("date"),o.optString("description"),
+            o.optLong("amountCents").coerceAtLeast(0L),o.optString("productCode"),o.optInt("quantity").coerceAtLeast(0),
+            o.optString("status","PENDING"),o.optString("decidedBy"),o.optLong("decidedAt"),
+            o.optString("rejectionReason"),o.optString("ownerDecision"),o.optString("ownerDecisionReason"))
+    }
+    private fun requestJson(r:Request)=JSONObject().put("id",r.id).put("profileId",r.profileId)
+        .put("type",r.type).put("date",r.date).put("description",r.description).put("amountCents",r.amountCents)
+        .put("productCode",r.productCode).put("quantity",r.quantity).put("status",r.status)
+        .put("decidedBy",r.decidedBy).put("decidedAt",r.decidedAt).put("rejectionReason",r.rejectionReason)
+        .put("ownerDecision",r.ownerDecision).put("ownerDecisionReason",r.ownerDecisionReason)
+
+    fun requests(c:Context,profileId:String?=null):List<Request> {
+        val a=array(c,REQUESTS)
+        return (0 until a.length()).mapNotNull{i->decodeRequest(a.optJSONObject(i)?:return@mapNotNull null)}
+            .filter{profileId.isNullOrBlank()||it.profileId==profileId}
+            .sortedWith(compareBy<Request>{it.status!="PENDING"}.thenByDescending{it.date})
+    }
+    @Synchronized fun upsertServerRequest(c:Context,r:Request):Boolean {
+        if(r.id.isBlank()||r.profileId.isBlank()||r.amountCents<=0L||
+            r.type !in setOf("PRESTAMO","CONSUMO")||isDeletedProfile(c,r.profileId))return false
+        val a=array(c,REQUESTS);val index=(0 until a.length()).firstOrNull{a.optJSONObject(it)?.optString("id")==r.id}
+        if(index==null)a.put(requestJson(r))
+        else {
+            val old=decodeRequest(a.optJSONObject(index)!!)?:return false
+            // Una respuesta atrasada del servidor no revierte una decisión ya recibida.
+            if(old.status=="APPROVED"||old.status=="REJECTED")return true
+            a.put(index,requestJson(r.copy(ownerDecision=old.ownerDecision,ownerDecisionReason=old.ownerDecisionReason)))
+        }
+        return saveArray(c,REQUESTS,a)
+    }
+    @Synchronized fun queueRequestDecision(c:Context,id:String,approve:Boolean,reason:String=""):Boolean {
+        val a=array(c,REQUESTS);val index=(0 until a.length()).firstOrNull{a.optJSONObject(it)?.optString("id")==id}?:return false
+        val old=decodeRequest(a.optJSONObject(index)!!)?:return false
+        if(old.status!="PENDING")return false
+        a.put(index,requestJson(old.copy(ownerDecision=if(approve)"APPROVE" else "REJECT",ownerDecisionReason=reason.trim())))
+        return saveArray(c,REQUESTS,a)
+    }
+    fun decisionsPendingSync(c:Context):List<Request> = requests(c).filter{it.status=="PENDING"&&it.ownerDecision.isNotBlank()}
+
+    /** Solo la confirmación final del servidor materializa el descuento de nómina. */
+    @Synchronized fun applyServerDecision(c:Context,id:String,status:String,decidedBy:String,decidedAt:Long,rejectionReason:String=""):Boolean {
+        val normalized=status.uppercase(Locale.ROOT)
+        if(normalized !in setOf("APPROVED","REJECTED"))return false
+        val a=array(c,REQUESTS);val index=(0 until a.length()).firstOrNull{a.optJSONObject(it)?.optString("id")==id}?:return false
+        val old=decodeRequest(a.optJSONObject(index)!!)?:return false
+        if(old.status==normalized)return true
+        if(old.status!="PENDING")return false
+        val updated=old.copy(status=normalized,decidedBy=decidedBy,decidedAt=decidedAt,rejectionReason=rejectionReason,
+            ownerDecision="",ownerDecisionReason="")
+        a.put(index,requestJson(updated))
+        if(!saveArray(c,REQUESTS,a))return false
+        if(normalized=="APPROVED"){
+            val movementType=if(old.type=="PRESTAMO")"PRESTAMO" else "CONSUMO"
+            val existing=entries(c,old.profileId).any{it.id==old.id}
+            if(!existing && !addEntryWithId(c,old.id,old.profileId,movementType,old.amountCents,
+                old.description,old.date))return false
+        }
+        return true
+    }
+    private fun addEntryWithId(c:Context,id:String,profileId:String,type:String,amountCents:Long,description:String,date:String):Boolean {
+        val a=array(c,ENTRIES)
+        if((0 until a.length()).any{a.optJSONObject(it)?.optString("id")==id})return true
+        a.put(JSONObject().put("id",id).put("profileId",profileId).put("type",type)
+            .put("date",date).put("description",description).put("amount",amountCents).put("payrollId",""))
+        return saveArray(c,ENTRIES,a)
+    }
+
     data class AttendanceSummary(val period:String,val workedDays:Int,val absences:Int,val closingType:String,val closingReason:String,val started:String,val closed:String)
     fun attendanceSummary(c:Context,profileId:String):AttendanceSummary? {
         return try{
