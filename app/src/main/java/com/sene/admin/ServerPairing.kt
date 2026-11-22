@@ -147,6 +147,7 @@ object AdminPayrollRequestSync {
                 p.edit().putLong("last_attempt",now).commit()
                 val response=ServerPairing.post("/admin/payroll/requests/sync",payload)
                 if(response.optInt("_http_status",0) !in 200..299)return@Thread
+                if(response.optInt("v",SeneWireProtocol.VERSION)!=SeneWireProtocol.VERSION)return@Thread
                 val requests=response.optJSONArray("items")?:response.optJSONArray("requests")?:JSONArray()
                 for(i in 0 until requests.length()) {
                     val o=requests.optJSONObject(i)?:continue
