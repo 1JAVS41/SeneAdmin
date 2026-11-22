@@ -129,6 +129,7 @@ object SharedInventoryManager {
     }
 
     fun list(c: Context, ownerKey: String, category: String): List<Snapshot> {
+        val hadLocalSnapshot = InventoryLocalStore.snapshot(c, category) != null
         val tree = savedTree(c) ?: throw IllegalStateException("Primero selecciona la carpeta INVENTARIO SENE.")
         val dirName = if (category == "INVENTARIO_MAESTRO") "INVENTARIO-MAESTRO" else "INVENTARIO-SENE"
         val dir = folder(c, tree, dirName, false) ?: return emptyList()
@@ -156,7 +157,7 @@ object SharedInventoryManager {
             } catch (_: Exception) { null }
         }
         // Migración oportunista: guarda una copia privada cifrada del respaldo más reciente.
-        snapshots.firstOrNull()?.let { InventoryLocalStore.save(c, it) }
+        if (!hadLocalSnapshot) snapshots.firstOrNull()?.let { InventoryLocalStore.save(c, it) }
         return snapshots
     }
 
