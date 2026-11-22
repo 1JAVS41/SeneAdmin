@@ -231,6 +231,55 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun showPairingDialog() {
+        if(ServerPairing.isLinked(this)) {
+            AlertDialog.Builder(this).setTitle("NEGOCIO VINCULADO")
+                .setMessage("SeneAdmin está conectado con: "+ServerPairing.businessName(this)+
+                    "\\n\\nLa vinculación se conserva en este dispositivo y permite sincronizar solicitudes y autorizaciones.")
+                .setPositiveButton("ACEPTAR",null).setNeutralButton("ACTUALIZAR"){_,_->AdminPayrollRequestSync.sync(this,true)}.show()
+            return
+        }
+        val code=EditText(this).apply {
+            hint="Código temporal de SENE VENTAS"
+            inputType=InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS
+            setSingleLine(true)
+        }
+        AlertDialog.Builder(this).setTitle("VINCULAR SENE ADMIN")
+            .setMessage("En SENE VENTAS entra a SOY PATRÓN → VINCULAR SENE ADMIN y genera un código temporal. Escríbelo aquí. El código es de un solo uso y caduca.")
+            .setView(code).setPositiveButton("VINCULAR",null).setNegativeButton("CANCELAR",null).create().also{dialog->
+                dialog.setOnShowListener{
+                    dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener{
+                        val value=code.text.toString().trim().uppercase(Locale.ROOT)
+                        if(value.length<5){code.error="Ingresa el código completo";return@setOnClickListener}
+                        dialog.dismiss()
+                        val progress=AlertDialog.Builder(this).setTitle("Vinculando negocio")
+                            .setMessage("Validando el código temporal con SERVER-SENE...").setCancelable(false).create()
+                        progress.show()
+                        Thread{
+                            val response=try{ServerPairing.claim(this,value)}
+                                catch(e:Exception){org.json.JSONObject().put("_error",e.message?:"No fue posible conectar")}
+                            val saved=response.optInt("_http_status",0) in 200..299 && ServerPairing.saveClaim(this,response)
+                            runOnUiThread{
+                                progress.dismiss()
+                                if(isFinishing||isDestroyed)return@runOnUiThread
+                                if(saved){
+                                    Toast.makeText(this,"SeneAdmin quedó vinculado con "+ServerPairing.businessName(this),Toast.LENGTH_LONG).show()
+                                    AdminPayrollRequestSync.sync(this,true)
+                                    showHome()
+                                }else{
+                                    AlertDialog.Builder(this).setTitle("NO SE PUDO VINCULAR")
+                                        .setMessage(response.optString("message",response.optString("_error",
+                                            "El código no es válido, caducó o SERVER-SENE aún no tiene habilitada esta función.")))
+                                        .setPositiveButton("ACEPTAR",null).show()
+                                }
+                            }
+                        }.start()
+                    }
+                }
+                dialog.show()
+            }
+    }
+
     private fun handleIncoming(incoming: Intent?) {
         if (incoming?.action == Intent.ACTION_SEND && incoming.type == "text/plain") {
             incoming.getStringExtra(Intent.EXTRA_TEXT)?.takeIf { it.isNotBlank() }?.let { importReports(it) }
@@ -319,6 +368,10 @@ class MainActivity : AppCompatActivity() {
             root.addView(card, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(10) })
         }
 
+        mainOption("↔", if(ServerPairing.isLinked(this)) "NEGOCIO VINCULADO" else "VINCULAR NEGOCIO",
+            if(ServerPairing.isLinked(this)) "Conectado a "+ServerPairing.businessName(this) else "Conecta SeneAdmin con SENE VENTAS", green = !ServerPairing.isLinked(this)) {
+            showPairingDialog()
+        }
         mainOption("N", "NÓMINA", "Consultar pagos y revisar asistencia") {
             startActivity(Intent(this, PayrollActivity::class.java))
         }
