@@ -28,15 +28,17 @@ class MainActivity : AppCompatActivity() {
         pendingImportRaw = getSharedPreferences("sene_admin_pending_import", MODE_PRIVATE).getString("raw", null)
         showHome()
         OwnerKeyStore.read(this)?.let { SharedInventoryManager.cleanupAllIfDue(this, it) }
-        if (!OwnerKeyStore.hasKey(this)) askOwnerKey() else if (!AccessPinStore.hasPin(this)) askCreatePin() else handleIncoming(intent)
+        // La clave compartida antigua ya no es requisito para abrir SeneAdmin,
+        // vincularlo con SERVER-SENE ni consultar nómina. Solo las herramientas
+        // heredadas de archivos cifrados podrán solicitarla si el usuario las abre.
+        if (!AccessPinStore.hasPin(this)) askCreatePin()
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        if (!OwnerKeyStore.hasKey(this)) askOwnerKey()
-        else if (!AccessPinStore.hasPin(this)) askCreatePin()
-        else handleIncoming(intent)
+        // WhatsApp dejó de ser un canal de importación de reportes.
+        if (!AccessPinStore.hasPin(this)) askCreatePin()
     }
 
     override fun onResume() {
@@ -308,11 +310,6 @@ class MainActivity : AppCompatActivity() {
             }
     }
 
-    private fun handleIncoming(incoming: Intent?) {
-        if (incoming?.action == Intent.ACTION_SEND && incoming.type == "text/plain") {
-            incoming.getStringExtra(Intent.EXTRA_TEXT)?.takeIf { it.isNotBlank() }?.let { importReports(it) }
-        }
-    }
 
     private fun showHome() {
         fun dp(value: Int) = (value * resources.displayMetrics.density + 0.5f).toInt()
