@@ -750,107 +750,54 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun askOwnerKey() {
-        val input = EditText(this).apply {
-            hint = "Clave del propietario (mínimo 8 caracteres)"; setSingleLine(true)
-            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
-        }
-        val dlg = AlertDialog.Builder(this).setTitle("CLAVE DEL PROPIETARIO")
-            .setMessage("Introduce obligatoriamente la MISMA CLAVE DE CIFRADO que ya está configurada en SENE VENTAS. SENE ADMIN no genera ni crea una clave nueva. No podrás continuar sin introducirla.")
-            .setView(input).setPositiveButton("CONTINUAR", null).create()
-        dlg.setOnShowListener {
-            dlg.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
-                val value = input.text.toString().trim()
-                if (value.length < 8) { input.error = "Mínimo 8 caracteres"; return@setOnClickListener }
-                if (!OwnerKeyStore.save(this, value)) {
-                    input.error = if (OwnerKeyStore.hasKey(this)) "La clave no coincide con la ya registrada" else "No se pudo guardar"
-                    return@setOnClickListener
-                }
-                dlg.dismiss()
-                Toast.makeText(this, "Clave de SENE VENTAS guardada", Toast.LENGTH_LONG).show()
-                askCreatePin()
-            }
-        }
-        dlg.setCancelable(false)
-        dlg.show()
+        info("CLAVE NO NECESARIA", "La vinculación y los datos nuevos se protegen automáticamente. Los reportes históricos cifrados con el formato anterior no se importan desde este flujo.")
     }
 
     private fun showInventory(category: String) {
-        val key = OwnerKeyStore.read(this)
-        val hasLocal = SharedInventoryManager.localSnapshot(this, category) != null
-        if (key == null && !hasLocal) { askOwnerKey(); return }
-        if (SharedInventoryManager.savedTree(this) == null && !hasLocal) { explainSharedFolder(); return }
-
         val title = if (category == "INVENTARIO_MAESTRO") "INVENTARIO MAESTRO" else "INVENTARIO SENE"
-        val (progress, updateProgress) = createProcessingDialog(3)
-        updateProgress(0, "Preparando la revisión del inventario...")
-
-        // Dar oportunidad a Android de dibujar el diálogo antes de iniciar la lectura.
-        progress.window?.decorView?.post {
-            Thread {
-                var snapshots: List<SharedInventoryManager.Snapshot>? = null
-                var failure: String? = null
-                try {
-                    runOnUiThread { if (!isFinishing && !isDestroyed) updateProgress(1, "Buscando los respaldos disponibles...") }
-                    snapshots = SharedInventoryManager.listAvailable(this@MainActivity, key, category)
-                    runOnUiThread { if (!isFinishing && !isDestroyed) updateProgress(2, "Leyendo y preparando los productos...") }
-                } catch (e: Exception) {
-                    failure = e.message ?: "Verifica la clave y los permisos. El archivo original permanece intacto."
-                }
-                runOnUiThread {
-                    progress.dismiss()
-                    if (isFinishing || isDestroyed) return@runOnUiThread
-                    if (failure != null) {
-                        info("NO SE PUDO ABRIR EL INVENTARIO", failure!!)
-                        return@runOnUiThread
-                    }
-                    val available = snapshots.orEmpty()
-                    val latest = available.firstOrNull()
-                    if (latest == null) {
-                        info(title, "Todavía no hay respaldos disponibles de este inventario. Se actualizará al incorporar reportes válidos de SENE VENTAS.")
-                        return@runOnUiThread
-                    }
-                    val content = LinearLayout(this@MainActivity).apply {
-                        orientation = LinearLayout.VERTICAL
-                        setPadding(14, 12, 14, 12)
-                        setBackgroundColor(0xFFF4F7FB.toInt())
-                    }
-                    addLabel(content, "Última actualización", latest.updated, 0xFFDCEBFA.toInt())
-                    addLabel(content, "Productos registrados", latest.items.size.toString(), 0xFFDDF4E5.toInt())
-                    addLabel(content, "Respaldos disponibles", available.size.toString(), 0xFFE8E5FA.toInt())
-                    if (latest.legacy) addLabel(content, "Formato anterior", "Inventario TXT heredado. Se conserva el archivo original.", 0xFFFFF0D9.toInt())
-                    latest.items.sortedBy { it.name.lowercase(Locale.ROOT) }.forEach { item ->
-                        val card = LinearLayout(this@MainActivity).apply {
-                            orientation = LinearLayout.VERTICAL
-                            setPadding(14, 12, 14, 12)
-                            background = android.graphics.drawable.GradientDrawable().apply {
-                                setColor(-1)
-                                cornerRadius = 18f
-                            }
-                            elevation = 1f
-                        }
-                        card.addView(TextView(this@MainActivity).apply {
-                            text = item.name
-                            textSize = 16f
-                            typeface = Typeface.DEFAULT_BOLD
-                            setTextColor(0xFF123B68.toInt())
-                            setPadding(0, 0, 0, 7)
-                        })
-                        addLabel(card, "Código", item.code, 0xFFE8F1FB.toInt())
-                        addLabel(card, "Precio", OwnerPayrollStore.money((item.price * 100.0).toLong()), 0xFFE8F1FB.toInt())
-                        addLabel(card, "Existencia", item.stock.toString(), if (item.stock > 0) 0xFFDDF4E5.toInt() else 0xFFFFE8E5.toInt())
-                        if (item.aisle.isNotBlank()) addLabel(card, "Pasillo", item.aisle)
-                        if (item.shelf.isNotBlank()) addLabel(card, "Estante", item.shelf)
-                        val lp = LinearLayout.LayoutParams(-1, -2)
-                        lp.bottomMargin = 10
-                        content.addView(card, lp)
-                    }
-                    updateProgress(3, "Inventario revisado")
-                    AlertDialog.Builder(this@MainActivity).setTitle(title)
-                        .setView(ScrollView(this@MainActivity).apply { addView(content) })
-                        .setPositiveButton("CERRAR", null).show()
-                }
-            }.start()
+        // Esta pantalla consulta exclusivamente la caché local que SeneAdmin recibió
+        // mediante sincronización. No lee carpetas compartidas ni consulta SERVER-SENE.
+        val latest = InventoryLocalStore.snapshot(this, category)
+        if (latest == null) {
+            info(title, "Todavía no hay una copia local recibida. Cuando llegue la próxima sincronización, el inventario quedará guardado aquí para consultarlo sin conexión.")
+            return
         }
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(14, 12, 14, 12)
+            setBackgroundColor(0xFFF4F7FB.toInt())
+        }
+        addLabel(content, "Última actualización", latest.updated, 0xFFDCEBFA.toInt())
+        addLabel(content, "Productos registrados", latest.items.size.toString(), 0xFFDDF4E5.toInt())
+        latest.items.sortedBy { it.name.lowercase(Locale.ROOT) }.forEach { item ->
+            val card = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(14, 12, 14, 12)
+                background = android.graphics.drawable.GradientDrawable().apply {
+                    setColor(-1)
+                    cornerRadius = 18f
+                }
+            }
+            card.addView(TextView(this).apply {
+                text = item.name
+                textSize = 16f
+                typeface = Typeface.DEFAULT_BOLD
+                setTextColor(0xFF123B68.toInt())
+                setPadding(0, 0, 0, 7)
+            })
+            addLabel(card, "Código", item.code)
+            addLabel(card, "Precio", OwnerPayrollStore.money((item.price * 100.0).toLong()))
+            addLabel(card, "Existencia", item.stock.toString(),
+                if (item.stock > 0) 0xFFDDF4E5.toInt() else 0xFFFFE8E5.toInt())
+            if (item.aisle.isNotBlank()) addLabel(card, "Pasillo", item.aisle)
+            if (item.shelf.isNotBlank()) addLabel(card, "Estante", item.shelf)
+            val lp = LinearLayout.LayoutParams(-1, -2)
+            lp.bottomMargin = 10
+            content.addView(card, lp)
+        }
+        AlertDialog.Builder(this).setTitle(title)
+            .setView(ScrollView(this).apply { addView(content) })
+            .setPositiveButton("CERRAR", null).show()
     }
 
     private fun createProcessingDialog(totalSteps: Int): Pair<AlertDialog, (Int, String) -> Unit> {
@@ -928,8 +875,7 @@ class MainActivity : AppCompatActivity() {
         }
         val key = OwnerKeyStore.read(this)
         if (key == null) {
-            info("CONFIGURA TU CLAVE", "Primero introduce la clave del propietario para leer estos reportes.")
-            askOwnerKey()
+            info("REPORTE HISTÓRICO NO COMPATIBLE", "Los reportes nuevos se reciben automáticamente desde SERVER-SENE y no requieren clave manual. Este formato antiguo de importación ya no se utiliza.")
             return
         }
         if (SharedInventoryManager.savedTree(this) == null) {
