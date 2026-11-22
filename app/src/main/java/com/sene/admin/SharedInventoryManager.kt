@@ -183,6 +183,42 @@ object SharedInventoryManager {
         return name
     }
 
+    /** Aplica un lote de existencias recibido del servidor; nunca calcula nómina. */
+    @Synchronized fun applySyncedInventoryEvent(c:Context,event:JSONObject):Boolean {
+        val eventId=event.optString("e")
+        val scope=event.optString("g")
+        val timestamp=event.optLong("i",0L)
+        val rows=event.optJSONArray("p")?:JSONArray()
+        if(eventId.isBlank()||scope !in setOf("M","S")||timestamp<=0L||rows.length()==0)return false
+        val p=prefs(c)
+        val processed=p.getStringSet("wire_inventory_events",emptySet()).orEmpty().toMutableSet()
+        if(eventId in processed)return true
+        val last=p.getLong("wire_inventory_stamp_$scope",0L)
+        if(timestamp<last)return true
+        val ownerKey=OwnerKeyStore.read(c)?.takeIf{it.isNotBlank()}?:return false
+        val category=if(scope=="M")"INVENTARIO_MAESTRO" else "INVENTARIO_SENE"
+        val snapshot=try{list(c,ownerKey,category).firstOrNull()}catch(_:Exception){null}?:return false
+        val items=snapshot.items.toMutableList()
+        for(i in 0 until rows.length()){
+            val row=rows.optJSONObject(i)?:continue
+            val code=row.optString("c")
+            if(code.isBlank())continue
+            val stock=row.optInt("s",-1)
+            if(stock<0)continue
+            val index=items.indexOfFirst{it.code.equals(code,true)}
+            if(index>=0)items[index]=items[index].copy(stock=stock)
+            else items.add(Item(code,row.optString("n"),row.optLong("a",0L).toDouble()/100.0,
+                stock,row.optString("l"),row.optString("h")))
+        }
+        return try {
+            save(c,ownerKey,category,items,SimpleDateFormat("yyyy-MM-dd HH:mm:ss",Locale.US).format(Date(timestamp)))
+            processed.add(eventId)
+            val bounded=processed.toList().takeLast(500).toSet()
+            p.edit().putStringSet("wire_inventory_events",bounded)
+                .putLong("wire_inventory_stamp_$scope",maxOf(last,timestamp)).commit()
+        } catch(_:Exception){false}
+    }
+
     /** Aplica una salida de inventario únicamente tras la decisión APPROVED del servidor. */
     @Synchronized fun applyApprovedConsumption(c:Context,request:OwnerPayrollStore.Request):Boolean {
         if(request.type!="CONSUMO")return true
