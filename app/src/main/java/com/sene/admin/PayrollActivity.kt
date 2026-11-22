@@ -17,6 +17,7 @@ class PayrollActivity : Activity() {
     private lateinit var root: LinearLayout
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        AdminPayrollRequestSync.sync(this,true)
         val profileId = intent.getStringExtra("profile_id")
         if (profileId.isNullOrBlank()) render() else if (OwnerPayrollStore.profile(this, profileId) != null) {
             setContentView(TextView(this).apply { text = "Perfil del trabajador"; setPadding(24, 24, 24, 24) })
