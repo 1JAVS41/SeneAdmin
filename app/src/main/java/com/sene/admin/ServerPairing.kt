@@ -83,6 +83,16 @@ object ServerPairing {
 object AdminPayrollRequestSync {
     private const val PREFS="sene_admin_payroll_sync"
     private val running=AtomicBoolean(false)
+    private fun wireMillis(value:Long):Long = if(value in 1L until 100000000000L) value*1000L else value
+    private fun wireDate(value:Any?):String {
+        val millis=when(value) {
+            is Number -> wireMillis(value.toLong())
+            is String -> value.toLongOrNull()?.let(::wireMillis) ?: 0L
+            else -> 0L
+        }
+        if(millis>0L) return java.text.SimpleDateFormat("yyyy-MM-dd",java.util.Locale.US).format(java.util.Date(millis))
+        return value?.toString().orEmpty().take(10)
+    }
     fun sync(c:Context,force:Boolean=false) {
         val app=c.applicationContext
         val token=ServerPairing.token(app);if(token.isBlank())return
@@ -95,10 +105,10 @@ object AdminPayrollRequestSync {
                 val decisions=JSONArray()
                 OwnerPayrollStore.decisionsPendingSync(app).forEach{r->
                     decisions.put(JSONObject().put("e",r.id)
-                        .put("x",if(r.ownerDecision=="APPROVE") "[OK]" else "[NO]")
+                        .put("x",if(r.ownerDecision=="APPROVE") SeneWireProtocol.APPROVED else SeneWireProtocol.REJECTED)
                         .put("r",r.ownerDecisionReason))
                 }
-                val payload=JSONObject().put("v",SeneWireProtocol.VERSION).put("t","[SYNC]")
+                val payload=JSONObject().put("v",SeneWireProtocol.VERSION).put("t",SeneWireProtocol.SYNC)
                     .put("a",token).put("c",p.getString("cursor","").orEmpty()).put("d",decisions)
                 p.edit().putLong("last_attempt",now).commit()
                 val response=ServerPairing.post("/admin/payroll/requests/sync",payload)
@@ -108,11 +118,11 @@ object AdminPayrollRequestSync {
                     val o=requests.optJSONObject(i)?:continue
                     val id=o.optString("e",o.optString("request_id",o.optString("id")))
                     val state=when(o.optString("x",o.optString("status","PENDING")).uppercase()) {
-                        "[OK]" -> "APPROVED"; "[NO]" -> "REJECTED"; else -> o.optString("status","PENDING").uppercase()
+                        SeneWireProtocol.APPROVED -> "APPROVED"; SeneWireProtocol.REJECTED -> "REJECTED"; else -> o.optString("status","PENDING").uppercase()
                     }
                     val profile=o.optString("w",o.optString("worker_id",o.optString("profile_id")))
                     if(id.isBlank()||profile.isBlank())continue
-                    val date=o.optString("i",o.optString("created_at",o.optString("date")))
+                    val date=wireDate(o.opt("i") ?: o.opt("created_at") ?: o.opt("date"))
                     val amount=o.optLong("a",o.optLong("amount_cents",o.optLong("amountCents")))
                     val type=when(o.optString("t",o.optString("type")).uppercase()) {
                         "[P$]","LOAN","PRESTAMO","PRÉSTAMO" -> "PRESTAMO"
@@ -124,7 +134,7 @@ object AdminPayrollRequestSync {
                         o.optString("z",o.optString("description",o.optString("r",o.optString("reason")))),amount,
                         o.optString("p",o.optString("product_code",o.optString("productCode"))),
                         o.optInt("q",o.optInt("quantity")),state,o.optString("by",o.optString("decided_by")),
-                        o.optLong("at",o.optLong("decided_at")),o.optString("rr",o.optString("rejection_reason")))
+                        wireMillis(o.optLong("at",o.optLong("decided_at"))),o.optString("rr",o.optString("rejection_reason")))
                     if(state=="APPROVED"||state=="REJECTED") {
                         // Primero asegura el registro pendiente; applyServerDecision solo lo finaliza
                         // cuando todos los efectos locales necesarios se aplicaron correctamente.
@@ -132,7 +142,7 @@ object AdminPayrollRequestSync {
                         OwnerPayrollStore.applyServerDecision(app,id,state,req.decidedBy,req.decidedAt,req.rejectionReason)
                     } else OwnerPayrollStore.upsertServerRequest(app,req)
                 }
-                val cursor=response.optString("next_cursor")
+                val cursor=response.optString("n",response.optString("next_cursor"))
                 if(cursor.isNotBlank())p.edit().putString("cursor",cursor).commit()
             } catch(_:Exception) {
                 // Sin conexión: la cola local sigue intacta y se reintentará después.
