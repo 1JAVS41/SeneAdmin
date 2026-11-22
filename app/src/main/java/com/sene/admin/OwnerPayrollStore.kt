@@ -436,33 +436,32 @@ object OwnerPayrollStore {
     fun decisionsPendingSync(c:Context):List<Request> = requests(c).filter{it.status=="PENDING"&&it.ownerDecision.isNotBlank()}
 
     /** Solo la confirmación final del servidor materializa el descuento de nómina. */
+    private fun finishApprovedRequest(c:Context,r:Request):Boolean {
+        // Primero se aplica el inventario con ID idempotente; solo después se registra el descuento.
+        // Si falla una parte, el estado local permanece pendiente y la próxima sincronización reintenta.
+        if(!SharedInventoryManager.applyApprovedConsumption(c,r))return false
+        val movementType=if(r.type=="PRESTAMO")"PRESTAMO" else "CONSUMO"
+        if(!entries(c,r.profileId).any{it.id==r.id} &&
+            !addEntryWithId(c,r.id,r.profileId,movementType,r.amountCents,r.description,r.date))return false
+        return recordApprovedMovement(c,r)
+    }
+
     @Synchronized fun applyServerDecision(c:Context,id:String,status:String,decidedBy:String,decidedAt:Long,rejectionReason:String=""):Boolean {
         val normalized=status.uppercase(Locale.ROOT)
         if(normalized !in setOf("APPROVED","REJECTED"))return false
-        val a=array(c,REQUESTS);val index=(0 until a.length()).firstOrNull{a.optJSONObject(it)?.optString("id")==id}?:return false
+        val a=array(c,REQUESTS)
+        val index=(0 until a.length()).firstOrNull{a.optJSONObject(it)?.optString("id")==id}?:return false
         val old=decodeRequest(a.optJSONObject(index)!!)?:return false
         if(old.status==normalized) {
-            if(normalized=="APPROVED") {
-                val movementType=if(old.type=="PRESTAMO")"PRESTAMO" else "CONSUMO"
-                if(!entries(c,old.profileId).any{it.id==old.id} &&
-                    !addEntryWithId(c,old.id,old.profileId,movementType,old.amountCents,old.description,old.date))return false
-                if(!recordApprovedMovement(c,old))return false
-                return SharedInventoryManager.applyApprovedConsumption(c,old)
-            }
+            if(normalized=="APPROVED")return finishApprovedRequest(c,old)
             return true
         }
         if(old.status!="PENDING")return false
-        val updated=old.copy(status=normalized,decidedBy=decidedBy,decidedAt=decidedAt,rejectionReason=rejectionReason,
-            ownerDecision="",ownerDecisionReason="")
+        if(normalized=="APPROVED" && !finishApprovedRequest(c,old))return false
+        val updated=old.copy(status=normalized,decidedBy=decidedBy,decidedAt=decidedAt,
+            rejectionReason=rejectionReason,ownerDecision="",ownerDecisionReason="")
         a.put(index,requestJson(updated))
-        if(!saveArray(c,REQUESTS,a))return false
-        if(normalized=="APPROVED"){
-            val movementType=if(old.type=="PRESTAMO")"PRESTAMO" else "CONSUMO"
-            if(!addEntryWithId(c,old.id,old.profileId,movementType,old.amountCents,old.description,old.date))return false
-            if(!recordApprovedMovement(c,updated))return false
-            if(!SharedInventoryManager.applyApprovedConsumption(c,updated))return false
-        }
-        return true
+        return saveArray(c,REQUESTS,a)
     }
     private fun addEntryWithId(c:Context,id:String,profileId:String,type:String,amountCents:Long,description:String,date:String):Boolean {
         val a=array(c,ENTRIES)
