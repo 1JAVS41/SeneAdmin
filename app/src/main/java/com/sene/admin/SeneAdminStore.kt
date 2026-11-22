@@ -23,6 +23,9 @@ object SeneAdminStore {
     private const val ALIAS = "SENE_ADMIN_REPORTS_STORE_V2"
     private const val IV_SIZE = 12
     private const val AAD = "SENE-ADMIN-REPORTS|2"
+    private const val CLEANUP_KEY = "last_reports_cleanup"
+    private const val RETENTION_MS = 30L * 24L * 60L * 60L * 1000L
+    private const val KEEP_PER_TYPE = 10
 
     private fun prefs(c: Context) = c.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
     private fun file(c: Context) = File(c.applicationContext.filesDir, FILE)
@@ -82,8 +85,50 @@ object SeneAdminStore {
     @Synchronized private fun readArray(c: Context): JSONArray {
         migrateLegacy(c)
         val target = file(c)
-        if (target.exists()) return JSONArray(decode(target.readBytes()))
-        return JSONArray()
+        val array = if (target.exists()) JSONArray(decode(target.readBytes())) else JSONArray()
+        return cleanupArrayIfDue(c, array)
+    }
+
+    /** Cada 30 días conserva los 10 reportes más recientes de cada tipo y los más nuevos. */
+    private fun cleanupArrayIfDue(c: Context, source: JSONArray): JSONArray {
+        val p = prefs(c)
+        val now = System.currentTimeMillis()
+        val last = p.getLong(CLEANUP_KEY, 0L)
+        if (last > 0L && now - last < RETENTION_MS) return source
+        val grouped = linkedMapOf<String, MutableList<Pair<Int, Long>>>()
+        for (i in 0 until source.length()) {
+            val item = source.optJSONObject(i) ?: continue
+            val type = item.optString("type").ifBlank { "SIN_TIPO" }
+            val stamp = try {
+                val parser = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.US)
+                parser.isLenient = false
+                parser.parse(item.optString("date") + " " + item.optString("time"))?.time ?: 0L
+            } catch (_: Exception) { 0L }
+            grouped.getOrPut(type) { mutableListOf() }.add(i to stamp)
+        }
+        val keep = mutableSetOf<Int>()
+        val cutoff = now - RETENTION_MS
+        grouped.values.forEach { entries ->
+            val ordered = entries.sortedWith(compareByDescending<Pair<Int, Long>> { it.second }.thenByDescending { it.first })
+            ordered.forEachIndexed { index, pair ->
+                if (index < KEEP_PER_TYPE || pair.second == 0L || pair.second >= cutoff) keep.add(pair.first)
+            }
+        }
+        val cleaned = JSONArray()
+        for (i in 0 until source.length()) if (i in keep) source.optJSONObject(i)?.let { cleaned.put(it) }
+        if (cleaned.length() == source.length()) {
+            p.edit().putLong(CLEANUP_KEY, now).commit()
+            return source
+        }
+        if (write(c, cleaned.toString())) {
+            p.edit().putLong(CLEANUP_KEY, now).commit()
+            return cleaned
+        }
+        return source
+    }
+
+    @Synchronized fun cleanupIfDue(c: Context) {
+        try { readArray(c) } catch (_: Exception) { /* Conservar íntegro el archivo si no puede leerse. */ }
     }
 
     @Synchronized fun reports(c: Context): List<SeneReport> {
