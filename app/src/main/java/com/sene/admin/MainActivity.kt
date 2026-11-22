@@ -444,9 +444,7 @@ class MainActivity : AppCompatActivity() {
             val event = events.optJSONObject(index) ?: return@mapNotNull null
             val worker = event.optString("w").ifBlank { "Trabajador" }
             val kindCode = event.optString("k")
-            val reportType = event.optString("b").lineSequence()
-                .firstOrNull { it.startsWith("TYPE=") }?.substringAfter("=").orEmpty()
-            val kind = if (reportType.equals("MOVEMENTS", true)) "Reporte de movimientos" else when (kindCode) {
+            val kind = when (kindCode) {
                 "[EC]" -> "Inicio de turno"
                 "[CO]" -> "Cierre de jornada"
                 "[CA]" -> "Cierre anticipado"
@@ -492,7 +490,7 @@ class MainActivity : AppCompatActivity() {
                 }
                 val ok = when {
                     report.body.startsWith("SENE-ORDER|1") -> OwnerPayrollStore.importOrder(this, report)
-                    report.type.equals("MOVEMENTS", true) -> true
+                    report.type == SeneWireProtocol.SYNC && report.body.startsWith("SENE VENTAS  •  REPORTE DE MOVIMIENTOS") -> true
                     else -> OwnerPayrollStore.importProfile(this, report)
                 }
                 if (!ok) {
