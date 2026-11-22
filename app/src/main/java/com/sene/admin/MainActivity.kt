@@ -449,7 +449,7 @@ class MainActivity : AppCompatActivity() {
                 "[CO]" -> "Cierre de jornada"
                 "[CA]" -> "Cierre anticipado"
                 "[AD]" -> "Cierre administrativo"
-                "[SYNC]" -> "Reporte periódico"
+                "[SYNC]" -> "Reporte sincronizado"
                 else -> kindCode.ifBlank { "Reporte" }
             }
             val date = event.optLong("i").takeIf { it > 0L }?.let {
