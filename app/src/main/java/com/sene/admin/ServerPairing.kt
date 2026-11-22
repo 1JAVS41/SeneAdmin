@@ -94,29 +94,37 @@ object AdminPayrollRequestSync {
             try {
                 val decisions=JSONArray()
                 OwnerPayrollStore.decisionsPendingSync(app).forEach{r->
-                    decisions.put(JSONObject().put("request_id",r.id).put("decision",r.ownerDecision)
-                        .put("reason",r.ownerDecisionReason))
+                    decisions.put(JSONObject().put("e",r.id)
+                        .put("x",if(r.ownerDecision=="APPROVE") "[OK]" else "[NO]")
+                        .put("r",r.ownerDecisionReason))
                 }
-                val payload=JSONObject().put("admin_token",token)
-                    .put("cursor",p.getString("cursor","").orEmpty()).put("decisions",decisions)
+                val payload=JSONObject().put("v",SeneWireProtocol.VERSION).put("t","[SYNC]")
+                    .put("a",token).put("c",p.getString("cursor","").orEmpty()).put("d",decisions)
                 p.edit().putLong("last_attempt",now).commit()
                 val response=ServerPairing.post("/admin/payroll/requests/sync",payload)
                 if(response.optInt("_http_status",0) !in 200..299)return@Thread
-                val requests=response.optJSONArray("requests")?:JSONArray()
+                val requests=response.optJSONArray("items")?:response.optJSONArray("requests")?:JSONArray()
                 for(i in 0 until requests.length()) {
                     val o=requests.optJSONObject(i)?:continue
-                    val id=o.optString("request_id",o.optString("id"))
-                    val state=o.optString("status","PENDING").uppercase()
-                    val profile=o.optString("worker_id",o.optString("profile_id"))
+                    val id=o.optString("e",o.optString("request_id",o.optString("id")))
+                    val state=when(o.optString("x",o.optString("status","PENDING")).uppercase()) {
+                        "[OK]" -> "APPROVED"; "[NO]" -> "REJECTED"; else -> o.optString("status","PENDING").uppercase()
+                    }
+                    val profile=o.optString("w",o.optString("worker_id",o.optString("profile_id")))
                     if(id.isBlank()||profile.isBlank())continue
-                    val date=o.optString("created_at",o.optString("date"))
-                    val amount=o.optLong("amount_cents",o.optLong("amountCents"))
-                    val type=when(o.optString("type").uppercase()){"LOAN","PRESTAMO","PRÉSTAMO"->"PRESTAMO";"CONSUMPTION","CONSUMO"->"CONSUMO";else->""}
+                    val date=o.optString("i",o.optString("created_at",o.optString("date")))
+                    val amount=o.optLong("a",o.optLong("amount_cents",o.optLong("amountCents")))
+                    val type=when(o.optString("t",o.optString("type")).uppercase()) {
+                        "[P$]","LOAN","PRESTAMO","PRÉSTAMO" -> "PRESTAMO"
+                        "[C$]","CONSUMPTION","CONSUMO" -> "CONSUMO"
+                        else -> ""
+                    }
                     if(type.isBlank())continue
                     val req=OwnerPayrollStore.Request(id,profile,type,date,
-                        o.optString("description",o.optString("reason")),amount,o.optString("product_code",o.optString("productCode")),
-                        o.optInt("quantity"),state,o.optString("decided_by"),o.optLong("decided_at"),
-                        o.optString("rejection_reason"))
+                        o.optString("z",o.optString("description",o.optString("r",o.optString("reason")))),amount,
+                        o.optString("p",o.optString("product_code",o.optString("productCode"))),
+                        o.optInt("q",o.optInt("quantity")),state,o.optString("by",o.optString("decided_by")),
+                        o.optLong("at",o.optLong("decided_at")),o.optString("rr",o.optString("rejection_reason")))
                     if(state=="APPROVED"||state=="REJECTED") {
                         // Primero asegura el registro pendiente; applyServerDecision solo lo finaliza
                         // cuando todos los efectos locales necesarios se aplicaron correctamente.
