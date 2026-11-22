@@ -580,6 +580,7 @@ object OwnerPayrollStore {
         }.toMap()
         val orderId = fields["ORDER_ID"].orEmpty()
         val profileId = fields["WORKER_ID"].orEmpty().ifBlank { report.workerId }
+        if(isDeletedProfile(c,profileId))return true
         val type = when (fields["ORDER_TYPE"]) { "CONSUMO" -> "CONSUMO"; "PRESTAMO" -> "PRESTAMO"; else -> return false }
         val cents = fields["AMOUNT_CENTS"]?.toLongOrNull()?.takeIf { it > 0 } ?: return false
         if (orderId.isBlank()) return false
