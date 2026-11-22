@@ -105,7 +105,8 @@ object OwnerPayrollStore {
             val parsed=SimpleDateFormat(pattern,Locale("es","MX")).apply{isLenient=false}.parse(value)?:continue
             return SimpleDateFormat("yyyy-MM-dd",Locale.US).format(parsed)
         }catch(_:Exception){}
-        return value.take(10)
+        // No convertir textos como "No disponible" en fechas aparentes.
+        return ""
     }
 
     private fun payDayNumber(value:String):Int=when(value.trim().lowercase(Locale("es","MX"))){
