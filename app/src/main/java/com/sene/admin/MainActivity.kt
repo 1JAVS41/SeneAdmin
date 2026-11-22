@@ -412,9 +412,6 @@ class MainActivity : AppCompatActivity() {
                     showInventory(if (which == 0) "INVENTARIO_SENE" else "INVENTARIO_MAESTRO")
                 }.setNegativeButton("CERRAR", null).show()
         }
-        mainOption("⌁", "PEGAR REPORTES DE WHATSAPP", "Importar asistencia y movimientos", green = true) {
-            showPasteDialog()
-        }
         mainOption("!", "REVISAR PENDIENTES", "Productos sin stock y productos dañados") {
             showPendingReviews()
         }
@@ -422,12 +419,6 @@ class MainActivity : AppCompatActivity() {
             showSettings()
         }
 
-        root.addView(TextView(this).apply {
-            text = "RECUERDA PEGAR LOS REPORTES DE TUS TRABAJADORES"
-            textSize = 11f; letterSpacing = .04f; typeface = Typeface.DEFAULT_BOLD
-            setTextColor(0xFF9B3B37.toInt())
-            setPadding(dp(5), dp(12), dp(5), dp(4))
-        })
         setContentView(ScrollView(this).apply {
             isFillViewport = true
             clipToPadding = false
@@ -627,7 +618,7 @@ class MainActivity : AppCompatActivity() {
             if(x.length !in 4..8 || x.any { !it.isDigit() }) { a.error="Usa de 4 a 8 números"; return@setOnClickListener }
             if(x!=b.text.toString()) { b.error="Los PIN no coinciden"; return@setOnClickListener }
             if(!AccessPinStore.save(this,x)) { a.error="No se pudo guardar"; return@setOnClickListener }
-            d.dismiss(); handleIncoming(intent)
+            d.dismiss()
         } }
         d.show()
     }
