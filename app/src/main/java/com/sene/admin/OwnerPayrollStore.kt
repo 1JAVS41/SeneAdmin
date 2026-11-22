@@ -243,7 +243,7 @@ object OwnerPayrollStore {
         val count=reportedCount.coerceAtMost(eligibleDays)
         if(payrolls(c,r.workerId).any{it.period==payrollPeriod&&it.status=="PAGADA"})
             return prefs(c).edit().putString(stampKey,stamp).commit()
-        val amount=(p.weeklySalaryCents/daysPerWeek*count).coerceAtMost(p.weeklySalaryCents)
+        val amount=(p.weeklySalaryCents*count/daysPerWeek).coerceAtMost(p.weeklySalaryCents)
         val id="attendance-absence-"+r.workerId+"-"+payrollPeriod
         val a=array(c,ENTRIES)
         val index=(0 until a.length()).firstOrNull{a.optJSONObject(it)?.optString("id")==id}
@@ -439,7 +439,7 @@ object OwnerPayrollStore {
             }
         }
         val daysPerWeek=scheduled.size
-        val amount=if(daysPerWeek>0)(p.weeklySalaryCents/daysPerWeek*missing).coerceAtMost(p.weeklySalaryCents) else 0L
+        val amount=if(daysPerWeek>0)(p.weeklySalaryCents*missing/daysPerWeek).coerceAtMost(p.weeklySalaryCents) else 0L
         val id="attendance-absence-"+p.id+"-"+periodEnd
         val a=array(c,ENTRIES)
         val index=(0 until a.length()).firstOrNull{a.optJSONObject(it)?.optString("id")==id}
