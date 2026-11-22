@@ -149,12 +149,15 @@ object SharedInventoryManager {
             }
         }
         collect(dir, 0)
-        return files.sortedByDescending { sortKey(it.first) }.mapNotNull { (name, _, uri) ->
+        val snapshots = files.sortedByDescending { sortKey(it.first) }.mapNotNull { (name, _, uri) ->
             try {
                 val bytes = c.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return@mapNotNull null
                 decode(c, bytes, ownerKey, category, name)
             } catch (_: Exception) { null }
         }
+        // Migración oportunista: guarda una copia privada cifrada del respaldo más reciente.
+        snapshots.firstOrNull()?.let { InventoryLocalStore.save(c, it) }
+        return snapshots
     }
 
     fun save(c: Context, ownerKey: String, category: String, items: List<Item>, updatedOverride: String? = null): String {
@@ -179,6 +182,7 @@ object SharedInventoryManager {
         val local = java.io.File(c.filesDir, "SENE-ADMIN/$dirName")
         if (!local.exists() && !local.mkdirs()) throw IllegalStateException("No se pudo crear la copia local.")
         java.io.File(local, name).writeBytes(bytes)
+        InventoryLocalStore.save(c, Snapshot(category, name, updated, items, false))
         cleanupIfDue(c, tree, dirName, ownerKey)
         return name
     }
