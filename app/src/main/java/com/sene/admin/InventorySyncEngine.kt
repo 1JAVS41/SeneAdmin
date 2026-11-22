@@ -28,7 +28,7 @@ object InventorySyncEngine {
         if (stamp < last) return true
         val category = if (scope == "M") "INVENTARIO_MAESTRO" else "INVENTARIO_SENE"
         val base = InventoryLocalStore.snapshot(c, category)
-            ?: if (scope == "S") latestReportInventory(c) else null
+            ?: (if (scope == "S") latestReportInventory(c) else null)
             ?: run {
                 val key = OwnerKeyStore.read(c)?.takeIf { it.isNotBlank() }
                 if (key != null) try { SharedInventoryManager.list(c, key, category).firstOrNull() } catch (_: Exception) { null }
