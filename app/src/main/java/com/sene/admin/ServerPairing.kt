@@ -144,6 +144,7 @@ object AdminPayrollRequestSync {
                     .put("a",token).put("c",p.getString("cursor","").orEmpty()).put("d",decisions)
                     .put("ha",try{JSONArray(p.getString(ATTENDANCE_ACKS,"[]")?:"[]")}catch(_:Exception){JSONArray()})
                     .put("gi",try{JSONArray(p.getString(INVENTORY_ACKS,"[]")?:"[]")}catch(_:Exception){JSONArray()})
+                    .put("ba",ReportInboxStore.pendingAcks(app))
                 p.edit().putLong("last_attempt",now).commit()
                 val response=ServerPairing.post("/admin/payroll/requests/sync",payload)
                 if(response.optInt("_http_status",0) !in 200..299)return@Thread
@@ -195,6 +196,13 @@ object AdminPayrollRequestSync {
                 mergeInventoryAcks(p,acceptedInventory)
                 val inventoryServerAck=response.optJSONArray("gaa")?:response.optJSONArray("inventory_ack_acks")?:JSONArray()
                 clearInventoryAcks(p,inventoryServerAck)
+
+                // Persistir los sobres antes de confirmar su recepción al servidor.
+                val reports=response.optJSONArray("b")?:response.optJSONArray("reports")?:JSONArray()
+                ReportInboxStore.accept(app,reports)
+                val reportAckConfirmations=response.optJSONArray("baa")?:response.optJSONArray("report_ack_acks")?:JSONArray()
+                ReportInboxStore.acknowledgeAcks(app,reportAckConfirmations)
+
                 val cursor=response.optString("n",response.optString("next_cursor"))
                 if(cursor.isNotBlank())p.edit().putString("cursor",cursor).commit()
             } catch(_:Exception) {
