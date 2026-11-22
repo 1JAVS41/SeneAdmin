@@ -472,6 +472,56 @@ object OwnerPayrollStore {
     }
 
     data class AttendanceSummary(val period:String,val workedDays:Int,val absences:Int,val closingType:String,val closingReason:String,val started:String,val closed:String)
+    /** Aplica un evento remoto de jornada sin modificar las reglas de cálculo de nómina. */
+    @Synchronized fun applySyncedAttendance(c:Context,event:JSONObject):Boolean {
+        val eventId=event.optString("e")
+        val workerId=event.optString("w")
+        val day=event.optString("d")
+        val state=event.optString("x")
+        if(eventId.isBlank()||workerId.isBlank()||day.length!=10)return false
+        if(isDeletedProfile(c,workerId))return true
+        if(state !in setOf(SeneWireProtocol.IN_PROGRESS,SeneWireProtocol.FULL_SHIFT,
+                SeneWireProtocol.EARLY_CLOSE,SeneWireProtocol.ADMIN_CLOSE))return false
+        val startedAt=event.optLong("s",0L)
+        val closedAt=event.optLong("f",0L)
+        val eventStamp=maxOf(startedAt,closedAt)
+        if(eventStamp<=0L)return false
+        val all=try{JSONObject(prefs(c).getString("attendance_days","{}")?:"{}")}catch(_:Exception){JSONObject()}
+        val worker=all.optJSONObject(workerId)?:JSONObject()
+        val old=worker.optJSONObject(day)?:JSONObject()
+        if(eventStamp<old.optLong("wireStamp",0L))return true
+        val merged=JSONObject(old.toString())
+        val previousStart=old.optLong("startedAt",0L)
+        val previousClose=old.optLong("closedAt",0L)
+        val start=when {
+            previousStart<=0L -> startedAt
+            startedAt<=0L -> previousStart
+            else -> minOf(previousStart,startedAt)
+        }
+        val close=maxOf(previousClose,closedAt)
+        if(start>0L) {
+            merged.put("startedAt",start)
+            merged.put("started",SimpleDateFormat("HH:mm",Locale("es","MX")).format(Date(start)))
+        }
+        if(close>0L) {
+            merged.put("closedAt",close)
+            merged.put("closed",SimpleDateFormat("HH:mm",Locale("es","MX")).format(Date(close)))
+        }
+        val status=when {
+            close<=0L -> "WORKING"
+            state==SeneWireProtocol.ADMIN_CLOSE -> "ADMIN_CLOSED"
+            state==SeneWireProtocol.FULL_SHIFT -> "WORKED"
+            state==SeneWireProtocol.EARLY_CLOSE -> "EARLY_EXIT"
+            else -> old.optString("status","WORKING")
+        }
+        merged.put("status",status).put("wireStamp",eventStamp)
+            .put("wireEventId",eventId).put("closureReason",event.optString("m"))
+            .put("closureSource",event.optString("o"))
+        worker.put(day,merged)
+        all.put(workerId,worker)
+        return prefs(c).edit().putString("attendance_days",all.toString()).commit()
+    }
+
     fun attendanceSummary(c:Context,profileId:String):AttendanceSummary? {
         return try{
             val all=JSONObject(prefs(c).getString("attendance_summary","{}")?:"{}")
