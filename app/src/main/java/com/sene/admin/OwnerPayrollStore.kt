@@ -478,7 +478,7 @@ object OwnerPayrollStore {
         val workerId=event.optString("w")
         val day=event.optString("d")
         val state=event.optString("x")
-        if(eventId.isBlank()||workerId.isBlank()||day.length!=10)return false
+        if(eventId.isBlank()||workerId.isBlank()||day.length!=10||event.optString("t")!=SeneWireProtocol.ATTENDANCE_SYNC)return false
         if(isDeletedProfile(c,workerId))return true
         if(state !in setOf(SeneWireProtocol.IN_PROGRESS,SeneWireProtocol.FULL_SHIFT,
                 SeneWireProtocol.EARLY_CLOSE,SeneWireProtocol.ADMIN_CLOSE))return false
