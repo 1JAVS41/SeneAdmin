@@ -53,6 +53,11 @@ class PayrollActivity : Activity() {
             textSize = 12f; setTextColor(0xFFE5EEFF.toInt())
         })
         root.addView(hero, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(17) })
+        root.addView(Button(this).apply {
+            text = "SOLICITUDES DE PRÉSTAMO Y CONSUMO"
+            isAllCaps = false
+            setOnClickListener { showRequests() }
+        }, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(12) })
         root.addView(TextView(this).apply {
             text = "TRABAJADORES REGISTRADOS"; textSize = 12f; letterSpacing = .1f
             typeface = android.graphics.Typeface.DEFAULT_BOLD; setTextColor(0xFF60738F.toInt())
@@ -87,6 +92,88 @@ class PayrollActivity : Activity() {
             addView(root)
         })
     }
+    private fun showRequests() {
+        fun dp(value:Int)=(value*resources.displayMetrics.density+0.5f).toInt()
+        val all=OwnerPayrollStore.requests(this)
+        val content=LinearLayout(this).apply {
+            orientation=LinearLayout.VERTICAL
+            setPadding(dp(14),dp(12),dp(14),dp(18))
+            setBackgroundColor(0xFFF1F5FB.toInt())
+        }
+        if(all.isEmpty()) {
+            content.addView(TextView(this).apply {
+                text="No hay solicitudes recibidas todavía. Cuando SENE VENTAS sincronice una solicitud, aparecerá aquí."
+                textSize=14f;setTextColor(0xFF53657D.toInt());setPadding(dp(12),dp(16),dp(12),dp(16))
+            })
+        }
+        all.forEach { request ->
+            val worker=OwnerPayrollStore.profile(this,request.profileId)?.name ?: request.profileId
+            val kind=if(request.type=="PRESTAMO")"PRÉSTAMO" else "CONSUMO"
+            val state=when {
+                request.status=="APPROVED" -> "AUTORIZADA"
+                request.status=="REJECTED" -> "RECHAZADA"
+                request.ownerDecision=="APPROVE" -> "APROBACIÓN PENDIENTE DE SINCRONIZAR"
+                request.ownerDecision=="REJECT" -> "RECHAZO PENDIENTE DE SINCRONIZAR"
+                else -> "PENDIENTE DE AUTORIZACIÓN"
+            }
+            val card=LinearLayout(this).apply {
+                orientation=LinearLayout.VERTICAL;setPadding(dp(15),dp(13),dp(15),dp(13))
+                background=android.graphics.drawable.GradientDrawable().apply {
+                    setColor(-1);cornerRadius=dp(17).toFloat();setStroke(dp(1),0xFFD9E3F0.toInt())
+                }
+            }
+            card.addView(TextView(this).apply {
+                text="$kind · $worker";textSize=16f;typeface=android.graphics.Typeface.DEFAULT_BOLD
+                setTextColor(0xFF173A68.toInt())
+            })
+            val details=buildString {
+                append("Fecha: ").append(request.date).append("\n")
+                append("Importe: ").append(OwnerPayrollStore.money(request.amountCents)).append("\n")
+                if(request.description.isNotBlank())append("Detalle: ").append(request.description).append("\n")
+                if(request.productCode.isNotBlank())append("Código: ").append(request.productCode).append(" · Cantidad: ").append(request.quantity).append("\n")
+                append("Estado: ").append(state)
+                if(request.decidedBy.isNotBlank())append("\nAutorizó: ").append(request.decidedBy)
+                if(request.rejectionReason.isNotBlank())append("\nMotivo de rechazo: ").append(request.rejectionReason)
+            }
+            card.addView(TextView(this).apply {
+                text=details;textSize=13f;setTextColor(0xFF53657D.toInt());setPadding(0,dp(7),0,dp(7))
+            })
+            if(request.status=="PENDING"&&request.ownerDecision.isBlank()) {
+                val actions=LinearLayout(this).apply{orientation=LinearLayout.HORIZONTAL}
+                actions.addView(Button(this@PayrollActivity).apply {
+                    text="AUTORIZAR";isAllCaps=false
+                    setOnClickListener {
+                        AlertDialog.Builder(this@PayrollActivity)
+                            .setTitle("AUTORIZAR $kind")
+                            .setMessage("La autorización se enviará al servidor. El descuento de nómina y, en consumos, el movimiento de inventario solo se aplicarán cuando el servidor confirme la decisión.")
+                            .setPositiveButton("CONFIRMAR") { _, _ ->
+                                if(OwnerPayrollStore.queueRequestDecision(this@PayrollActivity,request.id,true))
+                                    Toast.makeText(this@PayrollActivity,"Autorización guardada. Pendiente de sincronizar con el servidor.",Toast.LENGTH_LONG).show()
+                                showRequests()
+                            }.setNegativeButton("CANCELAR",null).show()
+                    }
+                },LinearLayout.LayoutParams(0,-2,1f))
+                actions.addView(Button(this@PayrollActivity).apply {
+                    text="RECHAZAR";isAllCaps=false
+                    setOnClickListener {
+                        val reason=EditText(this@PayrollActivity).apply{hint="Motivo (opcional)"}
+                        AlertDialog.Builder(this@PayrollActivity).setTitle("RECHAZAR $kind").setView(reason)
+                            .setPositiveButton("CONFIRMAR") { _, _ ->
+                                if(OwnerPayrollStore.queueRequestDecision(this@PayrollActivity,request.id,false,reason.text.toString()))
+                                    Toast.makeText(this@PayrollActivity,"Rechazo guardado. Pendiente de sincronizar con el servidor.",Toast.LENGTH_LONG).show()
+                                showRequests()
+                            }.setNegativeButton("CANCELAR",null).show()
+                    }
+                },LinearLayout.LayoutParams(0,-2,1f))
+                card.addView(actions)
+            }
+            content.addView(card,LinearLayout.LayoutParams(-1,-2).apply{bottomMargin=dp(10)})
+        }
+        AlertDialog.Builder(this).setTitle("SOLICITUDES · AUTORIZACIÓN")
+            .setView(ScrollView(this).apply{addView(content)})
+            .setPositiveButton("CERRAR",null).show()
+    }
+
     private fun addCard(title: String, subtitle: String, action: () -> Unit) {
         val box = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
