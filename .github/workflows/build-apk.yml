@@ -1,4 +1,4 @@
-name: Compilar APK SENE ADMIN
+name: Compilar APK SENE ADMIN (pruebas)
 on:
   push:
     branches: [main, work/sene-admin-foundation, work/payroll-dashboard-v2, fix/no-nested-inventario-sene-payroll, fix/payroll-zero-net-modern-ui, fix/payroll-attendance-sync-2026-11, feature/loan-consumption-approval-client]
