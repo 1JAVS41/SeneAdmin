@@ -118,7 +118,9 @@ object AdminPayrollRequestSync {
                         o.optInt("quantity"),state,o.optString("decided_by"),o.optLong("decided_at"),
                         o.optString("rejection_reason"))
                     if(state=="APPROVED"||state=="REJECTED") {
-                        OwnerPayrollStore.upsertServerRequest(app,req.copy(ownerDecision="",ownerDecisionReason=""))
+                        // Primero asegura el registro pendiente; applyServerDecision solo lo finaliza
+                        // cuando todos los efectos locales necesarios se aplicaron correctamente.
+                        OwnerPayrollStore.upsertServerRequest(app,req.copy(status="PENDING",ownerDecision="",ownerDecisionReason=""))
                         OwnerPayrollStore.applyServerDecision(app,id,state,req.decidedBy,req.decidedAt,req.rejectionReason)
                     } else OwnerPayrollStore.upsertServerRequest(app,req)
                 }
