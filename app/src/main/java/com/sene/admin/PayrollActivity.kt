@@ -92,6 +92,33 @@ class PayrollActivity : Activity() {
             addView(root)
         })
     }
+    private fun requireOwnerPin(onAuthorized:()->Unit) {
+        if(!AccessPinStore.hasPin(this)) {
+            AlertDialog.Builder(this).setTitle("PIN NO CONFIGURADO")
+                .setMessage("Primero configura el PIN privado de SeneAdmin.")
+                .setPositiveButton("ACEPTAR",null).show()
+            return
+        }
+        val pin=EditText(this).apply {
+            hint="PIN de SeneAdmin"
+            inputType=InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_VARIATION_PASSWORD
+        }
+        val dialog=AlertDialog.Builder(this).setTitle("CONFIRMAR AL PATRÓN")
+            .setMessage("Ingresa tu PIN para confirmar esta decisión.")
+            .setView(pin).setPositiveButton("AUTORIZAR",null).setNegativeButton("CANCELAR",null).create()
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                if(!AccessPinStore.matches(this,pin.text.toString())) {
+                    pin.error="PIN incorrecto"
+                    return@setOnClickListener
+                }
+                dialog.dismiss()
+                onAuthorized()
+            }
+        }
+        dialog.show()
+    }
+
     private fun showRequests() {
         AdminPayrollRequestSync.sync(this,true)
         fun dp(value:Int)=(value*resources.displayMetrics.density+0.5f).toInt()
@@ -148,11 +175,13 @@ class PayrollActivity : Activity() {
                             .setTitle("AUTORIZAR $kind")
                             .setMessage("La autorización se enviará al servidor. El descuento de nómina y, en consumos, el movimiento de inventario solo se aplicarán cuando el servidor confirme la decisión.")
                             .setPositiveButton("CONFIRMAR") { _, _ ->
-                                if(OwnerPayrollStore.queueRequestDecision(this@PayrollActivity,request.id,true)) {
-                                    Toast.makeText(this@PayrollActivity,"Autorización guardada. Enviando decisión al servidor...",Toast.LENGTH_LONG).show()
-                                    AdminPayrollRequestSync.sync(this@PayrollActivity,true)
+                                requireOwnerPin {
+                                    if(OwnerPayrollStore.queueRequestDecision(this@PayrollActivity,request.id,true)) {
+                                        Toast.makeText(this@PayrollActivity,"Autorización guardada. Enviando decisión al servidor...",Toast.LENGTH_LONG).show()
+                                        AdminPayrollRequestSync.sync(this@PayrollActivity,true)
+                                    }
+                                    showRequests()
                                 }
-                                showRequests()
                             }.setNegativeButton("CANCELAR",null).show()
                     }
                 },LinearLayout.LayoutParams(0,-2,1f))
@@ -162,11 +191,13 @@ class PayrollActivity : Activity() {
                         val reason=EditText(this@PayrollActivity).apply{hint="Motivo (opcional)"}
                         AlertDialog.Builder(this@PayrollActivity).setTitle("RECHAZAR $kind").setView(reason)
                             .setPositiveButton("CONFIRMAR") { _, _ ->
-                                if(OwnerPayrollStore.queueRequestDecision(this@PayrollActivity,request.id,false,reason.text.toString())) {
-                                    Toast.makeText(this@PayrollActivity,"Rechazo guardado. Enviando decisión al servidor...",Toast.LENGTH_LONG).show()
-                                    AdminPayrollRequestSync.sync(this@PayrollActivity,true)
+                                requireOwnerPin {
+                                    if(OwnerPayrollStore.queueRequestDecision(this@PayrollActivity,request.id,false,reason.text.toString())) {
+                                        Toast.makeText(this@PayrollActivity,"Rechazo guardado. Enviando decisión al servidor...",Toast.LENGTH_LONG).show()
+                                        AdminPayrollRequestSync.sync(this@PayrollActivity,true)
+                                    }
+                                    showRequests()
                                 }
-                                showRequests()
                             }.setNegativeButton("CANCELAR",null).show()
                     }
                 },LinearLayout.LayoutParams(0,-2,1f))
