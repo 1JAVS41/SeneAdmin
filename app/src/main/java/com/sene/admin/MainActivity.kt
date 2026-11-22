@@ -459,13 +459,10 @@ class MainActivity : AppCompatActivity() {
         }
         val message = "Reportes recibidos y protegidos en este dispositivo:\n\n" +
             lines.joinToString("\n") +
-            "\n\nLa importación de su contenido histórico requiere la clave de cifrado antigua. Los sobres permanecen guardados hasta completar la migración de cifrado."
+            "\n\nLos reportes nuevos se descifran con la clave privada protegida de este dispositivo. Los reportes históricos conservan su compatibilidad y pueden requerir la clave anterior."
         val builder = AlertDialog.Builder(this).setTitle("BUZÓN DE REPORTES")
             .setMessage(message).setPositiveButton("CERRAR", null)
-        val legacyKey = OwnerKeyStore.read(this)
-        if (!legacyKey.isNullOrBlank()) {
-            builder.setNeutralButton("IMPORTAR REPORTES") { _, _ -> importServerReportEnvelopes() }
-        }
+        builder.setNeutralButton("IMPORTAR REPORTES") { _, _ -> importServerReportEnvelopes() }
         builder.show()
     }
 
