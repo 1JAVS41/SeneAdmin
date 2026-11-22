@@ -264,6 +264,10 @@ object SharedInventoryManager {
         return name
     }
 
+    private fun readReportPayload(raw: String, ownerKey: String): SeneReport =
+        if (raw.trimStart().startsWith("SENE-ADMIN-REPORT|2")) SeneReportV2Reader.read(raw)
+        else SeneReportReader.read(raw, ownerKey)
+
     /** Recupera reportes cifrados desde la carpeta compartida sin modificar los archivos originales. */
     fun archivedReports(c: Context, ownerKey: String): List<SeneReport> {
         val tree = savedTree(c) ?: return emptyList()
@@ -272,7 +276,7 @@ object SharedInventoryManager {
             .sortedByDescending { it.first }.mapNotNull { (_, _, uri) ->
                 try {
                     val raw = c.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return@mapNotNull null
-                    SeneReportReader.read(String(raw, Charsets.UTF_8), ownerKey)
+                    readReportPayload(String(raw, Charsets.UTF_8), ownerKey)
                 } catch (_: Exception) { null }
             }
     }
