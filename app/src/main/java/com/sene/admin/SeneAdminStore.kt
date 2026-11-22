@@ -82,12 +82,12 @@ object SeneAdminStore {
     @Synchronized private fun readArray(c: Context): JSONArray {
         migrateLegacy(c)
         val target = file(c)
-        if (target.exists()) return try { JSONArray(decode(target.readBytes())) } catch (_: Exception) { JSONArray() }
+        if (target.exists()) return JSONArray(decode(target.readBytes()))
         return JSONArray()
     }
 
     @Synchronized fun reports(c: Context): List<SeneReport> {
-        val array = readArray(c)
+        val array = try { readArray(c) } catch (_: Exception) { return emptyList() }
         return (0 until array.length()).mapNotNull { i ->
             try {
                 val o = array.getJSONObject(i)
@@ -103,7 +103,7 @@ object SeneAdminStore {
     /** Guarda el lote completo cifrado; los IDs hacen idempotente la importación. */
     @Synchronized fun saveReports(c: Context, incoming: List<SeneReport>): Boolean {
         if (incoming.isEmpty()) return true
-        val array = readArray(c)
+        val array = try { readArray(c) } catch (_: Exception) { return false }
         val known = HashSet<String>()
         for (i in 0 until array.length()) array.optJSONObject(i)?.optString("id")
             ?.takeIf { it.isNotBlank() }?.let(known::add)
