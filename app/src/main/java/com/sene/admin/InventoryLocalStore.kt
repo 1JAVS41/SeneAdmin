@@ -58,17 +58,19 @@ object InventoryLocalStore {
         finally { if (temp.exists()) temp.delete() }
     }
 
-    @Synchronized fun snapshot(c: Context, category: String): SharedInventoryManager.Snapshot? = try {
-        val o = readAll(c).optJSONObject(category) ?: return null
-        val rows = o.optJSONArray("items") ?: JSONArray()
-        val items = (0 until rows.length()).mapNotNull { i ->
-            val row = rows.optJSONObject(i) ?: return@mapNotNull null
-            SharedInventoryManager.Item(row.optString("c"), row.optString("n"), row.optDouble("p"),
-                row.optInt("s"), row.optString("l"), row.optString("h"))
-        }
-        if (items.isEmpty()) null else SharedInventoryManager.Snapshot(category,
-            o.optString("file", "SERVER-SENE"), o.optString("updated"), items, false)
-    } catch (_: Exception) { null }
+    @Synchronized fun snapshot(c: Context, category: String): SharedInventoryManager.Snapshot? {
+        return try {
+            val o = readAll(c).optJSONObject(category) ?: return null
+            val rows = o.optJSONArray("items") ?: JSONArray()
+            val items = (0 until rows.length()).mapNotNull { i ->
+                val row = rows.optJSONObject(i) ?: return@mapNotNull null
+                SharedInventoryManager.Item(row.optString("c"), row.optString("n"), row.optDouble("p"),
+                    row.optInt("s"), row.optString("l"), row.optString("h"))
+            }
+            if (items.isEmpty()) null else SharedInventoryManager.Snapshot(category,
+                o.optString("file", "SERVER-SENE"), o.optString("updated"), items, false)
+        } catch (_: Exception) { null }
+    }
 
     @Synchronized fun save(c: Context, snapshot: SharedInventoryManager.Snapshot): Boolean {
         if (snapshot.category !in setOf("INVENTARIO_MAESTRO", "INVENTARIO_SENE") || snapshot.items.isEmpty()) return false
