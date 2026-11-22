@@ -39,6 +39,11 @@ class MainActivity : AppCompatActivity() {
         else handleIncoming(intent)
     }
 
+    override fun onResume() {
+        super.onResume()
+        if(ServerPairing.isLinked(this)) AdminPayrollRequestSync.sync(this)
+    }
+
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
         if (requestCode == SharedInventoryManager.REQUEST_TREE && resultCode == RESULT_OK) {
