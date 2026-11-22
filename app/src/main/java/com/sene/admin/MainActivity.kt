@@ -232,6 +232,29 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showPairingDialog() {
+        if(!AccessPinStore.hasPin(this)) { askCreatePin(); return }
+        val pin=EditText(this).apply {
+            hint="PIN de SeneAdmin"
+            inputType=InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_VARIATION_PASSWORD
+        }
+        AlertDialog.Builder(this).setTitle("VERIFICAR AL PATRÓN")
+            .setMessage("Confirma tu PIN de SeneAdmin para administrar la vinculación de este negocio.")
+            .setView(pin).setPositiveButton("CONTINUAR",null).setNegativeButton("CANCELAR",null).create().also{dialog->
+                dialog.setOnShowListener{
+                    dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener{
+                        if(!AccessPinStore.matches(this,pin.text.toString())) {
+                            pin.error="PIN incorrecto"
+                            return@setOnClickListener
+                        }
+                        dialog.dismiss()
+                        showPairingCodeDialog()
+                    }
+                }
+                dialog.show()
+            }
+    }
+
+    private fun showPairingCodeDialog() {
         if(ServerPairing.isLinked(this)) {
             AlertDialog.Builder(this).setTitle("NEGOCIO VINCULADO")
                 .setMessage("SeneAdmin está conectado con: "+ServerPairing.businessName(this)+
