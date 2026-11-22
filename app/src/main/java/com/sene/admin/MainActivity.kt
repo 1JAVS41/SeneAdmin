@@ -773,8 +773,9 @@ class MainActivity : AppCompatActivity() {
 
     private fun showInventory(category: String) {
         val key = OwnerKeyStore.read(this)
-        if (key == null) { askOwnerKey(); return }
-        if (SharedInventoryManager.savedTree(this) == null) { explainSharedFolder(); return }
+        val hasLocal = SharedInventoryManager.localSnapshot(this, category) != null
+        if (key == null && !hasLocal) { askOwnerKey(); return }
+        if (SharedInventoryManager.savedTree(this) == null && !hasLocal) { explainSharedFolder(); return }
 
         val title = if (category == "INVENTARIO_MAESTRO") "INVENTARIO MAESTRO" else "INVENTARIO SENE"
         val (progress, updateProgress) = createProcessingDialog(3)
@@ -787,7 +788,7 @@ class MainActivity : AppCompatActivity() {
                 var failure: String? = null
                 try {
                     runOnUiThread { if (!isFinishing && !isDestroyed) updateProgress(1, "Buscando los respaldos disponibles...") }
-                    snapshots = SharedInventoryManager.list(this@MainActivity, key, category)
+                    snapshots = SharedInventoryManager.listAvailable(this@MainActivity, key, category)
                     runOnUiThread { if (!isFinishing && !isDestroyed) updateProgress(2, "Leyendo y preparando los productos...") }
                 } catch (e: Exception) {
                     failure = e.message ?: "Verifica la clave y los permisos. El archivo original permanece intacto."
