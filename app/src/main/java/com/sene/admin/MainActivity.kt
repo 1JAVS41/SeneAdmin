@@ -488,10 +488,10 @@ class MainActivity : AppCompatActivity() {
                 require(envelopeWorker.isBlank() || envelopeWorker == report.workerId) {
                     "El trabajador del sobre no coincide con el reporte cifrado."
                 }
-                val ok = if (report.body.startsWith("SENE-ORDER|1")) {
-                    OwnerPayrollStore.importOrder(this, report)
-                } else {
-                    OwnerPayrollStore.importProfile(this, report)
+                val ok = when {
+                    report.body.startsWith("SENE-ORDER|1") -> OwnerPayrollStore.importOrder(this, report)
+                    report.type.equals("MOVEMENTS", true) -> true
+                    else -> OwnerPayrollStore.importProfile(this, report)
                 }
                 if (!ok) {
                     failures.add("No se pudieron aplicar los datos del reporte ${report.number}.")
