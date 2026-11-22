@@ -400,6 +400,10 @@ class MainActivity : AppCompatActivity() {
         mainOption("N", "NÓMINA", "Consultar pagos y revisar asistencia") {
             startActivity(Intent(this, PayrollActivity::class.java))
         }
+        val reportCount = ReportInboxStore.events(this).length()
+        mainOption("▤", "REPORTES DEL SERVIDOR", "$reportCount reporte(s) recibido(s) y guardado(s)") {
+            showServerReportInbox()
+        }
         mainOption("♙", "ADMINISTRAR TRABAJADORES", "Crear, editar y consultar perfiles") {
             showWorkerAdministration()
         }
@@ -424,6 +428,82 @@ class MainActivity : AppCompatActivity() {
             clipToPadding = false
             addView(root)
         })
+    }
+
+
+    private fun showServerReportInbox() {
+        if (ServerPairing.isLinked(this)) AdminPayrollRequestSync.sync(this, true)
+        val events = ReportInboxStore.events(this)
+        if (events.length() == 0) {
+            AlertDialog.Builder(this).setTitle("REPORTES DEL SERVIDOR")
+                .setMessage("No hay reportes pendientes en el buzón local. Cuando SERVER-SENE entregue reportes, se guardarán aquí de forma cifrada.")
+                .setPositiveButton("ACEPTAR", null).show()
+            return
+        }
+        val lines = (0 until events.length()).mapNotNull { index ->
+            val event = events.optJSONObject(index) ?: return@mapNotNull null
+            val worker = event.optString("w").ifBlank { "Trabajador" }
+            val kind = event.optString("k").ifBlank { "Reporte" }
+            val date = event.optLong("i").takeIf { it > 0L }?.let {
+                java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.US).format(java.util.Date(it))
+            }.orEmpty()
+            "• $worker · $kind" + if (date.isBlank()) "" else " · $date"
+        }
+        val message = "Reportes recibidos y protegidos en este dispositivo:\n\n" +
+            lines.joinToString("\n") +
+            "\n\nLa importación de su contenido histórico requiere la clave de cifrado antigua. Los sobres permanecen guardados hasta completar la migración de cifrado."
+        val builder = AlertDialog.Builder(this).setTitle("BUZÓN DE REPORTES")
+            .setMessage(message).setPositiveButton("CERRAR", null)
+        val legacyKey = OwnerKeyStore.read(this)
+        if (!legacyKey.isNullOrBlank()) {
+            builder.setNeutralButton("IMPORTAR REPORTES") { _, _ -> importServerReportEnvelopes() }
+        }
+        builder.show()
+    }
+
+    private fun importServerReportEnvelopes() {
+        val key = OwnerKeyStore.read(this)
+        if (key.isNullOrBlank()) {
+            info("CLAVE NO DISPONIBLE", "Los reportes históricos siguen cifrados con el formato anterior. El buzón no se modificó.")
+            return
+        }
+        val events = ReportInboxStore.events(this)
+        val imported = mutableListOf<SeneReport>()
+        val removeIds = mutableSetOf<String>()
+        val failures = mutableListOf<String>()
+        for (i in 0 until events.length()) {
+            val event = events.optJSONObject(i) ?: continue
+            val id = event.optString("e")
+            try {
+                val report = SeneReportReader.read(event.optString("b"), key)
+                val ok = if (report.body.startsWith("SENE-ORDER|1")) {
+                    OwnerPayrollStore.importOrder(this, report)
+                } else {
+                    OwnerPayrollStore.importProfile(this, report)
+                }
+                if (!ok) {
+                    failures.add("No se pudieron aplicar los datos del reporte ${report.number}.")
+                    continue
+                }
+                imported.add(report)
+                removeIds.add(id)
+            } catch (e: Exception) {
+                failures.add(e.message ?: "No se pudo leer un reporte.")
+            }
+        }
+        if (imported.isNotEmpty() && !SeneAdminStore.saveReports(this, imported)) {
+            info("NO SE PUDO GUARDAR", "Los reportes siguen en el buzón para volver a intentar.")
+            return
+        }
+        if (!ReportInboxStore.removeImported(this, removeIds)) {
+            info("IMPORTACIÓN PARCIAL", "Los reportes se importaron, pero no se pudo actualizar el buzón. No se borraron los datos recibidos.")
+            return
+        }
+        val summary = "Reportes importados: ${imported.size}" +
+            if (failures.isEmpty()) "\nTodos los reportes válidos quedaron registrados."
+            else "\n\nPendientes por revisar:\n" + failures.take(5).joinToString("\n")
+        AlertDialog.Builder(this).setTitle("IMPORTACIÓN DE REPORTES")
+            .setMessage(summary).setPositiveButton("ACEPTAR") { _, _ -> showHome() }.show()
     }
 
     private fun showPendingReviews() {
