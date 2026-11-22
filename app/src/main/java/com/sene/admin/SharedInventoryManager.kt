@@ -189,7 +189,7 @@ object SharedInventoryManager {
         val scope=event.optString("g")
         val timestamp=event.optLong("i",0L)
         val rows=event.optJSONArray("p")?:JSONArray()
-        if(eventId.isBlank()||scope !in setOf("M","S")||timestamp<=0L||rows.length()==0)return false
+        if(eventId.isBlank()||event.optString("t")!=SeneWireProtocol.INVENTORY_SYNC||scope !in setOf("M","S")||timestamp<=0L||rows.length()==0)return false
         val p=prefs(c)
         val processed=p.getStringSet("wire_inventory_events",emptySet()).orEmpty().toMutableSet()
         if(eventId in processed)return true
