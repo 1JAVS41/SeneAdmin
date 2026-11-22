@@ -444,7 +444,9 @@ class MainActivity : AppCompatActivity() {
             val event = events.optJSONObject(index) ?: return@mapNotNull null
             val worker = event.optString("w").ifBlank { "Trabajador" }
             val kindCode = event.optString("k")
-            val kind = when (kindCode) {
+            val reportType = event.optString("b").lineSequence()
+                .firstOrNull { it.startsWith("TYPE=") }?.substringAfter("=").orEmpty()
+            val kind = if (reportType.equals("MOVEMENTS", true)) "Reporte de movimientos" else when (kindCode) {
                 "[EC]" -> "Inicio de turno"
                 "[CO]" -> "Cierre de jornada"
                 "[CA]" -> "Cierre anticipado"
