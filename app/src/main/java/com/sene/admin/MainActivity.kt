@@ -470,11 +470,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun importServerReportEnvelopes() {
-        val key = OwnerKeyStore.read(this)
-        if (key.isNullOrBlank()) {
-            info("CLAVE NO DISPONIBLE", "Los reportes históricos siguen cifrados con el formato anterior. El buzón no se modificó.")
-            return
-        }
+        val legacyKey = OwnerKeyStore.read(this)
         val events = ReportInboxStore.events(this)
         val imported = mutableListOf<SeneReport>()
         val removeIds = mutableSetOf<String>()
@@ -483,7 +479,14 @@ class MainActivity : AppCompatActivity() {
             val event = events.optJSONObject(i) ?: continue
             val id = event.optString("e")
             try {
-                val report = SeneReportReader.read(event.optString("b"), key)
+                val encryptedPayload = event.optString("b")
+                val report = if (encryptedPayload.trimStart().startsWith("SENE-ADMIN-REPORT|2")) {
+                    SeneReportV2Reader.read(encryptedPayload)
+                } else {
+                    val key = legacyKey?.takeIf { it.isNotBlank() }
+                        ?: throw IllegalStateException("Este reporte histórico requiere la clave de cifrado anterior.")
+                    SeneReportReader.read(encryptedPayload, key)
+                }
                 val envelopeWorker = event.optString("w")
                 require(envelopeWorker.isBlank() || envelopeWorker == report.workerId) {
                     "El trabajador del sobre no coincide con el reporte cifrado."
