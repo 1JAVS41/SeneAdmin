@@ -526,23 +526,25 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showOutOfStockProducts() {
+        val local = SharedInventoryManager.localSnapshot(this, "INVENTARIO_SENE")
         val latest = SeneAdminStore.reports(this)
             .sortedWith(compareByDescending<SeneReport> { it.date }.thenByDescending { it.time }.thenByDescending { it.number })
             .firstNotNullOfOrNull { report ->
                 SharedInventoryManager.inventoryFromReport(report)?.let { report to it }
             }
-        if (latest == null) {
+        val snapshot = local ?: latest?.second
+        if (snapshot == null) {
             info("PRODUCTOS SIN STOCK", "Todavía no hay un inventario válido recibido.")
             return
         }
-        val (report, snapshot) = latest
+        val updatedLabel = local?.updated ?: latest?.first?.let { it.date + " " + it.time }.orEmpty()
         val empty = snapshot.items.filter { it.stock <= 0 }.distinctBy { it.code.ifBlank { it.name } }
         val content = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(14, 12, 14, 12)
             setBackgroundColor(0xFFF4F7FB.toInt())
         }
-        addLabel(content, "Inventario actualizado", report.date + " " + report.time, 0xFFDCEBFA.toInt())
+        addLabel(content, "Inventario actualizado", updatedLabel, 0xFFDCEBFA.toInt())
         if (empty.isEmpty()) addLabel(content, "ESTADO", "No hay productos agotados en el inventario más reciente.", 0xFFDDF4E5.toInt())
         empty.sortedBy { it.name.lowercase(Locale.ROOT) }.forEach { item ->
             addLabel(content, item.name, "Código: " + item.code + " · Existencia: " + item.stock, 0xFFFFE8E5.toInt())
