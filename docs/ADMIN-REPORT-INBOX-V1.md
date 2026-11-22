@@ -35,8 +35,8 @@ El servidor no debe eliminar su copia por el simple hecho de incluir el reporte 
 
 El buzón conserva los sobres hasta que el patrón importe correctamente el contenido. La importación actual reconoce el formato histórico `SENE-ADMIN-REPORT|1` mediante `SeneReportReader`, y aplica los datos a nómina/perfiles y al historial local antes de retirar el sobre del buzón.
 
-**Limitación pendiente:** los reportes actuales de SENE VENTAS todavía usan la clave compartida histórica. Por eso la importación legible sigue requiriendo esa clave en esta etapa. El archivo del buzón sí queda cifrado en reposo con Android Keystore, pero esto no sustituye el futuro cifrado extremo a extremo entre dispositivos ni completa la eliminación de la clave compartida. Los respaldos históricos deben seguir siendo legibles durante la migración.
+Los reportes nuevos pueden usar `SENE-ADMIN-REPORT|2`: SeneAdmin genera una clave RSA privada en Android Keystore y registra la clave pública `rp` con el servidor. SENE VENTAS cifra con AES-256-GCM y RSA-OAEP SHA-256; SeneAdmin descifra localmente. El lector v1 sigue disponible para reportes y respaldos históricos. La distribución de `rp` depende de SERVER-SENE y, hasta que esté desplegada, se conserva compatibilidad v1.
 
 ## No asumir implementación del servidor
 
-Los campos de respuesta `b` y `baa` documentan el contrato que SERVER-SENE deberá implementar. El cliente no puede recibir reportes hasta que el servidor implemente la persistencia, la entrega por negocio y el ACK. Esta especificación no afirma que esos endpoints estén desplegados.
+Los campos de respuesta `b` y `baa` documentan el contrato que SERVER-SENE deberá implementar. El cliente no puede recibir reportes hasta que el servidor implemente la persistencia, la entrega por negocio y el ACK. Esta especificación no afirma que esos endpoints estén desplegados. SERVER-SENE también debe registrar `rp` durante el canje de vinculación, actualizarlo de forma autenticada y entregarlo solo a instalaciones SENE VENTAS del negocio correspondiente.
