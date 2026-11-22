@@ -58,7 +58,6 @@ object ReportInboxStore {
         val temp = File(c.applicationContext.filesDir, "$FILE.tmp")
         return try {
             temp.outputStream().use { it.write(packed); it.fd.sync() }
-            if (target.exists() && !target.delete()) return false
             temp.renameTo(target)
         } finally {
             if (temp.exists()) temp.delete()
