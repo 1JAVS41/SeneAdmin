@@ -183,6 +183,29 @@ object SharedInventoryManager {
         return name
     }
 
+    /** Aplica una salida de inventario únicamente tras la decisión APPROVED del servidor. */
+    @Synchronized fun applyApprovedConsumption(c:Context,request:OwnerPayrollStore.Request):Boolean {
+        if(request.type!="CONSUMO")return true
+        if(request.productCode.isBlank()||request.quantity<=0)return false
+        val prefs=c.getSharedPreferences("sene_admin_approved_inventory_moves",Context.MODE_PRIVATE)
+        if(prefs.getBoolean(request.id,false))return true
+        val ownerKey=OwnerKeyStore.read(c)?.takeIf{it.isNotBlank()}?:return false
+        val current=try {
+            list(c,ownerKey,"INVENTARIO_MAESTRO").firstOrNull()
+                ?:list(c,ownerKey,"INVENTARIO_SENE").firstOrNull()
+        } catch(_:Exception){null} ?: return false
+        val index=current.items.indexOfFirst{it.code.equals(request.productCode,true)}
+        if(index<0)return false
+        val product=current.items[index]
+        if(product.stock<request.quantity)return false
+        val updated=current.items.toMutableList()
+        updated[index]=product.copy(stock=product.stock-request.quantity)
+        return try {
+            save(c,ownerKey,"INVENTARIO_MAESTRO",updated)
+            prefs.edit().putBoolean(request.id,true).commit()
+        } catch(_:Exception){false}
+    }
+
     /** Guarda el mensaje de reporte ya cifrado por SENE VENTAS en la carpeta compartida. */
     fun saveReport(c: Context, report: SeneReport, encryptedMessage: String, ownerKey: String): String {
         val tree = savedTree(c) ?: throw IllegalStateException("Carpeta compartida no seleccionada.")
