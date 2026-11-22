@@ -27,13 +27,10 @@ object InventorySyncEngine {
         val last = prefs.getLong("wire_inventory_stamp_$scope", 0L)
         if (stamp < last) return true
         val category = if (scope == "M") "INVENTARIO_MAESTRO" else "INVENTARIO_SENE"
+        // Los deltas solo se aplican sobre una base local ya recibida.
+        // No se solicita ni se lee una clave manual o una carpeta compartida.
         val base = InventoryLocalStore.snapshot(c, category)
             ?: (if (scope == "S") latestReportInventory(c) else null)
-            ?: run {
-                val key = OwnerKeyStore.read(c)?.takeIf { it.isNotBlank() }
-                if (key != null) try { SharedInventoryManager.list(c, key, category).firstOrNull() } catch (_: Exception) { null }
-                else null
-            }
         // Los eventos son deltas; sin una base completa no se confirma ni se muestra un inventario parcial.
         if (base == null) return false
         val items = base.items.toMutableList()
