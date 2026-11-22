@@ -303,35 +303,38 @@ object OwnerPayrollStore {
         if(marker<0)return true
         val profileId=r.workerId
         val existing=entries(c,profileId)
-        val pending=mutableListOf<Entry>()
+        val imported=mutableListOf<Entry>()
         var kind=""
         var amount=0L
         var date=""
         var reason=""
         var description=""
         var status=""
+        var requestId=""
         fun flush(){
-            if(kind.isBlank()||amount<=0L||status.equals("LIQUIDADO",true))return
+            // Los reportes solo pueden respaldar movimientos ya autorizados.
+            // Una solicitud pendiente o sin estado nunca se convierte en descuento.
+            if(kind.isBlank()||amount<=0L||status.uppercase(Locale.ROOT) !in setOf("AUTORIZADO","APPROVED","LIQUIDADO"))return
             val type=if(kind.contains("PRÉSTAMO",true)||kind.contains("PRESTAMO",true))"PRESTAMO" else "CONSUMO"
             val day=isoDate(date)
             if(day.isBlank())return
             val details=listOf(reason.takeIf{it.isNotBlank()}?.let{"Motivo: $it"},description.takeIf{it.isNotBlank()}?.let{"Descripción: $it"}).filterNotNull().joinToString(" · ")
-            // El ID compartido con la orden de WhatsApp hace idempotente la importación:
-            // si la orden ya llegó, el reporte de cierre actualiza el mismo movimiento y no crea otro.
+            val id=requestId.ifBlank{
+                val identity=listOf(profileId,type,date,amount.toString(),reason,description).joinToString("|")
+                "report-request-"+UUID.nameUUIDFromBytes(identity.toByteArray(Charsets.UTF_8)).toString()
+            }
+            if(existing.any{it.id==id}||imported.any{it.id==id})return
             val duplicate=existing.any{old->
                 old.type==type&&old.amountCents==amount&&isoDate(old.date)==day&&(
-                    old.description==details ||
-                    old.description==description ||
-                    (description.isNotBlank()&&old.description.contains(description,true)) ||
+                    old.description==details||old.description==description||
+                    (description.isNotBlank()&&old.description.contains(description,true))||
                     (reason.isNotBlank()&&(old.description.equals(reason,true)||old.description.contains(reason,true)||reason.contains(old.description,true)))
                 )
-            }||pending.any{old->old.type==type&&old.amountCents==amount&&old.date==day&&old.description==details}
+            }||imported.any{old->old.type==type&&old.amountCents==amount&&old.date==day&&old.description==details}
             if(!duplicate){
-                val identity=listOf(profileId,type,date,amount.toString(),reason,description).joinToString("|")
-                val id="report-request-"+UUID.nameUUIDFromBytes(identity.toByteArray(Charsets.UTF_8)).toString()
                 val payrollPeriod=periodForDate(day,payDayNumber(profile(c,profileId)?.payDay.orEmpty()))
                 if(!payrolls(c,profileId).any{it.period==payrollPeriod&&it.status=="PAGADA"})
-                    pending.add(Entry(id,profileId,type,day,details,amount,""))
+                    imported.add(Entry(id,profileId,type,day,details,amount,""))
             }
         }
         for(line in lines.drop(marker+1)){
@@ -342,16 +345,17 @@ object OwnerPayrollStore {
                 flush()
                 kind=value.substringBefore("|").trim()
                 amount=parseMoneyCents(value.substringAfter("|"))?:0L
-                date="";reason="";description="";status=""
+                date="";reason="";description="";status="";requestId=""
             }else if(value.startsWith("FECHA:",true))date=value.substringAfter(":").trim()
+            else if(value.startsWith("ID DE SOLICITUD:",true))requestId=value.substringAfter(":").trim()
             else if(value.startsWith("MOTIVO:",true))reason=value.substringAfter(":").trim()
             else if(value.startsWith("DESCRIPCIÓN:",true)||value.startsWith("DESCRIPCION:",true))description=value.substringAfter(":").trim()
             else if(value.startsWith("ESTADO:",true))status=value.substringAfter(":").trim()
         }
         flush()
-        if(pending.isEmpty())return true
+        if(imported.isEmpty())return true
         val a=array(c,ENTRIES)
-        pending.forEach{entry->a.put(JSONObject().put("id",entry.id).put("profileId",entry.profileId).put("type",entry.type)
+        imported.forEach{entry->a.put(JSONObject().put("id",entry.id).put("profileId",entry.profileId).put("type",entry.type)
             .put("date",entry.date).put("description",entry.description).put("amount",entry.amountCents).put("payrollId",entry.payrollId))}
         return saveArray(c,ENTRIES,a)
     }
