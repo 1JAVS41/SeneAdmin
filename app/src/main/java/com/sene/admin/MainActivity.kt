@@ -597,19 +597,20 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showSeneInventory() {
-        val latest = SeneAdminStore.reports(this)
+        val localInventory = SharedInventoryManager.localSnapshot(this, "INVENTARIO_SENE")
+        val latestReport = SeneAdminStore.reports(this)
             .sortedWith(compareByDescending<SeneReport> { it.date }.thenByDescending { it.time }.thenByDescending { it.number })
             .firstNotNullOfOrNull { report ->
                 SharedInventoryManager.inventoryFromReport(report)?.let { report to it }
             }
-
-        if (latest == null) {
-            info("INVENTARIO SENE", "Todavía no se ha recibido un reporte que contenga inventario.")
+        val inventory = localInventory ?: latestReport?.second
+        if (inventory == null) {
+            info("INVENTARIO SENE", "Todavía no se ha recibido un reporte ni una sincronización de inventario.")
             return
         }
-        val (report, inventory) = latest
+        val updatedLabel = localInventory?.updated ?: latestReport?.first?.let { it.date + " " + it.time }.orEmpty()
         val content=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setPadding(14,12,14,12);setBackgroundColor(0xFFF4F7FB.toInt())}
-        addLabel(content,"Actualizado",report.date+" "+report.time,0xFFDCEBFA.toInt())
+        addLabel(content,"Actualizado",updatedLabel,0xFFDCEBFA.toInt())
         addLabel(content,"Productos",inventory.items.size.toString(),0xFFDDF4E5.toInt())
         inventory.items.sortedBy{it.name.lowercase(Locale.ROOT)}.forEach { item ->
             val group=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setPadding(14,12,14,12)
