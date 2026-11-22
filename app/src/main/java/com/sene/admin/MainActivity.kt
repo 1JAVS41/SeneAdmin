@@ -239,9 +239,9 @@ class MainActivity : AppCompatActivity() {
 
     private fun showHome() {
         fun dp(value: Int) = (value * resources.displayMetrics.density + 0.5f).toInt()
-        val navy = 0xFF173A78.toInt()
-        val blue = 0xFF3478D4.toInt()
-        val pale = 0xFFF1F5FB.toInt()
+        val navy = 0xFF145A43.toInt()
+        val blue = 0xFFC83D3A.toInt()
+        val pale = 0xFFF4F7F4.toInt()
         root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(18), dp(18), dp(18), dp(28))
@@ -252,13 +252,13 @@ class MainActivity : AppCompatActivity() {
             setPadding(dp(22), dp(22), dp(22), dp(22))
             background = android.graphics.drawable.GradientDrawable(
                 android.graphics.drawable.GradientDrawable.Orientation.TL_BR,
-                intArrayOf(navy, blue, 0xFF69A6F2.toInt())
+                intArrayOf(navy, blue, 0xFF27875B.toInt())
             ).apply { cornerRadius = dp(25).toFloat() }
             elevation = dp(5).toFloat()
         }
         hero.addView(TextView(this).apply {
             text = "SENE / ADMIN"; textSize = 13f; letterSpacing = .16f
-            typeface = Typeface.DEFAULT_BOLD; setTextColor(0xFFDCEBFF.toInt())
+            typeface = Typeface.DEFAULT_BOLD; setTextColor(0xFFFFE5E2.toInt())
         })
         hero.addView(TextView(this).apply {
             text = "Tu negocio,\nbajo control."; textSize = 29f
@@ -267,13 +267,13 @@ class MainActivity : AppCompatActivity() {
         })
         hero.addView(TextView(this).apply {
             text = "Administración, trabajadores e inventario en un solo lugar."
-            textSize = 13f; setTextColor(0xFFE5EEFF.toInt())
+            textSize = 13f; setTextColor(0xFFFFEDEC.toInt())
         })
         root.addView(hero, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(20) })
 
         root.addView(TextView(this).apply {
             text = "ACCESOS PRINCIPALES"; textSize = 12f; letterSpacing = .12f
-            typeface = Typeface.DEFAULT_BOLD; setTextColor(0xFF60738F.toInt())
+            typeface = Typeface.DEFAULT_BOLD; setTextColor(0xFF66766E.toInt())
             setPadding(dp(3), 0, 0, dp(10))
         })
 
@@ -285,7 +285,7 @@ class MainActivity : AppCompatActivity() {
                 background = android.graphics.drawable.GradientDrawable().apply {
                     setColor(if (green) 0xFF168A4A.toInt() else -1)
                     cornerRadius = dp(19).toFloat()
-                    setStroke(dp(1), if (green) 0xFF168A4A.toInt() else 0xFFDCE6F3.toInt())
+                    setStroke(dp(1), if (green) 0xFF168A4A.toInt() else 0xFFE4EAE5.toInt())
                 }
                 elevation = dp(2).toFloat()
                 isClickable = true; isFocusable = true
@@ -295,7 +295,7 @@ class MainActivity : AppCompatActivity() {
                 text = icon; textSize = 23f; gravity = android.view.Gravity.CENTER
                 setTextColor(if (green) -1 else navy)
                 background = android.graphics.drawable.GradientDrawable().apply {
-                    setColor(if (green) 0xFF0F713B.toInt() else 0xFFEAF2FD.toInt())
+                    setColor(if (green) 0xFF0F713B.toInt() else 0xFFFCECEB.toInt())
                     cornerRadius = dp(15).toFloat()
                 }
             }
@@ -306,15 +306,15 @@ class MainActivity : AppCompatActivity() {
             }
             labels.addView(TextView(this).apply {
                 text = label; textSize = 15f; typeface = Typeface.DEFAULT_BOLD
-                setTextColor(if (green) -1 else 0xFF193B68.toInt())
+                setTextColor(if (green) -1 else 0xFF194A39.toInt())
             })
             labels.addView(TextView(this).apply {
-                text = subtitle; textSize = 12f; setTextColor(if (green) 0xFFE2F5E9.toInt() else 0xFF687B96.toInt())
+                text = subtitle; textSize = 12f; setTextColor(if (green) 0xFFE2F5E9.toInt() else 0xFF69796F.toInt())
                 setPadding(0, dp(4), 0, 0)
             })
             card.addView(labels, LinearLayout.LayoutParams(0, -2, 1f))
             card.addView(TextView(this).apply {
-                text = "›"; textSize = 28f; setTextColor(if (green) -1 else 0xFF4777B9.toInt())
+                text = "›"; textSize = 28f; setTextColor(if (green) -1 else 0xFFC64A43.toInt())
             })
             root.addView(card, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(10) })
         }
