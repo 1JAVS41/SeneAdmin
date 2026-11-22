@@ -1,4 +1,5 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.INTERNET" />
     <application android:allowBackup="false" android:icon="@drawable/sene_admin_icon_color" android:roundIcon="@drawable/sene_admin_icon_color" android:label="SeneAdmin"
         android:theme="@style/Theme.AppCompat.Light.NoActionBar" android:supportsRtl="true">
         <activity android:name=".PayrollActivity" android:exported="false" />
