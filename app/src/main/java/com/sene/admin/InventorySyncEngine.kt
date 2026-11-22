@@ -29,11 +29,12 @@ object InventorySyncEngine {
         val category = if (scope == "M") "INVENTARIO_MAESTRO" else "INVENTARIO_SENE"
         // Los deltas solo se aplican sobre una base local ya recibida.
         // No se solicita ni se lee una clave manual o una carpeta compartida.
-        val base = InventoryLocalStore.snapshot(c, category)
+        val fullSnapshot = event.optBoolean("f", false)
+        val base = if (fullSnapshot) null else InventoryLocalStore.snapshot(c, category)
             ?: (if (scope == "S") latestReportInventory(c) else null)
-        // Los eventos son deltas; sin una base completa no se confirma ni se muestra un inventario parcial.
-        if (base == null) return false
-        val items = base.items.toMutableList()
+        // El primer evento de cada categoría lleva una fotografía completa; los siguientes son deltas compactos.
+        if (!fullSnapshot && base == null) return false
+        val items = if (fullSnapshot) mutableListOf() else base!!.items.toMutableList()
         var acceptedRows = 0
         for (i in 0 until rows.length()) {
             val row = rows.optJSONObject(i) ?: continue
@@ -45,14 +46,14 @@ object InventorySyncEngine {
             if (index >= 0) {
                 val old = items[index]
                 items[index] = old.copy(stock = stock,
-                    name = old.name.ifBlank { row.optString("n") },
-                    price = if (old.price > 0.0) old.price else row.optLong("a", 0L).toDouble() / 100.0,
-                    aisle = old.aisle.ifBlank { row.optString("l") },
-                    shelf = old.shelf.ifBlank { row.optString("h") })
+                    name = row.optString("n").ifBlank { old.name },
+                    price = if (row.has("a")) row.optLong("a", 0L).toDouble() / 100.0 else old.price,
+                    aisle = row.optString("l").ifBlank { old.aisle },
+                    shelf = row.optString("h").ifBlank { old.shelf })
             } else items.add(SharedInventoryManager.Item(code, row.optString("n"),
                 row.optLong("a", 0L).toDouble() / 100.0, stock, row.optString("l"), row.optString("h")))
         }
-        if (acceptedRows == 0 || items.isEmpty()) return false
+        if (acceptedRows == 0 || (items.isEmpty() && !fullSnapshot)) return false
         val updated = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(Date(stamp))
         val snapshot = SharedInventoryManager.Snapshot(category, "SERVER-SENE-" + id, updated, items, false)
         if (!InventoryLocalStore.save(c, snapshot)) return false
