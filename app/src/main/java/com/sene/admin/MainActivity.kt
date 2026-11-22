@@ -27,10 +27,8 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         pendingImportRaw = getSharedPreferences("sene_admin_pending_import", MODE_PRIVATE).getString("raw", null)
         showHome()
-        OwnerKeyStore.read(this)?.let { SharedInventoryManager.cleanupAllIfDue(this, it) }
-        // La clave compartida antigua ya no es requisito para abrir SeneAdmin,
-        // vincularlo con SERVER-SENE ni consultar nómina. Solo las herramientas
-        // heredadas de archivos cifrados podrán solicitarla si el usuario las abre.
+        // El historial local nuevo se protege con Android Keystore; no depende de una clave manual.
+        SeneAdminStore.cleanupIfDue(this)
         if (!AccessPinStore.hasPin(this)) askCreatePin()
     }
 
@@ -419,7 +417,7 @@ class MainActivity : AppCompatActivity() {
         mainOption("!", "REVISAR PENDIENTES", "Productos sin stock y productos dañados") {
             showPendingReviews()
         }
-        mainOption("⚙", "AJUSTES", "Clave, huella y carpeta compartida") {
+        mainOption("⚙", "AJUSTES", "PIN, huella y carpeta compartida") {
             showSettings()
         }
 
@@ -599,34 +597,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showSeneInventory() {
-        val localInventory = SharedInventoryManager.localSnapshot(this, "INVENTARIO_SENE")
-        val latestReport = SeneAdminStore.reports(this)
-            .sortedWith(compareByDescending<SeneReport> { it.date }.thenByDescending { it.time }.thenByDescending { it.number })
-            .firstNotNullOfOrNull { report ->
-                SharedInventoryManager.inventoryFromReport(report)?.let { report to it }
-            }
-        val inventory = localInventory ?: latestReport?.second
-        if (inventory == null) {
-            info("INVENTARIO SENE", "Todavía no se ha recibido un reporte ni una sincronización de inventario.")
-            return
-        }
-        val updatedLabel = localInventory?.updated ?: latestReport?.first?.let { it.date + " " + it.time }.orEmpty()
-        val content=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setPadding(14,12,14,12);setBackgroundColor(0xFFF4F7FB.toInt())}
-        addLabel(content,"Actualizado",updatedLabel,0xFFDCEBFA.toInt())
-        addLabel(content,"Productos",inventory.items.size.toString(),0xFFDDF4E5.toInt())
-        inventory.items.sortedBy{it.name.lowercase(Locale.ROOT)}.forEach { item ->
-            val group=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setPadding(14,12,14,12)
-                background=android.graphics.drawable.GradientDrawable().apply{setColor(-1);cornerRadius=18f}}
-            group.addView(TextView(this).apply{text=item.name;textSize=16f;typeface=Typeface.DEFAULT_BOLD;setTextColor(0xFF123B68.toInt());setPadding(0,0,0,7)})
-            addLabel(group,"Código",item.code)
-            addLabel(group,"Precio",OwnerPayrollStore.money((item.price*100.0).toLong()))
-            addLabel(group,"Existencia",item.stock.toString(),0xFFDDF4E5.toInt())
-            if(item.aisle.isNotBlank())addLabel(group,"Pasillo",item.aisle)
-            if(item.shelf.isNotBlank())addLabel(group,"Estante",item.shelf)
-            val lp=LinearLayout.LayoutParams(-1,-2);lp.bottomMargin=10;content.addView(group,lp)
-        }
-        AlertDialog.Builder(this).setTitle("INVENTARIO SENE")
-            .setView(ScrollView(this).apply{addView(content)}).setPositiveButton("CERRAR",null).show()
+        // La consulta usa exclusivamente la última copia cifrada guardada en este teléfono.
+        showInventory("INVENTARIO_SENE")
     }
 
     private fun showPasteDialog() {
@@ -692,7 +664,7 @@ class MainActivity : AppCompatActivity() {
                 "2. Puedes seleccionar la carpeta principal compartida; si ya existe una carpeta llamada INVENTARIO-SENE, también puedes seleccionarla directamente.\n" +
                 "3. Pulsa «Usar esta carpeta» y después «Permitir», si Android lo solicita.\n" +
                 "4. Repite la vinculación en SENE VENTAS y SENE ADMIN, en sus respectivos teléfonos, seleccionando exactamente la misma carpeta.\n" +
-                "5. Introduce en ambas aplicaciones la misma clave del propietario.\n\n" +
+                "5. No necesitas introducir ninguna clave de cifrado: ambas aplicaciones protegen sus datos automáticamente.\n\n" +
                 "SENE organizará INVENTARIO-SENE, INVENTARIO-MAESTRO y REPORTES. Si seleccionas directamente INVENTARIO-SENE, la aplicación utilizará esa carpeta como destino y no creará otra carpeta igual dentro. " +
                 "No borres ni renombres esas carpetas. Si cambias la carpeta vinculada, los archivos que estén en la carpeta anterior no se trasladan automáticamente."
             )
