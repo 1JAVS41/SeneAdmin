@@ -83,6 +83,22 @@ object ServerPairing {
 object AdminPayrollRequestSync {
     private const val PREFS="sene_admin_payroll_sync"
     private val running=AtomicBoolean(false)
+    private const val ATTENDANCE_ACKS="attendance_acks"
+    private fun mergeAcks(p:android.content.SharedPreferences,ids:JSONArray) {
+        val old=try{JSONArray(p.getString(ATTENDANCE_ACKS,"[]")?:"[]")}catch(_:Exception){JSONArray()}
+        val set=linkedSetOf<String>()
+        for(i in 0 until old.length())old.optString(i).takeIf{it.isNotBlank()}?.let(set::add)
+        for(i in 0 until ids.length())ids.optString(i).takeIf{it.isNotBlank()}?.let(set::add)
+        p.edit().putString(ATTENDANCE_ACKS,JSONArray(set.toList()).toString()).commit()
+    }
+    private fun clearAcks(p:android.content.SharedPreferences,ids:JSONArray) {
+        if(ids.length()==0)return
+        val remove=buildSet{for(i in 0 until ids.length())ids.optString(i).takeIf{it.isNotBlank()}?.let(::add)}
+        val old=try{JSONArray(p.getString(ATTENDANCE_ACKS,"[]")?:"[]")}catch(_:Exception){JSONArray()}
+        val keep=JSONArray()
+        for(i in 0 until old.length())old.optString(i).takeIf{it.isNotBlank()&&it !in remove}?.let(keep::put)
+        p.edit().putString(ATTENDANCE_ACKS,keep.toString()).commit()
+    }
     private fun wireMillis(value:Long):Long = if(value in 1L until 100000000000L) value*1000L else value
     private fun wireDate(value:Any?):String {
         val millis=when(value) {
@@ -110,6 +126,7 @@ object AdminPayrollRequestSync {
                 }
                 val payload=JSONObject().put("v",SeneWireProtocol.VERSION).put("t",SeneWireProtocol.SYNC)
                     .put("a",token).put("c",p.getString("cursor","").orEmpty()).put("d",decisions)
+                    .put("ha",try{JSONArray(p.getString(ATTENDANCE_ACKS,"[]")?:"[]")}catch(_:Exception){JSONArray()})
                 p.edit().putLong("last_attempt",now).commit()
                 val response=ServerPairing.post("/admin/payroll/requests/sync",payload)
                 if(response.optInt("_http_status",0) !in 200..299)return@Thread
@@ -142,6 +159,15 @@ object AdminPayrollRequestSync {
                         OwnerPayrollStore.applyServerDecision(app,id,state,req.decidedBy,req.decidedAt,req.rejectionReason)
                     } else OwnerPayrollStore.upsertServerRequest(app,req)
                 }
+                val attendance=response.optJSONArray("h")?:response.optJSONArray("attendance")?:JSONArray()
+                val acceptedAttendance=JSONArray()
+                for(i in 0 until attendance.length()) {
+                    val event=attendance.optJSONObject(i)?:continue
+                    if(OwnerPayrollStore.applySyncedAttendance(app,event))acceptedAttendance.put(event.optString("e"))
+                }
+                mergeAcks(p,acceptedAttendance)
+                val serverAck=response.optJSONArray("haa")?:response.optJSONArray("attendance_ack_acks")?:JSONArray()
+                clearAcks(p,serverAck)
                 val cursor=response.optString("n",response.optString("next_cursor"))
                 if(cursor.isNotBlank())p.edit().putString("cursor",cursor).commit()
             } catch(_:Exception) {
