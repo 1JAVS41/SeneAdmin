@@ -484,6 +484,10 @@ class MainActivity : AppCompatActivity() {
             val id = event.optString("e")
             try {
                 val report = SeneReportReader.read(event.optString("b"), key)
+                val envelopeWorker = event.optString("w")
+                require(envelopeWorker.isBlank() || envelopeWorker == report.workerId) {
+                    "El trabajador del sobre no coincide con el reporte cifrado."
+                }
                 val ok = if (report.body.startsWith("SENE-ORDER|1")) {
                     OwnerPayrollStore.importOrder(this, report)
                 } else {
