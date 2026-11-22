@@ -443,7 +443,15 @@ class MainActivity : AppCompatActivity() {
         val lines = (0 until events.length()).mapNotNull { index ->
             val event = events.optJSONObject(index) ?: return@mapNotNull null
             val worker = event.optString("w").ifBlank { "Trabajador" }
-            val kind = event.optString("k").ifBlank { "Reporte" }
+            val kindCode = event.optString("k")
+            val kind = when (kindCode) {
+                "[EC]" -> "Inicio de turno"
+                "[CO]" -> "Cierre de jornada"
+                "[CA]" -> "Cierre anticipado"
+                "[AD]" -> "Cierre administrativo"
+                "[SYNC]" -> "Reporte periódico"
+                else -> kindCode.ifBlank { "Reporte" }
+            }
             val date = event.optLong("i").takeIf { it > 0L }?.let {
                 java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.US).format(java.util.Date(it))
             }.orEmpty()
