@@ -412,7 +412,14 @@ object OwnerPayrollStore {
         if(normalized !in setOf("APPROVED","REJECTED"))return false
         val a=array(c,REQUESTS);val index=(0 until a.length()).firstOrNull{a.optJSONObject(it)?.optString("id")==id}?:return false
         val old=decodeRequest(a.optJSONObject(index)!!)?:return false
-        if(old.status==normalized)return true
+        if(old.status==normalized) {
+            if(normalized=="APPROVED") {
+                val movementType=if(old.type=="PRESTAMO")"PRESTAMO" else "CONSUMO"
+                if(!entries(c,old.profileId).any{it.id==old.id} &&
+                    !addEntryWithId(c,old.id,old.profileId,movementType,old.amountCents,old.description,old.date))return false
+            }
+            return true
+        }
         if(old.status!="PENDING")return false
         val updated=old.copy(status=normalized,decidedBy=decidedBy,decidedAt=decidedAt,rejectionReason=rejectionReason,
             ownerDecision="",ownerDecisionReason="")
@@ -420,9 +427,7 @@ object OwnerPayrollStore {
         if(!saveArray(c,REQUESTS,a))return false
         if(normalized=="APPROVED"){
             val movementType=if(old.type=="PRESTAMO")"PRESTAMO" else "CONSUMO"
-            val existing=entries(c,old.profileId).any{it.id==old.id}
-            if(!existing && !addEntryWithId(c,old.id,old.profileId,movementType,old.amountCents,
-                old.description,old.date))return false
+            if(!addEntryWithId(c,old.id,old.profileId,movementType,old.amountCents,old.description,old.date))return false
         }
         return true
     }
