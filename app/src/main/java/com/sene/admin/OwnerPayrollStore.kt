@@ -363,6 +363,31 @@ object OwnerPayrollStore {
         val ownerDecision:String="",val ownerDecisionReason:String=""
     )
     private const val REQUESTS="server_payroll_requests"
+    data class ApprovedMovement(
+        val id:String,val profileId:String,val type:String,val date:String,val description:String,
+        val amountCents:Long,val productCode:String="",val quantity:Int=0
+    )
+    private const val APPROVED_MOVEMENTS="approved_request_movements"
+    fun approvedMovements(c:Context,profileId:String?=null):List<ApprovedMovement> {
+        val a=array(c,APPROVED_MOVEMENTS)
+        return (0 until a.length()).mapNotNull{i->
+            val o=a.optJSONObject(i)?:return@mapNotNull null
+            val id=o.optString("id");val worker=o.optString("profileId")
+            if(id.isBlank()||worker.isBlank()||(!profileId.isNullOrBlank()&&worker!=profileId))return@mapNotNull null
+            ApprovedMovement(id,worker,o.optString("type"),o.optString("date"),o.optString("description"),
+                o.optLong("amountCents"),o.optString("productCode"),o.optInt("quantity"))
+        }
+    }
+    @Synchronized private fun recordApprovedMovement(c:Context,r:Request):Boolean {
+        val a=array(c,APPROVED_MOVEMENTS)
+        if((0 until a.length()).any{a.optJSONObject(it)?.optString("id")==r.id})return true
+        val type=if(r.type=="PRESTAMO")"CASH_DISBURSEMENT" else "INVENTORY_CONSUMPTION"
+        a.put(JSONObject().put("id",r.id).put("profileId",r.profileId).put("type",type).put("date",r.date)
+            .put("description",r.description).put("amountCents",r.amountCents)
+            .put("productCode",r.productCode).put("quantity",r.quantity))
+        return saveArray(c,APPROVED_MOVEMENTS,a)
+    }
+
 
     private fun decodeRequest(o:JSONObject):Request? {
         val id=o.optString("id");val profileId=o.optString("profileId")
@@ -417,6 +442,7 @@ object OwnerPayrollStore {
                 val movementType=if(old.type=="PRESTAMO")"PRESTAMO" else "CONSUMO"
                 if(!entries(c,old.profileId).any{it.id==old.id} &&
                     !addEntryWithId(c,old.id,old.profileId,movementType,old.amountCents,old.description,old.date))return false
+                if(!recordApprovedMovement(c,old))return false
                 return SharedInventoryManager.applyApprovedConsumption(c,old)
             }
             return true
@@ -429,6 +455,7 @@ object OwnerPayrollStore {
         if(normalized=="APPROVED"){
             val movementType=if(old.type=="PRESTAMO")"PRESTAMO" else "CONSUMO"
             if(!addEntryWithId(c,old.id,old.profileId,movementType,old.amountCents,old.description,old.date))return false
+            if(!recordApprovedMovement(c,updated))return false
             if(!SharedInventoryManager.applyApprovedConsumption(c,updated))return false
         }
         return true
