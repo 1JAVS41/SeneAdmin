@@ -155,6 +155,7 @@ class MainActivity : AppCompatActivity() {
             Thread {
                 var restoredProfiles = 0
                 var restoredReports = 0
+                val restoredReportBatch = mutableListOf<SeneReport>()
                 val errors = mutableListOf<String>()
                 ordered.forEachIndexed { index, report ->
                     try {
@@ -167,8 +168,7 @@ class MainActivity : AppCompatActivity() {
                             errors.add("No se pudieron recuperar los datos de ${report.workerId}.")
                         } else {
                             if (!report.body.startsWith("SENE-ORDER|1")) restoredProfiles++
-                            if (SeneAdminStore.saveReport(this@MainActivity, report)) restoredReports++
-                            else errors.add("No se pudo guardar localmente el reporte ${report.number}.")
+                            restoredReportBatch.add(report)
                         }
                     } catch (e: Exception) {
                         errors.add("Reporte ${report.number}: " + (e.message ?: "error de recuperación"))
@@ -179,6 +179,13 @@ class MainActivity : AppCompatActivity() {
                             updateProgress(completed, "Recuperando historial ${completed} de ${ordered.size}...")
                         }
                     }
+                }
+                try {
+                    if(!SeneAdminStore.saveReports(this@MainActivity,restoredReportBatch))
+                        errors.add("No se pudo guardar el historial local de reportes.")
+                    else restoredReports=restoredReportBatch.distinctBy{it.id}.size
+                } catch(e:Exception) {
+                    errors.add(e.message ?: "No se pudo guardar el historial local de reportes.")
                 }
                 try {
                     OwnerPayrollStore.profiles(this@MainActivity)
@@ -786,6 +793,7 @@ class MainActivity : AppCompatActivity() {
             var imported = 0
             var duplicates = 0
             val errors = mutableListOf<String>()
+            val reportBatch = mutableListOf<SeneReport>()
             var fatalError: String? = null
             try {
                 // WhatsApp puede anteponer fecha, remitente o espacios al copiar el mensaje.
@@ -807,6 +815,7 @@ class MainActivity : AppCompatActivity() {
                         if (!knownIds.add(report.id)) duplicates++
                         else {
                             processReport(report, message, key)
+                            reportBatch.add(report)
                             imported++
                         }
                     } catch (e: Exception) {
@@ -814,6 +823,10 @@ class MainActivity : AppCompatActivity() {
                     }
                     publishProgress(index + 1, "Reporte ${index + 1} de ${chunks.size} revisado")
                 }
+                // Guardar el historial local en un solo lote evita reescribir todo el JSON
+                // una vez por reporte cuando se pegan semanas o meses de WhatsApp.
+                if(!SeneAdminStore.saveReports(this@MainActivity,reportBatch))
+                    throw IllegalStateException("No se pudo guardar el historial local de reportes.")
                 // Crear o actualizar la nómina solo después de procesar el lote completo.
                 publishProgress(expectedReports, "Actualizando la información de nómina...")
                 OwnerPayrollStore.profiles(this@MainActivity).filter { it.weeklySalaryCents > 0L }.forEach { profile ->
@@ -876,7 +889,6 @@ class MainActivity : AppCompatActivity() {
         }
         SharedInventoryManager.saveReport(this, report, message, key)
         SharedInventoryManager.updateMasterFromReport(this, key, report.body, report.date + " " + report.time)
-        check(SeneAdminStore.saveReport(this, report)) { "No se pudo registrar el reporte importado." }
     }
 
     private fun showReports() {
