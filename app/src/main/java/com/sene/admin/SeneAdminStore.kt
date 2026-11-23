@@ -111,7 +111,7 @@ object SeneAdminStore {
         grouped.values.forEach { entries ->
             val ordered = entries.sortedWith(compareByDescending<Pair<Int, Long>> { it.second }.thenByDescending { it.first })
             ordered.forEachIndexed { index, pair ->
-                if (index < KEEP_PER_TYPE || pair.second == 0L || pair.second >= cutoff) keep.add(pair.first)
+                if (index < KEEP_PER_TYPE) keep.add(pair.first)
             }
         }
         val cleaned = JSONArray()
