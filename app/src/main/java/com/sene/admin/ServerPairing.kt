@@ -225,7 +225,7 @@ object AdminPayrollRequestSync {
                 val reportAckConfirmations=response.optJSONArray("baa")?:response.optJSONArray("report_ack_acks")?:JSONArray()
                 ReportInboxStore.acknowledgeAcks(app,reportAckConfirmations)
                 // Solo después de persistir los sobres cifrados se solicita su organización local.
-                if (ReportInboxStore.events(app).length() > 0 && onComplete != null) {
+                if (onComplete != null) {
                     android.os.Handler(android.os.Looper.getMainLooper()).post { onComplete.invoke() }
                 }
 
