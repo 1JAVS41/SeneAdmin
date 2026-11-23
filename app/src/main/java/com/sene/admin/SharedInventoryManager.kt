@@ -262,7 +262,7 @@ object SharedInventoryManager {
             try {
                 val raw = c.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return@all false
                 if (dirName == "REPORTES") {
-                    SeneReportReader.read(String(raw, Charsets.UTF_8), ownerKey)
+                    readReportPayload(String(raw, Charsets.UTF_8), ownerKey)
                     true
                 } else if (SeneSharedFiles.isSharedFile(raw)) {
                     val doc = SeneSharedFiles.decode(raw, ownerKey)
@@ -287,7 +287,7 @@ object SharedInventoryManager {
             try {
                 val raw = file.readBytes()
                 if (dirName == "REPORTES") {
-                    SeneReportReader.read(String(raw, Charsets.UTF_8), ownerKey)
+                    readReportPayload(String(raw, Charsets.UTF_8), ownerKey)
                     true
                 } else {
                     val doc = SeneSharedFiles.decode(raw, ownerKey)
