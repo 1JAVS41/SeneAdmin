@@ -19,6 +19,7 @@ import android.widget.Toast
 import java.util.Locale
 
 class MainActivity : AppCompatActivity() {
+    @Volatile private var reportEnvelopeProcessing = false
     private lateinit var root: LinearLayout
     private var accessGranted = false
     private var biometricFallbackShown = false
@@ -113,10 +114,14 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
-        if (accessGranted && ServerPairing.isLinked(this)) {
-            AdminPayrollRequestSync.sync(this, onComplete = {
-                if (!isFinishing && !isDestroyed) processServerReportEnvelopes()
-            })
+        if (accessGranted) {
+            // Procesa primero lo que ya está guardado: también funciona sin conexión.
+            processServerReportEnvelopes()
+            if (ServerPairing.isLinked(this)) {
+                AdminPayrollRequestSync.sync(this, onComplete = {
+                    if (!isFinishing && !isDestroyed) processServerReportEnvelopes()
+                })
+            }
         }
     }
 
@@ -544,6 +549,9 @@ class MainActivity : AppCompatActivity() {
 
     /** Procesa automáticamente los sobres persistidos; el ACK de recepción ya es durable. */
     private fun processServerReportEnvelopes() {
+        if (reportEnvelopeProcessing) return
+        reportEnvelopeProcessing = true
+        try {
         val legacyKey = OwnerKeyStore.read(this)
         val events = ReportInboxStore.events(this)
         val imported = mutableListOf<SeneReport>()
@@ -594,6 +602,9 @@ class MainActivity : AppCompatActivity() {
         if (imported.isNotEmpty() || failures.isNotEmpty()) {
             AlertDialog.Builder(this).setTitle("REPORTES PROCESADOS AUTOMÁTICAMENTE")
                 .setMessage(summary).setPositiveButton("ACEPTAR", null).show()
+        }
+        } finally {
+            reportEnvelopeProcessing = false
         }
     }
 
