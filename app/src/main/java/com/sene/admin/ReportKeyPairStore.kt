@@ -1,6 +1,7 @@
 package com.sene.admin
 
 import android.content.Context
+import android.os.Build
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
@@ -14,7 +15,9 @@ import javax.crypto.spec.PSource
 
 /** Clave privada de reportes no exportable; la pública se registra en SERVER-SENE. */
 object ReportKeyPairStore {
-    private const val ALIAS = "SENE_ADMIN_REPORT_RSA_V2"
+    // V3 fuerza una clave nueva con autorización explícita para MGF1-SHA256.
+    // Las claves V2 creadas sin esa autorización pueden fallar al descifrar en Android Keystore.
+    private const val ALIAS = "SENE_ADMIN_REPORT_RSA_V3"
     private const val TRANSFORMATION = "RSA/ECB/OAEPWithSHA-256AndMGF1Padding"
     private val oaep = OAEPParameterSpec("SHA-256", "MGF1", MGF1ParameterSpec.SHA256, PSource.PSpecified.DEFAULT)
 
@@ -22,12 +25,17 @@ object ReportKeyPairStore {
         val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
         if (store.containsAlias(ALIAS)) return
         val generator = KeyPairGenerator.getInstance("RSA", "AndroidKeyStore")
-        generator.initialize(KeyGenParameterSpec.Builder(ALIAS,
+        val builder = KeyGenParameterSpec.Builder(ALIAS,
             KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT)
             .setKeySize(2048)
             .setDigests(KeyProperties.DIGEST_SHA256)
             .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_RSA_OAEP)
-            .setRandomizedEncryptionRequired(true).build())
+            .setRandomizedEncryptionRequired(true)
+        // Android 15+ permite declarar por separado el digest MGF1 autorizado.
+        if (Build.VERSION.SDK_INT >= 35) {
+            builder.setMgf1Digests(KeyProperties.DIGEST_SHA256)
+        }
+        generator.initialize(builder.build())
         generator.generateKeyPair()
     }
 
