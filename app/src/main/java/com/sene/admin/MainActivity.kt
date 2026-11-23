@@ -599,9 +599,13 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showPendingReviews() {
-        AlertDialog.Builder(this).setTitle("REVISAR PENDIENTES")
-            .setItems(arrayOf("PRODUCTOS SIN STOCK", "PRODUCTOS DAÑADOS")) { _, which ->
-                if (which == 0) showOutOfStockProducts() else showDamagedProducts()
+        AlertDialog.Builder(this).setTitle("PENDIENTES")
+            .setItems(arrayOf("PRODUCTOS SIN STOCK", "PRODUCTOS DAÑADOS", "SOLICITUDES DE TRABAJADORES")) { _, which ->
+                when(which) {
+                    0 -> showOutOfStockProducts()
+                    1 -> showDamagedProducts()
+                    2 -> startActivity(Intent(this, PayrollActivity::class.java).putExtra("show_requests", true))
+                }
             }.setNegativeButton("CERRAR", null).show()
     }
 
