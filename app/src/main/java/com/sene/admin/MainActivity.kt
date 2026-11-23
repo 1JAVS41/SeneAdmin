@@ -557,8 +557,8 @@ class MainActivity : AppCompatActivity() {
             val errors = mutableListOf<String>()
             val batch = mutableListOf<SeneReport>()
             try {
-                val normalized = raw.replace("\\r\\n", "\\n").replace("\\r", "\\n")
-                val headers = Regex("SENE-ADMIN-REPORT\\\\|[12]").findAll(normalized).toList()
+                val normalized = raw.replace("\r\n", "\n").replace("\r", "\n")
+                val headers = Regex("SENE-ADMIN-REPORT\\|[12]").findAll(normalized).toList()
                 val chunks = headers.mapIndexed { index, match ->
                     val end = headers.getOrNull(index + 1)?.range?.first ?: normalized.length
                     normalized.substring(match.range.first, end).trim()
@@ -607,10 +607,10 @@ class MainActivity : AppCompatActivity() {
                 showHome()
                 val summary = buildString {
                     append("Reportes organizados: ").append(imported)
-                    append("\\nDuplicados omitidos: ").append(duplicates)
+                    append("\nDuplicados omitidos: ").append(duplicates)
                     if (errors.isNotEmpty()) {
-                        append("\\n\\nPendientes por revisar:")
-                        errors.take(6).forEach { append("\\n• ").append(it) }
+                        append("\n\nPendientes por revisar:")
+                        errors.take(6).forEach { append("\n• ").append(it) }
                     }
                 }
                 AlertDialog.Builder(this@MainActivity).setTitle("IMPORTACIÓN TERMINADA")
