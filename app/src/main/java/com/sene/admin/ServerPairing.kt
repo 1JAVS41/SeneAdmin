@@ -172,7 +172,9 @@ object AdminPayrollRequestSync {
                     val o=requests.optJSONObject(i)?:continue
                     val id=o.optString("e",o.optString("request_id",o.optString("id")))
                     val state=when(o.optString("x",o.optString("status","PENDING")).uppercase()) {
-                        SeneWireProtocol.APPROVED -> "APPROVED"; SeneWireProtocol.REJECTED -> "REJECTED"; else -> o.optString("status","PENDING").uppercase()
+                        SeneWireProtocol.APPROVED,"APPROVED" -> "APPROVED"
+                        SeneWireProtocol.REJECTED,"REJECTED" -> "REJECTED"
+                        else -> "PENDING"
                     }
                     val profile=o.optString("w",o.optString("worker_id",o.optString("profile_id")))
                     if(id.isBlank()||profile.isBlank())continue
