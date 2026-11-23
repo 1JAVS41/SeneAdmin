@@ -20,14 +20,11 @@ import java.util.Locale
 
 class MainActivity : AppCompatActivity() {
     private lateinit var root: LinearLayout
-    @Volatile private var reportImportRunning = false
-    private var pendingImportRaw: String? = null
     private var accessGranted = false
     private var biometricFallbackShown = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        pendingImportRaw = getSharedPreferences("sene_admin_pending_import", MODE_PRIVATE).getString("raw", null)
         // No mostrar la pantalla principal hasta crear el PIN o autenticar al dueño.
         SeneAdminStore.cleanupIfDue(this)
         InventoryLocalStore.cleanupIfDue(this)
@@ -114,13 +111,6 @@ class MainActivity : AppCompatActivity() {
         dialog.show()
     }
 
-    override fun onNewIntent(intent: Intent) {
-        super.onNewIntent(intent)
-        setIntent(intent)
-        // WhatsApp dejó de ser un canal de importación de reportes.
-        if (!AccessPinStore.hasPin(this)) askCreatePin { accessGranted = true; showHome() }
-    }
-
     override fun onResume() {
         super.onResume()
         if(accessGranted && ServerPairing.isLinked(this)) AdminPayrollRequestSync.sync(this)
@@ -134,10 +124,7 @@ class MainActivity : AppCompatActivity() {
                 SharedInventoryManager.acceptFolder(this, uri)
                 Toast.makeText(this, "Carpeta INVENTARIO SENE vinculada", Toast.LENGTH_LONG).show()
                 showHome()
-                checkForWorkerRecovery {
-                    val pending = pendingImportRaw ?: getSharedPreferences("sene_admin_pending_import", MODE_PRIVATE).getString("raw", null)
-                    if (!pending.isNullOrBlank()) importReports(pending)
-                }
+                checkForWorkerRecovery()
             } catch (e: Exception) {
                 info("NO SE PUDO VINCULAR", e.message ?: "Android no concedió acceso a la carpeta.")
             }
@@ -345,8 +332,8 @@ class MainActivity : AppCompatActivity() {
         if(ServerPairing.isLinked(this)) {
             AlertDialog.Builder(this).setTitle("NEGOCIO VINCULADO")
                 .setMessage("SeneAdmin está conectado con: "+ServerPairing.businessName(this)+
-                    "\\n\\nLa vinculación se conserva en este dispositivo y permite sincronizar solicitudes y autorizaciones.")
-                .setPositiveButton("ACEPTAR",null).setNeutralButton("ACTUALIZAR"){_,_->AdminPayrollRequestSync.sync(this,true)}.show()
+                    "\n\nLa vinculación se conserva en este dispositivo y permite sincronizar inventarios, reportes, asistencia, solicitudes y autorizaciones.")
+                .setPositiveButton("ACEPTAR",null).setNeutralButton("SINCRONIZAR AHORA"){_,_->AdminPayrollRequestSync.sync(this,true)}.show()
             return
         }
         val code=EditText(this).apply {
@@ -355,7 +342,7 @@ class MainActivity : AppCompatActivity() {
             setSingleLine(true)
         }
         AlertDialog.Builder(this).setTitle("VINCULAR SENE ADMIN")
-            .setMessage("En SENE VENTAS entra a SOY PATRÓN → VINCULAR SENE ADMIN y genera un código temporal. Escríbelo aquí. El código es de un solo uso y caduca.")
+            .setMessage("En SENE VENTAS entra a SOY PATRÓN → VINCULAR SENE ADMIN y genera un código temporal. Escríbelo aquí. Es de un solo uso y tiene una vigencia de 10 minutos.")
             .setView(code).setPositiveButton("VINCULAR",null).setNegativeButton("CANCELAR",null).create().also{dialog->
                 dialog.setOnShowListener{
                     dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener{
@@ -477,6 +464,12 @@ class MainActivity : AppCompatActivity() {
             if(ServerPairing.isLinked(this)) "Conectado a "+ServerPairing.businessName(this) else "Conecta SeneAdmin con SENE VENTAS", green = !ServerPairing.isLinked(this)) {
             showPairingDialog()
         }
+        if (ServerPairing.isLinked(this)) {
+            mainOption("↻", "SINCRONIZAR AHORA", "Recibir reportes, inventarios, asistencia y solicitudes") {
+                AdminPayrollRequestSync.sync(this, true)
+                Toast.makeText(this, "Sincronización iniciada. Los datos se guardarán localmente al recibirse.", Toast.LENGTH_LONG).show()
+            }
+        }
         mainOption("N", "NÓMINA", "Consultar pagos y revisar asistencia") {
             startActivity(Intent(this, PayrollActivity::class.java))
         }
@@ -512,7 +505,7 @@ class MainActivity : AppCompatActivity() {
 
 
     private fun showServerReportInbox() {
-        if (ServerPairing.isLinked(this)) AdminPayrollRequestSync.sync(this, true)
+        if (ServerPairing.isLinked(this)) AdminPayrollRequestSync.sync(this)
         val events = ReportInboxStore.events(this)
         if (events.length() == 0) {
             AlertDialog.Builder(this).setTitle("REPORTES DEL SERVIDOR")
@@ -681,34 +674,6 @@ class MainActivity : AppCompatActivity() {
     private fun showSeneInventory() {
         // La consulta usa exclusivamente la última copia cifrada guardada en este teléfono.
         showInventory("INVENTARIO_SENE")
-    }
-
-    private fun showPasteDialog() {
-        val input = EditText(this).apply {
-            hint = "Mantén presionado aquí y selecciona PEGAR"
-            minLines = 8; maxLines = 16; gravity = android.view.Gravity.TOP
-            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE
-            setTextIsSelectable(true)
-        }
-        val box = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL; setPadding(20, 8, 20, 4)
-            addView(TextView(this@MainActivity).apply {
-                text = "Pega aquí el texto completo de WhatsApp. Puedes incluir varios reportes uno después de otro."
-                textSize = 13f; setTextColor(0xFF526579.toInt()); setPadding(0, 0, 0, 10)
-            })
-            addView(input)
-        }
-        val dialog = AlertDialog.Builder(this).setTitle("IMPORTAR REPORTES")
-            .setView(box).setPositiveButton("PROCESAR", null).setNegativeButton("CANCELAR", null).create()
-        dialog.setOnShowListener {
-            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
-                val raw = input.text.toString().trim()
-                if (raw.isBlank()) { input.error = "Pega al menos un reporte"; return@setOnClickListener }
-                dialog.dismiss()
-                importReports(raw)
-            }
-        }
-        dialog.show()
     }
 
     private fun showSettings() {
@@ -921,151 +886,6 @@ class MainActivity : AppCompatActivity() {
             counter.text = "$safe de $total pasos"
         }
         return dialog to update
-    }
-
-    private fun importReports(raw: String) {
-        if (reportImportRunning) {
-            Toast.makeText(this, "Ya se está procesando un reporte. Espera a que termine.", Toast.LENGTH_LONG).show()
-            return
-        }
-        val key = OwnerKeyStore.read(this)
-        if (key == null) {
-            info("REPORTE HISTÓRICO NO COMPATIBLE", "Los reportes nuevos se reciben automáticamente desde SERVER-SENE y no requieren clave manual. Este formato antiguo de importación ya no se utiliza.")
-            return
-        }
-        if (SharedInventoryManager.savedTree(this) == null) {
-            pendingImportRaw = raw
-            val saved = getSharedPreferences("sene_admin_pending_import", MODE_PRIVATE).edit().putString("raw", raw).commit()
-            if (!saved) {
-                info("NO SE PUDO CONSERVAR EL REPORTE", "No se pudo guardar temporalmente el texto. Vuelve a pegar el reporte antes de vincular la carpeta.")
-                return
-            }
-            AlertDialog.Builder(this)
-                .setTitle("VINCULA LA CARPETA COMPARTIDA")
-                .setMessage("Para organizar automáticamente el reporte, guardar su respaldo cifrado y actualizar los inventarios, primero selecciona la carpeta compartida que utilizan SENE VENTAS y SENE ADMIN. El reporte quedará pendiente y se procesará al terminar.")
-                .setPositiveButton("VINCULAR CARPETA") { _, _ -> explainSharedFolder() }
-                .setNegativeButton("CANCELAR", null)
-                .show()
-            return
-        }
-        reportImportRunning = true
-        val expectedReports = Regex("SENE-ADMIN-REPORT\\|1").findAll(raw).count()
-        val progressTotal = (expectedReports + 1).coerceAtLeast(1)
-        val (progress, updateProgress) = createProcessingDialog(progressTotal)
-        updateProgress(0, "Preparando los reportes...")
-
-        // Esperar a que el diálogo se dibuje; así permanece visible durante el trabajo.
-        progress.window?.decorView?.post {
-        Thread {
-            fun publishProgress(completed: Int, message: String) {
-                runOnUiThread {
-                    if (!isFinishing && !isDestroyed) updateProgress(completed, message)
-                }
-            }
-            var imported = 0
-            var duplicates = 0
-            val errors = mutableListOf<String>()
-            val reportBatch = mutableListOf<SeneReport>()
-            var fatalError: String? = null
-            try {
-                // WhatsApp puede anteponer fecha, remitente o espacios al copiar el mensaje.
-                // Se localiza cada cabecera y se procesa el lote fuera del hilo de pantalla.
-                val normalized = raw.replace("\r\n", "\n").replace("\r", "\n")
-                // No descartar el primer reporte cuando WhatsApp antepone fecha o remitente.
-                // Extraer cada mensaje desde su cabecera real hasta la siguiente cabecera.
-                val headers = Regex("SENE-ADMIN-REPORT\\|1").findAll(normalized).toList()
-                val chunks = headers.mapIndexed { index, match ->
-                    val end = headers.getOrNull(index + 1)?.range?.first ?: normalized.length
-                    normalized.substring(match.range.first, end).trim()
-                }
-                if (chunks.isEmpty()) errors.add("No se encontraron reportes SENE válidos. Pega el mensaje completo de WhatsApp.")
-                val knownIds = SeneAdminStore.reports(this@MainActivity).map { it.id }.toMutableSet()
-                chunks.forEachIndexed { index, message ->
-                    publishProgress(index, "Leyendo y organizando reporte ${index + 1} de ${chunks.size}...")
-                    try {
-                        val report = SeneReportReader.read(message, key)
-                        if (!knownIds.add(report.id)) duplicates++
-                        else {
-                            processReport(report, message, key)
-                            reportBatch.add(report)
-                            imported++
-                            if(reportBatch.size>=10) {
-                                if(!SeneAdminStore.saveReports(this@MainActivity,reportBatch))
-                                    throw IllegalStateException("No se pudo guardar un bloque del historial local.")
-                                reportBatch.clear()
-                            }
-                        }
-                    } catch (e: Exception) {
-                        errors.add("Reporte " + (index + 1) + ": " + (e.message ?: "formato no válido"))
-                    }
-                    publishProgress(index + 1, "Reporte ${index + 1} de ${chunks.size} revisado")
-                }
-                // Guardar el historial local en un solo lote evita reescribir todo el JSON
-                // una vez por reporte cuando se pegan semanas o meses de WhatsApp.
-                if(!SeneAdminStore.saveReports(this@MainActivity,reportBatch))
-                    throw IllegalStateException("No se pudo guardar el historial local de reportes.")
-                // Crear o actualizar la nómina solo después de procesar el lote completo.
-                publishProgress(expectedReports, "Actualizando la información de nómina...")
-                OwnerPayrollStore.profiles(this@MainActivity).filter { it.weeklySalaryCents > 0L }.forEach { profile ->
-                    try { OwnerPayrollStore.createOrGetPayroll(this@MainActivity, profile.id) } catch (_: Exception) { }
-                }
-                publishProgress(progressTotal, "Preparando el resumen...")
-            } catch (e: Exception) {
-                fatalError = e.message ?: "No se pudo completar la importación."
-            }
-
-            runOnUiThread {
-                reportImportRunning = false
-                if (isFinishing || isDestroyed) {
-                    progress.dismiss()
-                    return@runOnUiThread
-                }
-                progress.dismiss()
-                if (fatalError != null) {
-                    info("NO SE COMPLETÓ LA IMPORTACIÓN", fatalError!!)
-                    return@runOnUiThread
-                }
-                showHome()
-                if (errors.isEmpty() && (imported > 0 || duplicates > 0)) {
-                    getSharedPreferences("sene_admin_pending_import", MODE_PRIVATE).edit().remove("raw").commit()
-                    pendingImportRaw = null
-                }
-                val summary = buildString {
-                    append("Nuevos reportes: ").append(imported)
-                    append("\nDuplicados omitidos: ").append(duplicates)
-                    if (errors.isNotEmpty()) {
-                        append("\n\nNo se pudieron leer:")
-                        errors.take(8).forEach { append("\n• ").append(it) }
-                        if (errors.size > 8) append("\nY ").append(errors.size - 8).append(" más.")
-                    }
-                }
-                AlertDialog.Builder(this@MainActivity).setTitle("IMPORTACIÓN TERMINADA").setMessage(summary)
-                    .setPositiveButton("ACEPTAR", null).show()
-            }
-        }.start()
-        }
-    }
-
-    private fun processReport(report: SeneReport, message: String, key: String) {
-        // Primero clasifica y aplica los datos. Solo después registra el ID como importado:
-        // si falla el procesamiento, el dueño puede pegar el mismo mensaje otra vez.
-        if (report.body.startsWith("SENE-ORDER|1")) {
-            check(OwnerPayrollStore.importOrder(this, report)) { "No se pudo organizar la solicitud del trabajador." }
-        } else {
-            check(OwnerPayrollStore.importProfile(this, report)) {
-                "No se pudieron guardar los datos del trabajador, la asistencia o sus movimientos de nómina."
-            }
-        }
-
-        // El inventario del reporte se consulta desde el historial local y se muestra
-        // automáticamente en INVENTARIO SENE; no requiere que el dueño lo separe.
-        // La importación solo se confirma cuando el reporte cifrado quedó respaldado
-        // en la carpeta compartida y el inventario maestro pudo actualizarse si corresponde.
-        check(SharedInventoryManager.savedTree(this) != null) {
-            "Vincula la carpeta compartida antes de importar reportes."
-        }
-        SharedInventoryManager.saveReport(this, report, message, key)
-        SharedInventoryManager.updateMasterFromReport(this, key, report.body, report.date + " " + report.time)
     }
 
     private fun showReports() {
