@@ -29,6 +29,7 @@ class MainActivity : AppCompatActivity() {
         showHome()
         // El historial local nuevo se protege con Android Keystore; no depende de una clave manual.
         SeneAdminStore.cleanupIfDue(this)
+        InventoryLocalStore.cleanupIfDue(this)
         if (!AccessPinStore.hasPin(this)) askCreatePin()
     }
 
