@@ -82,9 +82,12 @@ object InventoryLocalStore {
             .put("saved_at", savedAt).put("items", rows)
     }
 
-    @Synchronized fun snapshot(c: Context, category: String): SharedInventoryManager.Snapshot? =
-        try { decode(category, readAll(c).optJSONObject(category) ?: return null) }
-        catch (_: Exception) { null }
+    @Synchronized fun snapshot(c: Context, category: String): SharedInventoryManager.Snapshot? {
+        return try {
+            val current = readAll(c).optJSONObject(category) ?: return null
+            decode(category, current)
+        } catch (_: Exception) { null }
+    }
 
     @Synchronized fun save(c: Context, snapshot: SharedInventoryManager.Snapshot): Boolean {
         if (snapshot.category !in setOf("INVENTARIO_MAESTRO", "INVENTARIO_SENE") || snapshot.items.isEmpty()) return false
@@ -98,10 +101,20 @@ object InventoryLocalStore {
                 saved.put(item)
             }
             val now = System.currentTimeMillis()
+            // Migra la última copia del formato anterior al historial sin descifrarla de nuevo.
+            if (old.has("items") && old.optJSONArray("items")?.length() ?: 0 > 0) {
+                val oldFile = old.optString("file")
+                val oldUpdated = old.optString("updated")
+                val alreadyStored = (0 until saved.length()).any { i ->
+                    val item = saved.optJSONObject(i)
+                    item != null && item.optString("file") == oldFile && item.optString("updated") == oldUpdated
+                }
+                if (!alreadyStored) saved.put(JSONObject(old.toString()).put("saved_at", old.optLong("saved_at", now)))
+            }
             val current = encode(snapshot, now)
             val duplicate = (0 until saved.length()).any { i ->
                 val item = saved.optJSONObject(i)
-                item?.optString("file") == snapshot.fileName && item.optString("updated") == snapshot.updated
+                item != null && item.optString("file") == snapshot.fileName && item.optString("updated") == snapshot.updated
             }
             if (!duplicate) saved.put(current)
             val lastCleanup = old.optLong("last_cleanup", 0L)
@@ -129,8 +142,15 @@ object InventoryLocalStore {
                 val last = old.optLong("last_cleanup", 0L)
                 if (last > 0L && now - last < RETENTION_MS) continue
                 val history = old.optJSONArray("history") ?: JSONArray()
-                val ordered = (0 until history.length()).mapNotNull { history.optJSONObject(it) }
-                    .sortedByDescending { it.optLong("saved_at", 0L) }
+                val orderedInput = (0 until history.length()).mapNotNull { history.optJSONObject(it) }.toMutableList()
+                if (old.has("items") && (old.optJSONArray("items")?.length() ?: 0) > 0) {
+                    val oldFile = old.optString("file")
+                    val oldUpdated = old.optString("updated")
+                    if (orderedInput.none { it.optString("file") == oldFile && it.optString("updated") == oldUpdated }) {
+                        orderedInput.add(JSONObject(old.toString()).put("saved_at", old.optLong("saved_at", now)))
+                    }
+                }
+                val ordered = orderedInput.sortedByDescending { it.optLong("saved_at", 0L) }
                 val kept = JSONArray(ordered.filterIndexed { index, item ->
                     index < KEEP || now - item.optLong("saved_at", now) <= RETENTION_MS
                 })
