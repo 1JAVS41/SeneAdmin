@@ -42,6 +42,9 @@ jobs:
         run: |
           mkdir -p dist
           cp app/build/outputs/apk/debug/app-debug.apk dist/SENE-ADMIN.apk
+          test -s dist/SENE-ADMIN.apk
+          unzip -t dist/SENE-ADMIN.apk >/dev/null
+          sha256sum dist/SENE-ADMIN.apk
       - uses: actions/upload-artifact@v4
         with:
           name: SENE-ADMIN
