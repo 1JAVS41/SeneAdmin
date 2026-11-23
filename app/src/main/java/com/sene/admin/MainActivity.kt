@@ -113,7 +113,11 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
-        if(accessGranted && ServerPairing.isLinked(this)) AdminPayrollRequestSync.sync(this)
+        if (accessGranted && ServerPairing.isLinked(this)) {
+            AdminPayrollRequestSync.sync(this, onComplete = {
+                if (!isFinishing && !isDestroyed) processServerReportEnvelopes()
+            })
+        }
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
@@ -536,7 +540,6 @@ class MainActivity : AppCompatActivity() {
         val builder = AlertDialog.Builder(this).setTitle("BUZÓN DE REPORTES")
             .setMessage(message).setPositiveButton("CERRAR", null)
         builder.show()
-        processServerReportEnvelopes()
     }
 
     /** Procesa automáticamente los sobres persistidos; el ACK de recepción ya es durable. */
