@@ -148,8 +148,8 @@ class PayrollActivity : Activity() {
             val state=when {
                 request.status=="APPROVED" -> "AUTORIZADA"
                 request.status=="REJECTED" -> "RECHAZADA"
-                request.ownerDecision=="APPROVE" -> "APROBACIÓN PENDIENTE DE SINCRONIZAR"
-                request.ownerDecision=="REJECT" -> "RECHAZO PENDIENTE DE SINCRONIZAR"
+                request.ownerDecision=="APPROVE" -> "APROBACIÓN PENDIENTE DE ENVÍO"
+                request.ownerDecision=="REJECT" -> "RECHAZO PENDIENTE DE ENVÍO"
                 else -> "PENDIENTE DE AUTORIZACIÓN"
             }
             val card=LinearLayout(this).apply {
@@ -363,7 +363,7 @@ class PayrollActivity : Activity() {
         }
         option("CONSULTAR / PAGAR NÓMINA") { payroll(p) }
         option("VER REPORTES") { showReportsForWorker(p.id) }
-        dialog = AlertDialog.Builder(this).setTitle("PAGAR A · " + p.name)
+        dialog = AlertDialog.Builder(this).setTitle("TRABAJADOR · " + p.name)
             .setView(ScrollView(this).apply { addView(box) })
             .setPositiveButton("CERRAR", null).create()
         dialog.show()
