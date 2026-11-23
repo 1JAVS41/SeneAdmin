@@ -97,8 +97,6 @@ class PayrollActivity : Activity() {
         val profile=OwnerPayrollStore.profile(this,id)?:return
         AlertDialog.Builder(this)
             .setTitle(profile.name)
-            .setItems(arrayOf("Consultar nómina y asistencia","Ver reportes"))
-            .setNegativeButton("CERRAR",null)
             .setItems(arrayOf("Consultar nómina y asistencia","Ver reportes")) { _,which ->
                 if(which==0)showProfile(id) else showReportsForWorker(id)
             }.show()
