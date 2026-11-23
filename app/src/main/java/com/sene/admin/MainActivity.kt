@@ -114,15 +114,9 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
-        if (accessGranted) {
-            // Procesa primero lo que ya está guardado: también funciona sin conexión.
-            processServerReportEnvelopes()
-            if (ServerPairing.isLinked(this)) {
-                AdminPayrollRequestSync.sync(this, onComplete = {
-                    if (!isFinishing && !isDestroyed) processServerReportEnvelopes()
-                })
-            }
-        }
+        // No sincronizar ni reprocesar al volver de Nómina/Reportes.
+        // La consulta de datos es local; la sincronización se inicia manualmente
+        // o mediante el trabajo periódico en segundo plano.
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
@@ -510,19 +504,14 @@ class MainActivity : AppCompatActivity() {
             clipToPadding = false
             addView(root)
         })
-        // La primera sincronización no depende de que Android vuelva a llamar onResume
-        // después del PIN o la huella; lo ya recibido se procesa incluso sin red.
+        // Procesar una sola vez lo que ya está guardado localmente al mostrar Inicio.
+        // No consultar al servidor ni repetir el procesamiento al regresar de otras pantallas.
         processServerReportEnvelopes()
-        if (ServerPairing.isLinked(this)) {
-            AdminPayrollRequestSync.sync(this, onComplete = {
-                if (!isFinishing && !isDestroyed) processServerReportEnvelopes()
-            })
-        }
     }
 
 
     private fun showServerReportInbox() {
-        if (ServerPairing.isLinked(this)) AdminPayrollRequestSync.sync(this, onComplete = { if (!isFinishing && !isDestroyed) processServerReportEnvelopes() })
+        // El buzón muestra exclusivamente lo que ya está guardado en el teléfono.
         val events = ReportInboxStore.events(this)
         if (events.length() == 0) {
             AlertDialog.Builder(this).setTitle("REPORTES DEL SERVIDOR")
