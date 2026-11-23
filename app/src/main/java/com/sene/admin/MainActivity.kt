@@ -342,7 +342,7 @@ class MainActivity : AppCompatActivity() {
             AlertDialog.Builder(this).setTitle("NEGOCIO VINCULADO")
                 .setMessage("SeneAdmin está conectado con: "+ServerPairing.businessName(this)+
                     "\n\nLa vinculación se conserva en este dispositivo y permite sincronizar inventarios, reportes, asistencia, solicitudes y autorizaciones.")
-                .setPositiveButton("ACEPTAR",null).setNeutralButton("SINCRONIZAR AHORA"){_,_->AdminPayrollRequestSync.sync(this,true)}.show()
+                .setPositiveButton("ACEPTAR",null).setNeutralButton("SINCRONIZAR AHORA"){_,_->AdminPayrollRequestSync.sync(this,true,onComplete={if(!isFinishing&&!isDestroyed)processServerReportEnvelopes()})}.show()
             return
         }
         val code=EditText(this).apply {
@@ -370,7 +370,7 @@ class MainActivity : AppCompatActivity() {
                                 if(isFinishing||isDestroyed)return@runOnUiThread
                                 if(saved){
                                     Toast.makeText(this,"SeneAdmin quedó vinculado con "+ServerPairing.businessName(this),Toast.LENGTH_LONG).show()
-                                    AdminPayrollRequestSync.sync(this,true)
+                                    AdminPayrollRequestSync.sync(this,true,onComplete={if(!isFinishing&&!isDestroyed)processServerReportEnvelopes()})
                                     showHome()
                                 }else{
                                     AlertDialog.Builder(this).setTitle("NO SE PUDO VINCULAR")
@@ -475,7 +475,7 @@ class MainActivity : AppCompatActivity() {
         }
         if (ServerPairing.isLinked(this)) {
             mainOption("↻", "SINCRONIZAR AHORA", "Recibir reportes, inventarios, asistencia y solicitudes") {
-                AdminPayrollRequestSync.sync(this, true)
+                AdminPayrollRequestSync.sync(this, true, onComplete = { if (!isFinishing && !isDestroyed) processServerReportEnvelopes() })
                 Toast.makeText(this, "Sincronización iniciada. Los datos se guardarán localmente al recibirse.", Toast.LENGTH_LONG).show()
             }
         }
@@ -522,7 +522,7 @@ class MainActivity : AppCompatActivity() {
 
 
     private fun showServerReportInbox() {
-        if (ServerPairing.isLinked(this)) AdminPayrollRequestSync.sync(this)
+        if (ServerPairing.isLinked(this)) AdminPayrollRequestSync.sync(this, onComplete = { if (!isFinishing && !isDestroyed) processServerReportEnvelopes() })
         val events = ReportInboxStore.events(this)
         if (events.length() == 0) {
             AlertDialog.Builder(this).setTitle("REPORTES DEL SERVIDOR")
