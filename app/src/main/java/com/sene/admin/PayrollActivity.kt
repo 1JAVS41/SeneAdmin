@@ -19,7 +19,10 @@ class PayrollActivity : Activity() {
         super.onCreate(savedInstanceState)
         AdminPayrollRequestSync.sync(this,true)
         val profileId = intent.getStringExtra("profile_id")
-        if (profileId.isNullOrBlank()) render() else if (OwnerPayrollStore.profile(this, profileId) != null) {
+        if (profileId.isNullOrBlank()) {
+            render()
+            if(intent.getBooleanExtra("show_requests",false)) window.decorView.post { showRequests() }
+        } else if (OwnerPayrollStore.profile(this, profileId) != null) {
             setContentView(TextView(this).apply { text = "Perfil del trabajador"; setPadding(24, 24, 24, 24) })
             showProfile(profileId)
         } else render()
@@ -54,11 +57,6 @@ class PayrollActivity : Activity() {
             textSize = 12f; setTextColor(0xFFE5EEFF.toInt())
         })
         root.addView(hero, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(17) })
-        root.addView(Button(this).apply {
-            text = "SOLICITUDES DE PRÉSTAMO Y CONSUMO"
-            isAllCaps = false
-            setOnClickListener { showRequests() }
-        }, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(12) })
         root.addView(TextView(this).apply {
             text = "TRABAJADORES REGISTRADOS"; textSize = 12f; letterSpacing = .1f
             typeface = android.graphics.Typeface.DEFAULT_BOLD; setTextColor(0xFF60738F.toInt())
