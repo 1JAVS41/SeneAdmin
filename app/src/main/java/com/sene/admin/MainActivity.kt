@@ -114,9 +114,14 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
-        // No sincronizar ni reprocesar al volver de Nómina/Reportes.
-        // La consulta de datos es local; la sincronización se inicia manualmente
-        // o mediante el trabajo periódico en segundo plano.
+        // Recuperar datos del servidor al volver a primer plano, con límite interno
+        // de 15 minutos para evitar consultas repetitivas al cambiar de pantalla.
+        // Los datos recibidos se guardan localmente y luego se procesa el buzón una vez.
+        if (ServerPairing.isLinked(this)) {
+            AdminPayrollRequestSync.sync(this, false, onComplete = {
+                if (!isFinishing && !isDestroyed) processServerReportEnvelopes()
+            })
+        }
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
