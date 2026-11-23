@@ -483,7 +483,7 @@ class MainActivity : AppCompatActivity() {
             startActivity(Intent(this, PayrollActivity::class.java))
         }
         val reportCount = ReportInboxStore.events(this).length()
-        mainOption("▤", "REPORTES DEL SERVIDOR", "$reportCount reporte(s) recibido(s) y guardado(s)") {
+        mainOption("▤", "REPORTES DEL SERVIDOR", "$reportCount reporte(s) pendiente(s) de organizar localmente") {
             showServerReportInbox()
         }
         mainOption("♙", "ADMINISTRAR TRABAJADORES", "Crear, editar y consultar perfiles") {
