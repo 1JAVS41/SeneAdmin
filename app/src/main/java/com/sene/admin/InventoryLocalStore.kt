@@ -12,12 +12,14 @@ import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
-/** Caché local de inventarios, cifrada con una clave exclusiva de esta instalación. */
+/** Caché local cifrada de inventarios; conserva historial de 10 copias por categoría. */
 object InventoryLocalStore {
     private const val FILE = "sene_admin_inventory_v1.bin"
     private const val ALIAS = "SENE_ADMIN_INVENTORY_LOCAL_V1"
     private const val IV_SIZE = 12
     private const val AAD = "SENE-ADMIN-INVENTORY|1"
+    private const val RETENTION_MS = 30L * 24L * 60L * 60L * 1000L
+    private const val KEEP = 10
 
     private fun file(c: Context) = File(c.applicationContext.filesDir, FILE)
 
@@ -58,32 +60,84 @@ object InventoryLocalStore {
         finally { if (temp.exists()) temp.delete() }
     }
 
-    @Synchronized fun snapshot(c: Context, category: String): SharedInventoryManager.Snapshot? {
-        return try {
-            val o = readAll(c).optJSONObject(category) ?: return null
-            val rows = o.optJSONArray("items") ?: JSONArray()
-            val items = (0 until rows.length()).mapNotNull { i ->
-                val row = rows.optJSONObject(i) ?: return@mapNotNull null
-                SharedInventoryManager.Item(row.optString("c"), row.optString("n"), row.optDouble("p"),
-                    row.optInt("s"), row.optString("l"), row.optString("h"))
-            }
-            if (items.isEmpty()) null else SharedInventoryManager.Snapshot(category,
-                o.optString("file", "SERVER-SENE"), o.optString("updated"), items, false)
-        } catch (_: Exception) { null }
+    private fun decode(category: String, o: JSONObject): SharedInventoryManager.Snapshot? {
+        val rows = o.optJSONArray("items") ?: JSONArray()
+        val items = (0 until rows.length()).mapNotNull { i ->
+            val row = rows.optJSONObject(i) ?: return@mapNotNull null
+            SharedInventoryManager.Item(row.optString("c"), row.optString("n"), row.optDouble("p"),
+                row.optInt("s"), row.optString("l"), row.optString("h"))
+        }
+        if (items.isEmpty()) return null
+        return SharedInventoryManager.Snapshot(category, o.optString("file", "SERVER-SENE"),
+            o.optString("updated"), items, false)
     }
+
+    private fun encode(snapshot: SharedInventoryManager.Snapshot, savedAt: Long): JSONObject {
+        val rows = JSONArray()
+        snapshot.items.forEach { item ->
+            rows.put(JSONObject().put("c", item.code).put("n", item.name).put("p", item.price)
+                .put("s", item.stock).put("l", item.aisle).put("h", item.shelf))
+        }
+        return JSONObject().put("file", snapshot.fileName).put("updated", snapshot.updated)
+            .put("saved_at", savedAt).put("items", rows)
+    }
+
+    @Synchronized fun snapshot(c: Context, category: String): SharedInventoryManager.Snapshot? =
+        try { decode(category, readAll(c).optJSONObject(category) ?: return null) }
+        catch (_: Exception) { null }
 
     @Synchronized fun save(c: Context, snapshot: SharedInventoryManager.Snapshot): Boolean {
         if (snapshot.category !in setOf("INVENTARIO_MAESTRO", "INVENTARIO_SENE") || snapshot.items.isEmpty()) return false
         return try {
             val all = readAll(c)
-            val rows = JSONArray()
-            snapshot.items.forEach { item ->
-                rows.put(JSONObject().put("c", item.code).put("n", item.name).put("p", item.price)
-                    .put("s", item.stock).put("l", item.aisle).put("h", item.shelf))
+            val old = all.optJSONObject(snapshot.category) ?: JSONObject()
+            val history = old.optJSONArray("history") ?: JSONArray()
+            val saved = JSONArray()
+            for (i in 0 until history.length()) {
+                val item = history.optJSONObject(i) ?: continue
+                saved.put(item)
             }
-            all.put(snapshot.category, JSONObject().put("file", snapshot.fileName)
-                .put("updated", snapshot.updated).put("items", rows))
+            val now = System.currentTimeMillis()
+            val current = encode(snapshot, now)
+            val duplicate = (0 until saved.length()).any { i ->
+                val item = saved.optJSONObject(i)
+                item?.optString("file") == snapshot.fileName && item.optString("updated") == snapshot.updated
+            }
+            if (!duplicate) saved.put(current)
+            val lastCleanup = old.optLong("last_cleanup", 0L)
+            val kept = if (lastCleanup == 0L || now - lastCleanup >= RETENTION_MS) {
+                val ordered = (0 until saved.length()).mapNotNull { saved.optJSONObject(it) }
+                    .sortedByDescending { it.optLong("saved_at", 0L) }
+                JSONArray(ordered.filterIndexed { index, item ->
+                    index < KEEP || now - item.optLong("saved_at", now) <= RETENTION_MS
+                })
+            } else saved
+            all.put(snapshot.category, encode(snapshot, now)
+                .put("history", kept).put("last_cleanup", if (lastCleanup == 0L || now - lastCleanup >= RETENTION_MS) now else lastCleanup))
             writeAll(c, all)
+        } catch (_: Exception) { false }
+    }
+
+    /** Limpia cada 30 días y conserva siempre las 10 copias más recientes de cada categoría. */
+    @Synchronized fun cleanupIfDue(c: Context): Boolean {
+        return try {
+            val all = readAll(c)
+            val now = System.currentTimeMillis()
+            var changed = false
+            for (category in listOf("INVENTARIO_MAESTRO", "INVENTARIO_SENE")) {
+                val old = all.optJSONObject(category) ?: continue
+                val last = old.optLong("last_cleanup", 0L)
+                if (last > 0L && now - last < RETENTION_MS) continue
+                val history = old.optJSONArray("history") ?: JSONArray()
+                val ordered = (0 until history.length()).mapNotNull { history.optJSONObject(it) }
+                    .sortedByDescending { it.optLong("saved_at", 0L) }
+                val kept = JSONArray(ordered.filterIndexed { index, item ->
+                    index < KEEP || now - item.optLong("saved_at", now) <= RETENTION_MS
+                })
+                old.put("history", kept).put("last_cleanup", now)
+                changed = true
+            }
+            !changed || writeAll(c, all)
         } catch (_: Exception) { false }
     }
 }
