@@ -20,7 +20,6 @@ import java.util.Locale
 
 class MainActivity : AppCompatActivity() {
     private lateinit var root: LinearLayout
-    @Volatile private var reportImportRunning = false
     private var accessGranted = false
     private var biometricFallbackShown = false
 
@@ -474,9 +473,6 @@ class MainActivity : AppCompatActivity() {
         mainOption("N", "NÓMINA", "Consultar pagos y revisar asistencia") {
             startActivity(Intent(this, PayrollActivity::class.java))
         }
-        mainOption("P", "PEGAR REPORTE", "Pega el texto completo de WhatsApp; SeneAdmin organiza todo automáticamente") {
-            showPasteReportDialog()
-        }
         val reportCount = ReportInboxStore.events(this).length()
         mainOption("▤", "REPORTES DEL SERVIDOR", "$reportCount reporte(s) recibido(s) y guardado(s)") {
             showServerReportInbox()
@@ -507,117 +503,6 @@ class MainActivity : AppCompatActivity() {
         })
     }
 
-
-    /** Importación manual compatible con reportes históricos copiados desde WhatsApp. */
-    private fun showPasteReportDialog() {
-        val input = EditText(this).apply {
-            hint = "Mantén presionado aquí y selecciona PEGAR"
-            minLines = 8
-            maxLines = 16
-            gravity = android.view.Gravity.TOP
-            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE
-        }
-        val box = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(20, 8, 20, 4)
-            addView(TextView(this@MainActivity).apply {
-                text = "Copia el reporte completo de WhatsApp y pégalo aquí. Puedes pegar varios reportes juntos; no necesitas separarlos ni clasificarlos."
-                textSize = 13f
-                setTextColor(0xFF526579.toInt())
-                setPadding(0, 0, 0, 10)
-            })
-            addView(input)
-        }
-        val dialog = AlertDialog.Builder(this).setTitle("PEGAR REPORTES")
-            .setView(box).setPositiveButton("ORGANIZAR", null)
-            .setNegativeButton("CANCELAR", null).create()
-        dialog.setOnShowListener {
-            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
-                val raw = input.text.toString().trim()
-                if (raw.isBlank()) {
-                    input.error = "Pega al menos un reporte"
-                    return@setOnClickListener
-                }
-                dialog.dismiss()
-                importPastedReports(raw)
-            }
-        }
-        dialog.show()
-    }
-
-    private fun importPastedReports(raw: String) {
-        if (reportImportRunning) {
-            Toast.makeText(this, "Ya se está organizando otro lote. Espera un momento.", Toast.LENGTH_LONG).show()
-            return
-        }
-        reportImportRunning = true
-        Thread {
-            var imported = 0
-            var duplicates = 0
-            val errors = mutableListOf<String>()
-            val batch = mutableListOf<SeneReport>()
-            try {
-                val normalized = raw.replace("\r\n", "\n").replace("\r", "\n")
-                val headers = Regex("SENE-ADMIN-REPORT\\|[12]").findAll(normalized).toList()
-                val chunks = headers.mapIndexed { index, match ->
-                    val end = headers.getOrNull(index + 1)?.range?.first ?: normalized.length
-                    normalized.substring(match.range.first, end).trim()
-                }
-                if (chunks.isEmpty()) errors.add("No se encontró una cabecera SENE-ADMIN-REPORT válida.")
-                val legacyKey = OwnerKeyStore.read(this)
-                val known = SeneAdminStore.reports(this).map { it.id }.toMutableSet()
-                chunks.forEachIndexed { index, message ->
-                    try {
-                        val report = if (message.startsWith("SENE-ADMIN-REPORT|2")) {
-                            SeneReportV2Reader.read(message)
-                        } else {
-                            val key = legacyKey?.takeIf { it.isNotBlank() }
-                                ?: throw IllegalStateException("Este reporte histórico v1 requiere la clave anterior. Los reportes nuevos se reciben cifrados automáticamente desde SERVER-SENE.")
-                            SeneReportReader.read(message, key)
-                        }
-                        if (!known.add(report.id)) {
-                            duplicates++
-                        } else {
-                            val ok = when {
-                                report.body.startsWith("SENE-ORDER|1") -> OwnerPayrollStore.importOrder(this, report)
-                                report.type == SeneWireProtocol.SYNC &&
-                                    report.body.startsWith("SENE VENTAS  •  REPORTE DE MOVIMIENTOS") -> true
-                                else -> OwnerPayrollStore.importProfile(this, report)
-                            }
-                            if (!ok) throw IllegalStateException("No se pudieron organizar los datos del reporte ${report.number}.")
-                            SharedInventoryManager.inventoryFromReport(report)?.let { snapshot ->
-                                if (!InventoryLocalStore.save(this, snapshot))
-                                    throw IllegalStateException("No se pudo guardar el inventario local del reporte ${report.number}.")
-                            }
-                            batch.add(report)
-                            imported++
-                        }
-                    } catch (e: Exception) {
-                        errors.add("Reporte ${index + 1}: " + (e.message ?: "no válido"))
-                    }
-                }
-                if (batch.isNotEmpty() && !SeneAdminStore.saveReports(this, batch))
-                    throw IllegalStateException("No se pudo guardar el historial local de reportes.")
-            } catch (e: Exception) {
-                errors.add(e.message ?: "No se pudo completar la importación.")
-            }
-            runOnUiThread {
-                reportImportRunning = false
-                if (isFinishing || isDestroyed) return@runOnUiThread
-                showHome()
-                val summary = buildString {
-                    append("Reportes organizados: ").append(imported)
-                    append("\nDuplicados omitidos: ").append(duplicates)
-                    if (errors.isNotEmpty()) {
-                        append("\n\nPendientes por revisar:")
-                        errors.take(6).forEach { append("\n• ").append(it) }
-                    }
-                }
-                AlertDialog.Builder(this@MainActivity).setTitle("IMPORTACIÓN TERMINADA")
-                    .setMessage(summary).setPositiveButton("ACEPTAR", null).show()
-            }
-        }.start()
-    }
 
     private fun showServerReportInbox() {
         if (ServerPairing.isLinked(this)) AdminPayrollRequestSync.sync(this)
@@ -650,11 +535,12 @@ class MainActivity : AppCompatActivity() {
             "\n\nLos reportes nuevos se descifran con la clave privada protegida de este dispositivo. Los reportes históricos conservan su compatibilidad y pueden requerir la clave anterior."
         val builder = AlertDialog.Builder(this).setTitle("BUZÓN DE REPORTES")
             .setMessage(message).setPositiveButton("CERRAR", null)
-        builder.setNeutralButton("IMPORTAR REPORTES") { _, _ -> importServerReportEnvelopes() }
         builder.show()
+        processServerReportEnvelopes()
     }
 
-    private fun importServerReportEnvelopes() {
+    /** Procesa automáticamente los sobres persistidos; el ACK de recepción ya es durable. */
+    private fun processServerReportEnvelopes() {
         val legacyKey = OwnerKeyStore.read(this)
         val events = ReportInboxStore.events(this)
         val imported = mutableListOf<SeneReport>()
@@ -702,8 +588,10 @@ class MainActivity : AppCompatActivity() {
         val summary = "Reportes importados: ${imported.size}" +
             if (failures.isEmpty()) "\nTodos los reportes válidos quedaron registrados."
             else "\n\nPendientes por revisar:\n" + failures.take(5).joinToString("\n")
-        AlertDialog.Builder(this).setTitle("IMPORTACIÓN DE REPORTES")
-            .setMessage(summary).setPositiveButton("ACEPTAR") { _, _ -> showHome() }.show()
+        if (imported.isNotEmpty() || failures.isNotEmpty()) {
+            AlertDialog.Builder(this).setTitle("REPORTES PROCESADOS AUTOMÁTICAMENTE")
+                .setMessage(summary).setPositiveButton("ACEPTAR", null).show()
+        }
     }
 
     private fun showPendingReviews() {
