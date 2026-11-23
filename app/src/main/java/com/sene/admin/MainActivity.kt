@@ -461,7 +461,7 @@ class MainActivity : AppCompatActivity() {
         mainOption("↔", "VINCULAR", "Conectar este negocio con SENE VENTAS") {
             showPairingDialog()
         }
-        if(linked) mainOption("↻", "ACTUALIZAR", "Recibir los datos más recientes") {
+        mainOption("↻", "ACTUALIZAR", "Recibir los datos más recientes") {
             updateFromServer()
         }
         mainOption("▦", "INVENTARIO", "Consultar la última información guardada") {
@@ -701,9 +701,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showSettingsMenu() {
-        val options=arrayOf("Cambiar PIN de acceso","Activar / desactivar huella","Vincular / cambiar carpeta compartida","Ver inventario maestro","Ver todos los reportes")
+        val options=arrayOf("Cambiar PIN de acceso","Activar / desactivar huella","Vincular / cambiar carpeta compartida")
         AlertDialog.Builder(this).setTitle("AJUSTES").setItems(options) { _,which ->
-            when(which) { 0->askChangePin(); 1->toggleFingerprint(); 2->explainSharedFolder(); 3->showInventory("INVENTARIO_MAESTRO"); 4->showReports() }
+            when(which) { 0->askChangePin(); 1->toggleFingerprint(); 2->explainSharedFolder() }
         }.setNegativeButton("CERRAR",null).show()
     }
 
