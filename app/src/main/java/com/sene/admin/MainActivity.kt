@@ -510,6 +510,14 @@ class MainActivity : AppCompatActivity() {
             clipToPadding = false
             addView(root)
         })
+        // La primera sincronización no depende de que Android vuelva a llamar onResume
+        // después del PIN o la huella; lo ya recibido se procesa incluso sin red.
+        processServerReportEnvelopes()
+        if (ServerPairing.isLinked(this)) {
+            AdminPayrollRequestSync.sync(this, onComplete = {
+                if (!isFinishing && !isDestroyed) processServerReportEnvelopes()
+            })
+        }
     }
 
 
