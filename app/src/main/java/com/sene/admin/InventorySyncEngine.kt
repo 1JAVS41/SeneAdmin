@@ -20,7 +20,7 @@ object InventorySyncEngine {
         val stamp = event.optLong("i", 0L)
         val rows = event.optJSONArray("p") ?: JSONArray()
         if (id.isBlank() || event.optString("t") != SeneWireProtocol.INVENTORY_SYNC ||
-            scope !in setOf("M", "S") || stamp <= 0L || rows.length() == 0) return false
+            scope !in setOf("M", "S") || stamp <= 0L) return false
         val prefs = c.getSharedPreferences("sene_admin_shared_inventory", Context.MODE_PRIVATE)
         val done = prefs.getStringSet("wire_inventory_events", emptySet()).orEmpty().toMutableSet()
         if (id in done) return true
@@ -53,7 +53,9 @@ object InventorySyncEngine {
             } else items.add(SharedInventoryManager.Item(code, row.optString("n"),
                 row.optLong("a", 0L).toDouble() / 100.0, stock, row.optString("l"), row.optString("h")))
         }
-        if (acceptedRows == 0 || (items.isEmpty() && !fullSnapshot)) return false
+        // Un snapshot completo vacío también es una fotografía válida del inventario.
+        // Los deltas sin filas válidas nunca se confirman.
+        if ((!fullSnapshot && acceptedRows == 0) || (items.isEmpty() && !fullSnapshot)) return false
         val updated = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(Date(stamp))
         val snapshot = SharedInventoryManager.Snapshot(category, "SERVER-SENE-" + id, updated, items, false)
         if (!InventoryLocalStore.save(c, snapshot)) return false
