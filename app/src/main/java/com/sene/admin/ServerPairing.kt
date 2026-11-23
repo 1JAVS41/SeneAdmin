@@ -131,7 +131,7 @@ object AdminPayrollRequestSync {
         val token=ServerPairing.token(app);if(token.isBlank())return
         val p=app.getSharedPreferences(PREFS,Context.MODE_PRIVATE)
         val now=System.currentTimeMillis()
-        if(!force&&now-p.getLong("last_attempt",0L)<5L*60L*1000L)return
+        if(!force&&now-p.getLong("last_attempt",0L)<15L*60L*1000L)return
         if(!running.compareAndSet(false,true))return
         Thread {
             try {
