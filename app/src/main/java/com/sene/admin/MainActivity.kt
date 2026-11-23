@@ -339,10 +339,9 @@ class MainActivity : AppCompatActivity() {
 
     private fun showPairingCodeDialog() {
         if(ServerPairing.isLinked(this)) {
-            AlertDialog.Builder(this).setTitle("NEGOCIO VINCULADO")
-                .setMessage("SeneAdmin está conectado con: "+ServerPairing.businessName(this)+
-                    "\n\nLa vinculación se conserva en este dispositivo y permite sincronizar inventarios, reportes, asistencia, solicitudes y autorizaciones.")
-                .setPositiveButton("ACEPTAR",null).setNeutralButton("SINCRONIZAR AHORA"){_,_->AdminPayrollRequestSync.sync(this,true,onComplete={if(!isFinishing&&!isDestroyed)processServerReportEnvelopes()})}.show()
+            AlertDialog.Builder(this).setTitle(ServerPairing.businessName(this))
+                .setMessage("Conectado a SENE SERVER.\n\nEste negocio está vinculado a SeneAdmin en este dispositivo.")
+                .setPositiveButton("CERRAR",null).setNeutralButton("ACTUALIZAR"){_,_->updateFromServer()}.show()
             return
         }
         val code=EditText(this).apply {
@@ -390,7 +389,6 @@ class MainActivity : AppCompatActivity() {
     private fun showHome() {
         fun dp(value: Int) = (value * resources.displayMetrics.density + 0.5f).toInt()
         val navy = 0xFF145A43.toInt()
-        val blue = 0xFFC83D3A.toInt()
         val pale = 0xFFF4F7F4.toInt()
         root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -402,124 +400,100 @@ class MainActivity : AppCompatActivity() {
             setPadding(dp(22), dp(22), dp(22), dp(22))
             background = android.graphics.drawable.GradientDrawable(
                 android.graphics.drawable.GradientDrawable.Orientation.TL_BR,
-                intArrayOf(navy, blue, 0xFF27875B.toInt())
+                intArrayOf(navy, 0xFF237A55.toInt(), 0xFF27875B.toInt())
             ).apply { cornerRadius = dp(25).toFloat() }
             elevation = dp(5).toFloat()
         }
+        val linked = ServerPairing.isLinked(this)
         hero.addView(TextView(this).apply {
-            text = "SENE / ADMIN"; textSize = 13f; letterSpacing = .16f
-            typeface = Typeface.DEFAULT_BOLD; setTextColor(0xFFFFE5E2.toInt())
+            text = if(linked) ServerPairing.businessName(this@MainActivity) else "SENE ADMIN"
+            textSize = 24f; typeface = Typeface.DEFAULT_BOLD; setTextColor(-1)
         })
         hero.addView(TextView(this).apply {
-            text = "Tu negocio,\nbajo control."; textSize = 29f
-            typeface = Typeface.create("sans-serif", Typeface.BOLD)
-            setTextColor(-1); setPadding(0, dp(8), 0, dp(5))
-        })
-        hero.addView(TextView(this).apply {
-            text = "Administración, trabajadores e inventario en un solo lugar."
-            textSize = 13f; setTextColor(0xFFFFEDEC.toInt())
+            text = if(linked) "Conectado a SENE SERVER" else "Sin conexión con SENE SERVER"
+            textSize = 13f; typeface = Typeface.DEFAULT_BOLD
+            setTextColor(if(linked) 0xFFDDF4E5.toInt() else 0xFFFFE5D8.toInt())
+            setPadding(0, dp(7), 0, 0)
         })
         root.addView(hero, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(20) })
 
-        root.addView(TextView(this).apply {
-            text = "ACCESOS PRINCIPALES"; textSize = 12f; letterSpacing = .12f
-            typeface = Typeface.DEFAULT_BOLD; setTextColor(0xFF66766E.toInt())
-            setPadding(dp(3), 0, 0, dp(10))
-        })
-
-        fun mainOption(icon: String, label: String, subtitle: String, green: Boolean = false, action: () -> Unit) {
+        fun mainOption(icon: String, label: String, subtitle: String, action: () -> Unit) {
             val card = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = android.view.Gravity.CENTER_VERTICAL
                 setPadding(dp(15), dp(15), dp(16), dp(15))
                 background = android.graphics.drawable.GradientDrawable().apply {
-                    setColor(if (green) 0xFF168A4A.toInt() else -1)
-                    cornerRadius = dp(19).toFloat()
-                    setStroke(dp(1), if (green) 0xFF168A4A.toInt() else 0xFFE4EAE5.toInt())
+                    setColor(-1); cornerRadius = dp(19).toFloat()
+                    setStroke(dp(1), 0xFFE4EAE5.toInt())
                 }
                 elevation = dp(2).toFloat()
                 isClickable = true; isFocusable = true
                 setOnClickListener { action() }
             }
-            val symbol = TextView(this).apply {
+            card.addView(TextView(this).apply {
                 text = icon; textSize = 23f; gravity = android.view.Gravity.CENTER
-                setTextColor(if (green) -1 else navy)
+                setTextColor(navy)
                 background = android.graphics.drawable.GradientDrawable().apply {
-                    setColor(if (green) 0xFF0F713B.toInt() else 0xFFFCECEB.toInt())
-                    cornerRadius = dp(15).toFloat()
+                    setColor(0xFFE6F3EA.toInt()); cornerRadius = dp(15).toFloat()
                 }
-            }
-            card.addView(symbol, LinearLayout.LayoutParams(dp(52), dp(52)))
+            }, LinearLayout.LayoutParams(dp(52), dp(52)))
             val labels = LinearLayout(this).apply {
-                orientation = LinearLayout.VERTICAL
-                setPadding(dp(13), 0, dp(6), 0)
+                orientation = LinearLayout.VERTICAL; setPadding(dp(13), 0, dp(6), 0)
             }
             labels.addView(TextView(this).apply {
                 text = label; textSize = 15f; typeface = Typeface.DEFAULT_BOLD
-                setTextColor(if (green) -1 else 0xFF194A39.toInt())
+                setTextColor(0xFF194A39.toInt())
             })
             labels.addView(TextView(this).apply {
-                text = subtitle; textSize = 12f; setTextColor(if (green) 0xFFE2F5E9.toInt() else 0xFF69796F.toInt())
+                text = subtitle; textSize = 12f; setTextColor(0xFF69796F.toInt())
                 setPadding(0, dp(4), 0, 0)
             })
             card.addView(labels, LinearLayout.LayoutParams(0, -2, 1f))
             card.addView(TextView(this).apply {
-                text = "›"; textSize = 28f; setTextColor(if (green) -1 else 0xFFC64A43.toInt())
+                text = "›"; textSize = 28f; setTextColor(0xFF237A55.toInt())
             })
             root.addView(card, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(10) })
         }
 
-        mainOption("↔", if(ServerPairing.isLinked(this)) "NEGOCIO VINCULADO" else "VINCULAR NEGOCIO",
-            if(ServerPairing.isLinked(this)) "Conectado a "+ServerPairing.businessName(this) else "Conecta SeneAdmin con SENE VENTAS", green = !ServerPairing.isLinked(this)) {
-            showPairingDialog()
-        }
-        if (ServerPairing.isLinked(this)) {
-            mainOption("↻", "SINCRONIZAR AHORA", "Recibir reportes, inventarios, asistencia y solicitudes") {
-                AdminPayrollRequestSync.sync(this, true, onComplete = { if (!isFinishing && !isDestroyed) processServerReportEnvelopes() })
-                Toast.makeText(this, "Sincronización iniciada. Los datos se guardarán localmente al recibirse.", Toast.LENGTH_LONG).show()
-            }
-        }
-        mainOption("N", "NÓMINA", "Consultar pagos y revisar asistencia") {
+        mainOption("♙", "MIS TRABAJADORES", "Consultar perfiles, nómina y reportes") {
             startActivity(Intent(this, PayrollActivity::class.java))
         }
-        val reportCount = ReportInboxStore.events(this).length()
-        mainOption("▤", "REPORTES DEL SERVIDOR", "$reportCount reporte(s) pendiente(s) de organizar localmente") {
-            showServerReportInbox()
+        mainOption("↔", "VINCULAR", "Conectar este negocio con SENE VENTAS") {
+            showPairingDialog()
         }
-        mainOption("♙", "ADMINISTRAR TRABAJADORES", "Crear, editar y consultar perfiles") {
-            showWorkerAdministration()
+        if(linked) mainOption("↻", "ACTUALIZAR", "Recibir los datos más recientes") {
+            updateFromServer()
         }
-        mainOption("▤", "OTROS REPORTES", "Reportes de trabajadores, ventas y caja") {
-            showReports()
+        mainOption("▦", "INVENTARIO", "Consultar la última información guardada") {
+            showSeneInventory()
         }
-        mainOption("▦", "INVENTARIO SENE", "Consultar inventario recibido y maestro") {
-            AlertDialog.Builder(this).setTitle("INVENTARIOS")
-                .setItems(arrayOf("INVENTARIO SENE", "INVENTARIO MAESTRO")) { _, which ->
-                    showInventory(if (which == 0) "INVENTARIO_SENE" else "INVENTARIO_MAESTRO")
-                }.setNegativeButton("CERRAR", null).show()
-        }
-        mainOption("!", "REVISAR PENDIENTES", "Productos sin stock y productos dañados") {
+        mainOption("!", "PENDIENTES", "Revisar asuntos que requieren atención") {
             showPendingReviews()
         }
-        mainOption("⚙", "AJUSTES", "PIN, huella y carpeta compartida") {
+        mainOption("⚙", "AJUSTES", "Seguridad y carpeta compartida") {
             showSettings()
         }
 
         setContentView(ScrollView(this).apply {
-            isFillViewport = true
-            clipToPadding = false
-            addView(root)
+            isFillViewport = true; clipToPadding = false; addView(root)
         })
-        // La primera sincronización no depende de que Android vuelva a llamar onResume
-        // después del PIN o la huella; lo ya recibido se procesa incluso sin red.
+        // Todo el procesamiento técnico permanece interno; la pantalla muestra solo accesos esenciales.
         processServerReportEnvelopes()
-        if (ServerPairing.isLinked(this)) {
-            AdminPayrollRequestSync.sync(this, onComplete = {
-                if (!isFinishing && !isDestroyed) processServerReportEnvelopes()
-            })
-        }
+        if (linked) AdminPayrollRequestSync.sync(this, onComplete = {
+            if (!isFinishing && !isDestroyed) processServerReportEnvelopes()
+        })
     }
 
+    private fun updateFromServer() {
+        if(!ServerPairing.isLinked(this)) {
+            Toast.makeText(this, "Primero vincula SeneAdmin.", Toast.LENGTH_LONG).show()
+            return
+        }
+        AdminPayrollRequestSync.sync(this, true, onComplete = {
+            if (!isFinishing && !isDestroyed) processServerReportEnvelopes()
+        })
+        Toast.makeText(this, "Actualizando información...", Toast.LENGTH_SHORT).show()
+    }
 
     private fun showServerReportInbox() {
         if (ServerPairing.isLinked(this)) AdminPayrollRequestSync.sync(this, onComplete = { if (!isFinishing && !isDestroyed) processServerReportEnvelopes() })
