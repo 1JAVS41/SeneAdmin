@@ -77,7 +77,7 @@ object ServerPairing {
     fun claim(c:Context,code:String):JSONObject=post("/admin/pairing/claim",JSONObject()
         .put("pairing_code",code.trim().uppercase())
         .put("admin_installation_id",installationId(c))
-        .put("rp",ReportKeyPairStore.publicKeyBase64()))
+        .put(SeneWireProtocol.FIELD_REPORT_PUBLIC_KEY,ReportKeyPairStore.publicKeyBase64()))
 }
 
 /** Sincroniza solicitudes y decisiones en lotes; conserva la cola local cuando no hay red. */
@@ -156,16 +156,16 @@ object AdminPayrollRequestSync {
                         .put("x",if(r.ownerDecision=="APPROVE") SeneWireProtocol.APPROVED else SeneWireProtocol.REJECTED)
                         .put("r",r.ownerDecisionReason))
                 }
-                val payload=JSONObject().put("v",SeneWireProtocol.VERSION).put("t",SeneWireProtocol.SYNC)
-                    .put("a",token).put("c",p.getString("cursor","").orEmpty()).put("d",decisions)
-                    .put("ha",try{JSONArray(p.getString(ATTENDANCE_ACKS,"[]")?:"[]")}catch(_:Exception){JSONArray()})
-                    .put("gi",try{JSONArray(p.getString(INVENTORY_ACKS,"[]")?:"[]")}catch(_:Exception){JSONArray()})
-                    .put("ba",ReportInboxStore.pendingAcks(app))
-                    .put("rp",ReportKeyPairStore.publicKeyBase64())
+                val payload=JSONObject().put(SeneWireProtocol.FIELD_VERSION,SeneWireProtocol.VERSION).put(SeneWireProtocol.FIELD_TYPE,SeneWireProtocol.SYNC)
+                    .put(SeneWireProtocol.FIELD_ADMIN_TOKEN,token).put(SeneWireProtocol.FIELD_CURSOR,p.getString("cursor","").orEmpty()).put(SeneWireProtocol.FIELD_DECISIONS,decisions)
+                    .put(SeneWireProtocol.FIELD_ATTENDANCE_ACKS,try{JSONArray(p.getString(ATTENDANCE_ACKS,"[]")?:"[]")}catch(_:Exception){JSONArray()})
+                    .put(SeneWireProtocol.FIELD_INVENTORY_ACKS,try{JSONArray(p.getString(INVENTORY_ACKS,"[]")?:"[]")}catch(_:Exception){JSONArray()})
+                    .put(SeneWireProtocol.FIELD_REPORT_ACKS,ReportInboxStore.pendingAcks(app))
+                    .put(SeneWireProtocol.FIELD_REPORT_PUBLIC_KEY,ReportKeyPairStore.publicKeyBase64())
                 p.edit().putLong("last_attempt",now).commit()
                 val response=ServerPairing.post("/admin/payroll/requests/sync",payload)
                 if(response.optInt("_http_status",0) !in 200..299)return@Thread
-                if(response.optInt("v",SeneWireProtocol.VERSION)!=SeneWireProtocol.VERSION)return@Thread
+                if(response.optInt(SeneWireProtocol.FIELD_VERSION,SeneWireProtocol.VERSION)!=SeneWireProtocol.VERSION)return@Thread
                 val requests=response.optJSONArray("items")?:response.optJSONArray("requests")?:JSONArray()
                 var requestsPersisted=true
                 for(i in 0 until requests.length()) {
@@ -207,7 +207,7 @@ object AdminPayrollRequestSync {
                     if(OwnerPayrollStore.applySyncedAttendance(app,event))acceptedAttendance.put(event.optString("e"))
                 }
                 mergeAcks(p,acceptedAttendance)
-                val serverAck=response.optJSONArray("haa")?:response.optJSONArray("attendance_ack_acks")?:JSONArray()
+                val serverAck=response.optJSONArray(SeneWireProtocol.FIELD_ATTENDANCE_ACK_CONFIRMATIONS)?:response.optJSONArray("attendance_ack_acks")?:JSONArray()
                 clearAcks(p,serverAck)
                 val inventory=response.optJSONArray("g")?:response.optJSONArray("inventory")?:JSONArray()
                 val acceptedInventory=JSONArray()
@@ -216,20 +216,20 @@ object AdminPayrollRequestSync {
                     if(SharedInventoryManager.applySyncedInventoryEvent(app,event))acceptedInventory.put(event.optString("e"))
                 }
                 mergeInventoryAcks(p,acceptedInventory)
-                val inventoryServerAck=response.optJSONArray("gaa")?:response.optJSONArray("inventory_ack_acks")?:JSONArray()
+                val inventoryServerAck=response.optJSONArray(SeneWireProtocol.FIELD_INVENTORY_ACK_CONFIRMATIONS)?:response.optJSONArray("inventory_ack_acks")?:JSONArray()
                 clearInventoryAcks(p,inventoryServerAck)
 
                 // Persistir los sobres antes de confirmar su recepción al servidor.
                 val reports=response.optJSONArray("b")?:response.optJSONArray("reports")?:JSONArray()
                 ReportInboxStore.accept(app,reports)
-                val reportAckConfirmations=response.optJSONArray("baa")?:response.optJSONArray("report_ack_acks")?:JSONArray()
+                val reportAckConfirmations=response.optJSONArray(SeneWireProtocol.FIELD_REPORT_ACK_CONFIRMATIONS)?:response.optJSONArray("report_ack_acks")?:JSONArray()
                 ReportInboxStore.acknowledgeAcks(app,reportAckConfirmations)
                 // Solo después de persistir los sobres cifrados se solicita su organización local.
                 if (onComplete != null) {
                     android.os.Handler(android.os.Looper.getMainLooper()).post { onComplete.invoke() }
                 }
 
-                val cursor=response.optString("n",response.optString("next_cursor"))
+                val cursor=response.optString(SeneWireProtocol.FIELD_NEXT_CURSOR,response.optString("next_cursor"))
                 // Si algún registro no quedó persistido, se conserva el cursor para que el servidor lo reenvíe.
                 if(cursor.isNotBlank()&&requestsPersisted)p.edit().putString("cursor",cursor).commit()
             } catch(_:Exception) {
