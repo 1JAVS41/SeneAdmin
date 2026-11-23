@@ -86,13 +86,24 @@ class PayrollActivity : Activity() {
         profiles.forEach { p ->
             val subtitle = "Sueldo semanal: ${OwnerPayrollStore.money(p.weeklySalaryCents)} · Pago: ${p.payDay.ifBlank { "Sin configurar" }}" +
                 if (OwnerPayrollStore.isPayDay(p)) " · HOY: Revisa SENE VENTAS antes de pagar" else ""
-            addCard(p.name, subtitle) { showProfile(p.id) }
+            addCard(p.name, subtitle) { showWorkerMenu(p.id) }
         }
         setContentView(ScrollView(this).apply {
             isFillViewport = true; clipToPadding = false
             addView(root)
         })
     }
+    private fun showWorkerMenu(id:String) {
+        val profile=OwnerPayrollStore.profile(this,id)?:return
+        AlertDialog.Builder(this)
+            .setTitle(profile.name)
+            .setItems(arrayOf("Consultar nómina y asistencia","Ver reportes"))
+            .setNegativeButton("CERRAR",null)
+            .setItems(arrayOf("Consultar nómina y asistencia","Ver reportes")) { _,which ->
+                if(which==0)showProfile(id) else showReportsForWorker(id)
+            }.show()
+    }
+
     private fun requireOwnerPin(onAuthorized:()->Unit) {
         if(!AccessPinStore.hasPin(this)) {
             AlertDialog.Builder(this).setTitle("PIN NO CONFIGURADO")
@@ -355,6 +366,7 @@ class PayrollActivity : Activity() {
             })
         }
         option("CONSULTAR / PAGAR NÓMINA") { payroll(p) }
+        option("VER REPORTES") { showReportsForWorker(p.id) }
         dialog = AlertDialog.Builder(this).setTitle("PAGAR A · " + p.name)
             .setView(ScrollView(this).apply { addView(box) })
             .setPositiveButton("CERRAR", null).create()
