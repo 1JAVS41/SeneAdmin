@@ -117,6 +117,21 @@ object AdminPayrollRequestSync {
         p.edit().putString(INVENTORY_ACKS,keep.toString()).commit()
     }
     private fun wireMillis(value:Long):Long = if(value in 1L until 100000000000L) value*1000L else value
+    /** El Worker envía decided_at como ISO-8601; no debe convertirse accidentalmente en cero. */
+    private fun wireTimestamp(value:Any?):Long = when(value) {
+        is Number -> wireMillis(value.toLong())
+        is String -> {
+            val raw=value.trim()
+            raw.toLongOrNull()?.let(::wireMillis) ?: try {
+                val pattern=if(raw.contains(".")) "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'" else "yyyy-MM-dd'T'HH:mm:ss'Z'"
+                java.text.SimpleDateFormat(pattern,java.util.Locale.US).apply {
+                    isLenient=false
+                    timeZone=java.util.TimeZone.getTimeZone("UTC")
+                }.parse(raw)?.time ?: 0L
+            } catch(_:Exception) { 0L }
+        }
+        else -> 0L
+    }
     private fun wireDate(value:Any?):String {
         val millis=when(value) {
             is Number -> wireMillis(value.toLong())
@@ -152,6 +167,7 @@ object AdminPayrollRequestSync {
                 if(response.optInt("_http_status",0) !in 200..299)return@Thread
                 if(response.optInt("v",SeneWireProtocol.VERSION)!=SeneWireProtocol.VERSION)return@Thread
                 val requests=response.optJSONArray("items")?:response.optJSONArray("requests")?:JSONArray()
+                var requestsPersisted=true
                 for(i in 0 until requests.length()) {
                     val o=requests.optJSONObject(i)?:continue
                     val id=o.optString("e",o.optString("request_id",o.optString("id")))
@@ -160,6 +176,8 @@ object AdminPayrollRequestSync {
                     }
                     val profile=o.optString("w",o.optString("worker_id",o.optString("profile_id")))
                     if(id.isBlank()||profile.isBlank())continue
+                    // Un perfil eliminado se ignora deliberadamente: no debe recrearse desde un evento antiguo.
+                    if(OwnerPayrollStore.isDeletedProfile(app,profile))continue
                     val date=wireDate(o.opt("i") ?: o.opt("created_at") ?: o.opt("date"))
                     val amount=o.optLong("a",o.optLong("amount_cents",o.optLong("amountCents")))
                     val type=when(o.optString("t",o.optString("type")).uppercase()) {
@@ -167,18 +185,18 @@ object AdminPayrollRequestSync {
                         "[C$]","CONSUMPTION","CONSUMO" -> "CONSUMO"
                         else -> ""
                     }
-                    if(type.isBlank())continue
+                    if(type.isBlank()||amount<=0L)continue
                     val req=OwnerPayrollStore.Request(id,profile,type,date,
                         o.optString("z",o.optString("description",o.optString("r",o.optString("reason")))),amount,
                         o.optString("p",o.optString("product_code",o.optString("productCode"))),
                         o.optInt("q",o.optInt("quantity")),state,o.optString("by",o.optString("decided_by")),
-                        wireMillis(o.optLong("at",o.optLong("decided_at"))),o.optString("rr",o.optString("rejection_reason")))
-                    if(state=="APPROVED"||state=="REJECTED") {
-                        // Primero asegura el registro pendiente; applyServerDecision solo lo finaliza
-                        // cuando todos los efectos locales necesarios se aplicaron correctamente.
-                        OwnerPayrollStore.upsertServerRequest(app,req.copy(status="PENDING",ownerDecision="",ownerDecisionReason=""))
-                        OwnerPayrollStore.applyServerDecision(app,id,state,req.decidedBy,req.decidedAt,req.rejectionReason)
+                        wireTimestamp(o.opt("at") ?: o.opt("decided_at")),o.optString("rr",o.optString("rejection_reason")))
+                    val persisted=if(state=="APPROVED"||state=="REJECTED") {
+                        // El cursor solo avanza después de guardar y aplicar la decisión localmente.
+                        val staged=OwnerPayrollStore.upsertServerRequest(app,req.copy(status="PENDING",ownerDecision="",ownerDecisionReason=""))
+                        staged && OwnerPayrollStore.applyServerDecision(app,id,state,req.decidedBy,req.decidedAt,req.rejectionReason)
                     } else OwnerPayrollStore.upsertServerRequest(app,req)
+                    if(!persisted)requestsPersisted=false
                 }
                 val attendance=response.optJSONArray("h")?:response.optJSONArray("attendance")?:JSONArray()
                 val acceptedAttendance=JSONArray()
@@ -206,7 +224,8 @@ object AdminPayrollRequestSync {
                 ReportInboxStore.acknowledgeAcks(app,reportAckConfirmations)
 
                 val cursor=response.optString("n",response.optString("next_cursor"))
-                if(cursor.isNotBlank())p.edit().putString("cursor",cursor).commit()
+                // Si algún registro no quedó persistido, se conserva el cursor para que el servidor lo reenvíe.
+                if(cursor.isNotBlank()&&requestsPersisted)p.edit().putString("cursor",cursor).commit()
             } catch(_:Exception) {
                 // Sin conexión: la cola local sigue intacta y se reintentará después.
             } finally {running.set(false)}
