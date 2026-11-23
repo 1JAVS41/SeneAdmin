@@ -67,7 +67,6 @@ object InventoryLocalStore {
             SharedInventoryManager.Item(row.optString("c"), row.optString("n"), row.optDouble("p"),
                 row.optInt("s"), row.optString("l"), row.optString("h"))
         }
-        if (items.isEmpty()) return null
         return SharedInventoryManager.Snapshot(category, o.optString("file", "SERVER-SENE"),
             o.optString("updated"), items, false)
     }
@@ -90,7 +89,7 @@ object InventoryLocalStore {
     }
 
     @Synchronized fun save(c: Context, snapshot: SharedInventoryManager.Snapshot): Boolean {
-        if (snapshot.category !in setOf("INVENTARIO_MAESTRO", "INVENTARIO_SENE") || snapshot.items.isEmpty()) return false
+        if (snapshot.category !in setOf("INVENTARIO_MAESTRO", "INVENTARIO_SENE")) return false
         return try {
             val all = readAll(c)
             val old = all.optJSONObject(snapshot.category) ?: JSONObject()
@@ -126,9 +125,7 @@ object InventoryLocalStore {
             val kept = if (lastCleanup == 0L || now - lastCleanup >= RETENTION_MS) {
                 val ordered = (0 until saved.length()).mapNotNull { saved.optJSONObject(it) }
                     .sortedByDescending { it.optLong("saved_at", 0L) }
-                JSONArray(ordered.filterIndexed { index, item ->
-                    index < KEEP || now - item.optLong("saved_at", now) <= RETENTION_MS
-                })
+                JSONArray(ordered.take(KEEP))
             } else saved
             all.put(snapshot.category, encode(snapshot, now)
                 .put("history", kept).put("last_cleanup", if (lastCleanup == 0L || now - lastCleanup >= RETENTION_MS) now else lastCleanup))
@@ -159,9 +156,7 @@ object InventoryLocalStore {
                     }
                 }
                 val ordered = orderedInput.sortedByDescending { it.optLong("saved_at", 0L) }
-                val kept = JSONArray(ordered.filterIndexed { index, item ->
-                    index < KEEP || now - item.optLong("saved_at", now) <= RETENTION_MS
-                })
+                val kept = JSONArray(ordered.take(KEEP))
                 old.put("history", kept).put("last_cleanup", now)
                 changed = true
             }
