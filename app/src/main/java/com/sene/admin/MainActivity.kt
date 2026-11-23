@@ -561,6 +561,14 @@ class MainActivity : AppCompatActivity() {
         reportEnvelopeProcessing = true
         try {
         val legacyKey = OwnerKeyStore.read(this)
+        // La retención local se ejecuta en segundo plano y solo cuando existe la clave
+        // necesaria para verificar los respaldos; nunca se limpian datos sin validarlos.
+        if (!legacyKey.isNullOrBlank() && SharedInventoryManager.savedTree(this) != null) {
+            Thread {
+                try { SharedInventoryManager.cleanupAllIfDue(applicationContext, legacyKey) }
+                catch (_: Exception) { }
+            }.start()
+        }
         val events = ReportInboxStore.events(this)
         val imported = mutableListOf<SeneReport>()
         val removeIds = mutableSetOf<String>()
