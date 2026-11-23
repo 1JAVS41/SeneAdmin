@@ -109,7 +109,12 @@ object InventoryLocalStore {
                     val item = saved.optJSONObject(i)
                     item != null && item.optString("file") == oldFile && item.optString("updated") == oldUpdated
                 }
-                if (!alreadyStored) saved.put(JSONObject(old.toString()).put("saved_at", old.optLong("saved_at", now)))
+                if (!alreadyStored) {
+                    val prior = JSONObject(old.toString())
+                    prior.remove("history")
+                    prior.remove("last_cleanup")
+                    saved.put(prior.put("saved_at", old.optLong("saved_at", now)))
+                }
             }
             val current = encode(snapshot, now)
             val duplicate = (0 until saved.length()).any { i ->
@@ -147,7 +152,10 @@ object InventoryLocalStore {
                     val oldFile = old.optString("file")
                     val oldUpdated = old.optString("updated")
                     if (orderedInput.none { it.optString("file") == oldFile && it.optString("updated") == oldUpdated }) {
-                        orderedInput.add(JSONObject(old.toString()).put("saved_at", old.optLong("saved_at", now)))
+                        val prior = JSONObject(old.toString())
+                        prior.remove("history")
+                        prior.remove("last_cleanup")
+                        orderedInput.add(prior.put("saved_at", old.optLong("saved_at", now)))
                     }
                 }
                 val ordered = orderedInput.sortedByDescending { it.optLong("saved_at", 0L) }
