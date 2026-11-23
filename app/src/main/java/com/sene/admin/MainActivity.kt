@@ -22,27 +22,108 @@ class MainActivity : AppCompatActivity() {
     private lateinit var root: LinearLayout
     @Volatile private var reportImportRunning = false
     private var pendingImportRaw: String? = null
+    private var accessGranted = false
+    private var biometricFallbackShown = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         pendingImportRaw = getSharedPreferences("sene_admin_pending_import", MODE_PRIVATE).getString("raw", null)
-        showHome()
-        // El historial local nuevo se protege con Android Keystore; no depende de una clave manual.
+        // No mostrar la pantalla principal hasta crear el PIN o autenticar al dueño.
         SeneAdminStore.cleanupIfDue(this)
         InventoryLocalStore.cleanupIfDue(this)
-        if (!AccessPinStore.hasPin(this)) askCreatePin()
+        if (!AccessPinStore.hasPin(this)) {
+            askCreatePin {
+                accessGranted = true
+                showHome()
+            }
+        } else {
+            requestMainAccess()
+        }
+    }
+
+    private fun requestMainAccess() {
+        accessGranted = false
+        if (AccessPinStore.fingerprintEnabled(this) &&
+            BiometricManager.from(this).canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_STRONG) == BiometricManager.BIOMETRIC_SUCCESS) {
+            biometricFallbackShown = false
+            var failedAttempts = 0
+            val prompt = BiometricPrompt(this, ContextCompat.getMainExecutor(this),
+                object : BiometricPrompt.AuthenticationCallback() {
+                    override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
+                        accessGranted = true
+                        showHome()
+                    }
+                    override fun onAuthenticationFailed() {
+                        failedAttempts++
+                        if (failedAttempts >= 5 && !biometricFallbackShown) {
+                            biometricFallbackShown = true
+                            Toast.makeText(this@MainActivity, "Huella no reconocida. Intenta con tu PIN", Toast.LENGTH_LONG).show()
+                            // Cancelar el diálogo biométrico antes de presentar el teclado del PIN.
+                            window.decorView.post {
+                                promptRef?.cancelAuthentication()
+                                showPinAccess()
+                            }
+                        }
+                    }
+                    override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
+                        if (!biometricFallbackShown) {
+                            biometricFallbackShown = true
+                            showPinAccess()
+                        }
+                    }
+                })
+            promptRef = prompt
+            prompt.authenticate(BiometricPrompt.PromptInfo.Builder()
+                .setTitle("SENE ADMIN")
+                .setSubtitle("Desbloquea para entrar a la pantalla principal")
+                .setNegativeButtonText("USAR PIN")
+                .build())
+        } else {
+            showPinAccess()
+        }
+    }
+
+    private var promptRef: BiometricPrompt? = null
+
+    private fun showPinAccess() {
+        if (isFinishing || isDestroyed || accessGranted) return
+        val pin = EditText(this).apply {
+            hint = "Tu PIN de SeneAdmin"
+            setSingleLine(true)
+            inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_VARIATION_PASSWORD
+        }
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("DESBLOQUEAR SENE ADMIN")
+            .setMessage("Introduce el PIN que estableciste al configurar la aplicación.")
+            .setView(pin)
+            .setCancelable(false)
+            .setPositiveButton("ENTRAR", null)
+            .create()
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                if (AccessPinStore.matches(this, pin.text.toString())) {
+                    accessGranted = true
+                    dialog.dismiss()
+                    showHome()
+                } else {
+                    pin.text?.clear()
+                    pin.error = "PIN incorrecto"
+                }
+            }
+        }
+        dialog.show()
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
         // WhatsApp dejó de ser un canal de importación de reportes.
-        if (!AccessPinStore.hasPin(this)) askCreatePin()
+        if (!AccessPinStore.hasPin(this)) askCreatePin { accessGranted = true; showHome() }
     }
 
     override fun onResume() {
         super.onResume()
-        if(ServerPairing.isLinked(this)) AdminPayrollRequestSync.sync(this)
+        if(accessGranted && ServerPairing.isLinked(this)) AdminPayrollRequestSync.sync(this)
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
@@ -674,7 +755,7 @@ class MainActivity : AppCompatActivity() {
             .show()
     }
 
-    private fun askCreatePin() {
+    private fun askCreatePin(onSaved: () -> Unit = {}) {
         val a=EditText(this).apply { hint="Crea un PIN de 4 a 8 dígitos"; setSingleLine(true); inputType=InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_VARIATION_PASSWORD }
         val b=EditText(this).apply { hint="Confirma tu PIN"; setSingleLine(true); inputType=InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_VARIATION_PASSWORD }
         val box=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(20,8,20,4); addView(a); addView(b) }
@@ -687,6 +768,7 @@ class MainActivity : AppCompatActivity() {
             if(x!=b.text.toString()) { b.error="Los PIN no coinciden"; return@setOnClickListener }
             if(!AccessPinStore.save(this,x)) { a.error="No se pudo guardar"; return@setOnClickListener }
             d.dismiss()
+            onSaved()
         } }
         d.show()
     }
