@@ -417,7 +417,7 @@ class MainActivity : AppCompatActivity() {
         })
         root.addView(hero, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(20) })
 
-        fun mainOption(icon: String, label: String, subtitle: String, action: () -> Unit) {
+        fun mainOption(icon: String, label: String, action: () -> Unit) {
             val card = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = android.view.Gravity.CENTER_VERTICAL
@@ -444,10 +444,6 @@ class MainActivity : AppCompatActivity() {
                 text = label; textSize = 15f; typeface = Typeface.DEFAULT_BOLD
                 setTextColor(0xFF194A39.toInt())
             })
-            labels.addView(TextView(this).apply {
-                text = subtitle; textSize = 12f; setTextColor(0xFF69796F.toInt())
-                setPadding(0, dp(4), 0, 0)
-            })
             card.addView(labels, LinearLayout.LayoutParams(0, -2, 1f))
             card.addView(TextView(this).apply {
                 text = "›"; textSize = 28f; setTextColor(0xFF237A55.toInt())
@@ -455,22 +451,22 @@ class MainActivity : AppCompatActivity() {
             root.addView(card, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(10) })
         }
 
-        mainOption("♙", "MIS TRABAJADORES", "Consultar perfiles, nómina y reportes") {
+        mainOption("♙", "MIS TRABAJADORES") {
             startActivity(Intent(this, PayrollActivity::class.java))
         }
-        mainOption("↔", "VINCULAR", "Conectar este negocio con SENE VENTAS") {
+        mainOption("↔", "VINCULAR") {
             showPairingDialog()
         }
-        mainOption("↻", "ACTUALIZAR", "Recibir los datos más recientes") {
+        mainOption("↻", "ACTUALIZAR") {
             updateFromServer()
         }
-        mainOption("▦", "INVENTARIO", "Consultar la última información guardada") {
+        mainOption("▦", "INVENTARIO") {
             showSeneInventory()
         }
-        mainOption("!", "PENDIENTES", "Revisar asuntos que requieren atención") {
+        mainOption("!", "PENDIENTES") {
             showPendingReviews()
         }
-        mainOption("⚙", "AJUSTES", "Seguridad y carpeta compartida") {
+        mainOption("⚙", "AJUSTES") {
             showSettings()
         }
 
