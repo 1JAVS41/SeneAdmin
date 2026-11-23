@@ -101,7 +101,7 @@ object InventoryLocalStore {
             }
             val now = System.currentTimeMillis()
             // Migra la última copia del formato anterior al historial sin descifrarla de nuevo.
-            if (old.has("items") && (old.optJSONArray("items")?.length() ?: 0) > 0) {
+            if (old.has("items")) {
                 val oldFile = old.optString("file")
                 val oldUpdated = old.optString("updated")
                 val alreadyStored = (0 until saved.length()).any { i ->
@@ -145,7 +145,7 @@ object InventoryLocalStore {
                 if (last > 0L && now - last < RETENTION_MS) continue
                 val history = old.optJSONArray("history") ?: JSONArray()
                 val orderedInput = (0 until history.length()).mapNotNull { history.optJSONObject(it) }.toMutableList()
-                if (old.has("items") && (old.optJSONArray("items")?.length() ?: 0) > 0) {
+                if (old.has("items")) {
                     val oldFile = old.optString("file")
                     val oldUpdated = old.optString("updated")
                     if (orderedInput.none { it.optString("file") == oldFile && it.optString("updated") == oldUpdated }) {
