@@ -141,7 +141,7 @@ object AdminPayrollRequestSync {
         if(millis>0L) return java.text.SimpleDateFormat("yyyy-MM-dd",java.util.Locale.US).format(java.util.Date(millis))
         return value?.toString().orEmpty().take(10)
     }
-    fun sync(c:Context,force:Boolean=false) {
+    fun sync(c:Context,force:Boolean=false,onComplete:(()->Unit)?=null) {
         val app=c.applicationContext
         val token=ServerPairing.token(app);if(token.isBlank())return
         val p=app.getSharedPreferences(PREFS,Context.MODE_PRIVATE)
@@ -224,6 +224,10 @@ object AdminPayrollRequestSync {
                 ReportInboxStore.accept(app,reports)
                 val reportAckConfirmations=response.optJSONArray("baa")?:response.optJSONArray("report_ack_acks")?:JSONArray()
                 ReportInboxStore.acknowledgeAcks(app,reportAckConfirmations)
+                // Solo después de persistir los sobres cifrados se solicita su organización local.
+                if (ReportInboxStore.events(app).length() > 0 && onComplete != null) {
+                    android.os.Handler(android.os.Looper.getMainLooper()).post { onComplete.invoke() }
+                }
 
                 val cursor=response.optString("n",response.optString("next_cursor"))
                 // Si algún registro no quedó persistido, se conserva el cursor para que el servidor lo reenvíe.
