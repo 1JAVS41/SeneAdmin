@@ -424,40 +424,13 @@ object OwnerPayrollStore {
      * después del cierre de turno. Se limpian al día siguiente del día de pago.
      * Las nóminas pagadas permanecen como historial protegido.
      */
+    /** Conserva solicitudes y movimientos aprobados como historial permanente.
+     * La pantalla puede mostrar el estado histórico; nunca se eliminan al cerrar el ciclo.
+     */
     @Synchronized private fun cleanupExpiredPayrollCycles(c:Context) {
-        val today=SimpleDateFormat("yyyy-MM-dd",Locale.US).format(Date())
-        fun expired(profileId:String,date:String):Boolean {
-            val p=profile(c,profileId) ?: return false
-            if(p.payDay.isBlank()) return false
-            val day=isoDate(date)
-            if(day.isBlank()) return false
-            val end=periodForDate(day,payDayNumber(p.payDay))
-            return end.isNotBlank() && end<today
-        }
-        val requests=array(c,REQUESTS);val keptRequests=JSONArray();var requestChanged=false
-        for(i in 0 until requests.length()) {
-            val item=requests.optJSONObject(i) ?: continue
-            if(expired(item.optString("profileId"),item.optString("date"))) requestChanged=true
-            else keptRequests.put(item)
-        }
-        if(requestChanged) saveArray(c,REQUESTS,keptRequests)
-
-        val entries=array(c,ENTRIES);val keptEntries=JSONArray();var entryChanged=false
-        for(i in 0 until entries.length()) {
-            val item=entries.optJSONObject(i) ?: continue
-            if(expired(item.optString("profileId"),item.optString("date"))) entryChanged=true
-            else keptEntries.put(item)
-        }
-        if(entryChanged) saveArray(c,ENTRIES,keptEntries)
-
-        val movements=array(c,APPROVED_MOVEMENTS);val keptMovements=JSONArray();var movementChanged=false
-        for(i in 0 until movements.length()) {
-            val item=movements.optJSONObject(i) ?: continue
-            if(expired(item.optString("profileId"),item.optString("date"))) movementChanged=true
-            else keptMovements.put(item)
-        }
-        if(movementChanged) saveArray(c,APPROVED_MOVEMENTS,keptMovements)
+        // Intencionalmente no se borran REQUESTS, ENTRIES ni APPROVED_MOVEMENTS.
     }
+
     data class ApprovedMovement(
         val id:String,val profileId:String,val type:String,val date:String,val description:String,
         val amountCents:Long,val productCode:String="",val quantity:Int=0
@@ -509,12 +482,6 @@ object OwnerPayrollStore {
     @Synchronized fun upsertServerRequest(c:Context,r:Request):Boolean {
         if(r.id.isBlank()||r.profileId.isBlank()||r.amountCents<=0L||
             r.type !in setOf("PRESTAMO","CONSUMO")||isDeletedProfile(c,r.profileId))return false
-        val owner=profile(c,r.profileId)
-        if(owner!=null && owner.payDay.isNotBlank()) {
-            val requestDate=isoDate(r.date)
-            val today=SimpleDateFormat("yyyy-MM-dd",Locale.US).format(Date())
-            if(requestDate.isNotBlank() && periodForDate(requestDate,payDayNumber(owner.payDay))<today)return true
-        }
         val a=array(c,REQUESTS);val index=(0 until a.length()).firstOrNull{a.optJSONObject(it)?.optString("id")==r.id}
         if(index==null)a.put(requestJson(r))
         else {
