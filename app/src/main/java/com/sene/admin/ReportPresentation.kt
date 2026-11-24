@@ -106,26 +106,45 @@ object ReportPresentation {
         if (items.containsKey("Gastos proveedores") && items["Total de egresos"]?.value == items["Gastos proveedores"]?.value) {
             items.remove("Total de egresos")
         }
-        items.values.forEach { item ->
-            val (bg, fg) = when (item.kind) {
-                "EGRESO" -> 0xFFFFE8E5.toInt() to 0xFF9C2F25.toInt()
-                "INGRESO" -> 0xFFDDF4E5.toInt() to 0xFF176344.toInt()
-                else -> 0xFFE8F1FB.toInt() to 0xFF285A91.toInt()
-            }
+        val metricItems = items.values.toList()
+        metricItems.chunked(2).forEach { pair ->
             val row = LinearLayout(context).apply {
                 orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
-                setPadding(0, dp(9), 0, 0)
+                gravity = Gravity.TOP
             }
-            row.addView(chip(context, item.label.uppercase(Locale.ROOT), bg, fg))
-            row.addView(TextView(context).apply {
-                text = item.value
-                textSize = 14f
-                typeface = Typeface.DEFAULT_BOLD
-                setTextColor(fg)
-                setPadding(dp(9), dp(5), 0, dp(5))
-            }, LinearLayout.LayoutParams(0, -2, 1f))
-            card.addView(row)
+            pair.forEach { item ->
+                val (bg, fg) = when (item.kind) {
+                    "EGRESO" -> 0xFFFFE8E5.toInt() to 0xFF9C2F25.toInt()
+                    "INGRESO" -> 0xFFDDF4E5.toInt() to 0xFF176344.toInt()
+                    else -> 0xFFE8F1FB.toInt() to 0xFF285A91.toInt()
+                }
+                val tile = LinearLayout(context).apply {
+                    orientation = LinearLayout.VERTICAL
+                    setPadding(dp(12), dp(11), dp(12), dp(11))
+                    background = GradientDrawable().apply {
+                        setColor(bg)
+                        cornerRadius = dp(14).toFloat()
+                    }
+                }
+                tile.addView(TextView(context).apply {
+                    text = item.label.uppercase(Locale.ROOT)
+                    textSize = 10f
+                    typeface = Typeface.DEFAULT_BOLD
+                    setTextColor(fg)
+                })
+                tile.addView(TextView(context).apply {
+                    text = item.value
+                    textSize = 17f
+                    typeface = Typeface.DEFAULT_BOLD
+                    setTextColor(fg)
+                    setPadding(0, dp(4), 0, 0)
+                })
+                row.addView(tile, LinearLayout.LayoutParams(0, -2, 1f).apply {
+                    if (pair.first() !== item) leftMargin = dp(7)
+                    if (pair.size == 1) rightMargin = dp(7)
+                })
+            }
+            card.addView(row, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) })
         }
         if (items.isEmpty()) {
             card.addView(TextView(context).apply {
