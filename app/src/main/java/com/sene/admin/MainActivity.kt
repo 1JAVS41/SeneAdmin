@@ -633,28 +633,65 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showOutOfStockProducts() {
-        val local = listOfNotNull(
-            SharedInventoryManager.localSnapshot(this, "INVENTARIO_SENE"),
-            SharedInventoryManager.localSnapshot(this, "INVENTARIO_MAESTRO")
-        ).maxByOrNull { inventoryTimestamp(it.updated) }
-        val latest = SeneAdminStore.reports(this)
+        // Primero usa el inventario más reciente de cada trabajador recibido en reportes.
+        // Así no se confunde la copia operativa de un turno anterior con la de otro trabajador.
+        val candidates = SeneAdminStore.reports(this)
             .sortedWith(compareByDescending<SeneReport> { reportTimestamp(it) }.thenByDescending { it.number })
-            .firstNotNullOfOrNull { report ->
+            .mapNotNull { report ->
                 SharedInventoryManager.inventoryFromReport(report)?.let { report to it }
             }
-        val snapshot = local ?: latest?.second
-        if (snapshot == null) {
-            info("PRODUCTOS SIN STOCK", "Todavía no hay un inventario válido recibido.")
-            return
-        }
-        val updatedLabel = local?.updated ?: latest?.first?.let { it.date + " " + it.time }.orEmpty()
-        val empty = snapshot.items.filter { it.stock <= 0 }.distinctBy { it.code.ifBlank { it.name } }
+        val latestByWorker = candidates.groupBy { it.first.workerId }.mapNotNull { (workerId, items) ->
+            val latest = items.firstOrNull() ?: return@mapNotNull null
+            val reportName = latest.first.body.replace("\\r", "").lineSequence()
+                .firstOrNull { it.trim().startsWith("TRABAJADOR:", true) }
+                ?.substringAfter(":")?.trim().orEmpty()
+            val name = OwnerPayrollStore.profile(this, workerId)?.name ?: reportName.ifBlank { workerId }
+            Triple(name, latest.first.date + " " + latest.first.time, latest.second)
+        }.sortedBy { it.first.lowercase(Locale.ROOT) }
+
         val content = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(14, 12, 14, 12)
             setBackgroundColor(0xFFF4F7FB.toInt())
         }
-        addLabel(content, "Inventario actualizado", updatedLabel, 0xFFDCEBFA.toInt())
+        if (latestByWorker.isNotEmpty()) {
+            var totalOutOfStock = 0
+            latestByWorker.forEach { (workerName, reportDate, snapshot) ->
+                val empty = snapshot.items.filter { it.stock <= 0 }.distinctBy { it.code.ifBlank { it.name } }
+                totalOutOfStock += empty.size
+                addLabel(content, "TRABAJADOR", workerName, 0xFFDCEBFA.toInt())
+                addLabel(content, "INVENTARIO ACTUALIZADO", reportDate, 0xFFDCEBFA.toInt())
+                if (empty.isEmpty()) {
+                    addLabel(content, "ESTADO", "Sin productos agotados", 0xFFDDF4E5.toInt())
+                } else {
+                    empty.sortedBy { it.name.lowercase(Locale.ROOT) }.forEach { item ->
+                        addLabel(content, item.name,
+                            "Código: " + item.code + " · Existencia: " + item.stock,
+                            0xFFFFE8E5.toInt())
+                    }
+                }
+            }
+            if (totalOutOfStock == 0) {
+                addLabel(content, "ESTADO", "No hay productos agotados en los inventarios más recientes de los trabajadores.", 0xFFDDF4E5.toInt())
+            }
+            AlertDialog.Builder(this).setTitle("PRODUCTOS SIN STOCK")
+                .setView(ScrollView(this).apply { addView(content) })
+                .setPositiveButton("CERRAR", null).show()
+            return
+        }
+
+        // Si aún no hay reportes individuales, consulta la copia compacta local.
+        val local = listOfNotNull(
+            SharedInventoryManager.localSnapshot(this, "INVENTARIO_SENE"),
+            SharedInventoryManager.localSnapshot(this, "INVENTARIO_MAESTRO")
+        ).maxByOrNull { inventoryTimestamp(it.updated) }
+        if (local == null) {
+            info("PRODUCTOS SIN STOCK", "Todavía no hay un inventario válido recibido.")
+            return
+        }
+        val empty = local.items.filter { it.stock <= 0 }.distinctBy { it.code.ifBlank { it.name } }
+        addLabel(content, "INVENTARIO ACTUALIZADO", local.updated, 0xFFDCEBFA.toInt())
+        if (local.category != "INVENTARIO_SENE") addLabel(content, "ORIGEN DE LA COPIA", "Inventario maestro", 0xFFDCEBFA.toInt())
         if (empty.isEmpty()) addLabel(content, "ESTADO", "No hay productos agotados en el inventario más reciente.", 0xFFDDF4E5.toInt())
         empty.sortedBy { it.name.lowercase(Locale.ROOT) }.forEach { item ->
             addLabel(content, item.name, "Código: " + item.code + " · Existencia: " + item.stock, 0xFFFFE8E5.toInt())
