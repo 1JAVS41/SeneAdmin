@@ -25,7 +25,8 @@ object InventorySyncEngine {
         val done = prefs.getStringSet("wire_inventory_events", emptySet()).orEmpty().toMutableSet()
         if (id in done) return true
         val last = prefs.getLong("wire_inventory_stamp_$scope", 0L)
-        if (stamp < last) return true
+        // El orden autoritativo es la secuencia del servidor, no el reloj del teléfono.
+        // No descartar un delta válido porque el reloj del dispositivo retrocedió.
         val category = if (scope == "M") "INVENTARIO_MAESTRO" else "INVENTARIO_SENE"
         // Los deltas solo se aplican sobre una base local ya recibida.
         // No se solicita ni se lee una clave manual o una carpeta compartida.
