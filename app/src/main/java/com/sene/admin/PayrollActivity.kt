@@ -20,7 +20,8 @@ class PayrollActivity : Activity() {
         val profileId = intent.getStringExtra("profile_id")
         // La sincronización trabaja en segundo plano. No basta con abrir la pantalla
         // inmediatamente: al terminar hay que volver a leer asistencia y nómina local.
-        AdminPayrollRequestSync.sync(this, true) {
+        // Respeta la ventana automática de 15 minutos; no fuerza una consulta al abrir cada perfil.
+        AdminPayrollRequestSync.sync(this, false) {
             if (!isFinishing && !isDestroyed) {
                 if (!profileId.isNullOrBlank() && OwnerPayrollStore.profile(this, profileId) != null) {
                     showProfile(profileId)
