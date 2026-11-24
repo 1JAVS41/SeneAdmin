@@ -87,6 +87,32 @@ object AdminPayrollRequestSync {
     private var syncRunning = false
     private const val ATTENDANCE_ACKS="attendance_acks"
     private const val INVENTORY_ACKS="inventory_acks"
+    private const val ADMIN_DECISION_ACKS="admin_decision_acks"
+    private fun pendingAdminDecisionAcks(p:android.content.SharedPreferences):JSONArray =
+        try{JSONArray(p.getString(ADMIN_DECISION_ACKS,"[]")?:"[]")}catch(_:Exception){JSONArray()}
+    private fun mergeAdminDecisionAcks(p:android.content.SharedPreferences,ids:Set<String>) {
+        if(ids.isEmpty())return
+        val old=pendingAdminDecisionAcks(p);val merged=linkedSetOf<String>()
+        for(i in 0 until old.length())old.optString(i).takeIf{it.isNotBlank()}?.let{merged.add(it)}
+        merged.addAll(ids.filter{it.isNotBlank()})
+        p.edit().putString(ADMIN_DECISION_ACKS,JSONArray(merged.toList()).toString()).commit()
+    }
+    private fun clearAdminDecisionAcks(p:android.content.SharedPreferences,ids:JSONArray?) {
+        if(ids==null||ids.length()==0)return
+        val remove=mutableSetOf<String>()
+        for(i in 0 until ids.length()) {
+            val item=ids.opt(i)
+            val id=if(item is JSONObject)item.optString("e",item.optString("id")) else item?.toString().orEmpty()
+            if(id.isNotBlank())remove.add(id)
+        }
+        if(remove.isEmpty())return
+        val old=pendingAdminDecisionAcks(p);val keep=JSONArray()
+        for(i in 0 until old.length()) {
+            val id=old.optString(i)
+            if(id.isNotBlank()&&id !in remove)keep.put(id)
+        }
+        p.edit().putString(ADMIN_DECISION_ACKS,keep.toString()).commit()
+    }
     private fun mergeAcks(p:android.content.SharedPreferences,ids:JSONArray) {
         val old=try{JSONArray(p.getString(ATTENDANCE_ACKS,"[]")?:"[]")}catch(_:Exception){JSONArray()}
         val set=linkedSetOf<String>()
@@ -180,6 +206,7 @@ object AdminPayrollRequestSync {
                     .put(SeneWireProtocol.FIELD_ATTENDANCE_ACKS,try{JSONArray(p.getString(ATTENDANCE_ACKS,"[]")?:"[]")}catch(_:Exception){JSONArray()})
                     .put(SeneWireProtocol.FIELD_INVENTORY_ACKS,try{JSONArray(p.getString(INVENTORY_ACKS,"[]")?:"[]")}catch(_:Exception){JSONArray()})
                     .put(SeneWireProtocol.FIELD_REPORT_ACKS,ReportInboxStore.pendingAcks(app))
+                    .put("ad",pendingAdminDecisionAcks(p))
                     .put(SeneWireProtocol.FIELD_REPORT_PUBLIC_KEY,ReportKeyPairStore.publicKeyBase64())
                 p.edit().putLong("last_attempt",now).commit()
                 val response=ServerPairing.post("/admin/payroll/requests/sync",payload)
@@ -265,7 +292,9 @@ object AdminPayrollRequestSync {
 
                 // Aplicar decisiones después de guardar inventario: un consumo aprobado
                 // puede depender de la fotografía o del delta recibido en este mismo lote.
+                clearAdminDecisionAcks(p,response.optJSONArray("adak")?:response.optJSONArray("admin_decision_ack_acks"))
                 val decisionAcks=response.optJSONArray("ada")?:response.optJSONArray("admin_decision_acks")?:JSONArray()
+                val processedAdminDecisionAcks=mutableSetOf<String>()
                 for(i in 0 until decisionAcks.length()) {
                     val decision=decisionAcks.optJSONObject(i)?:continue
                     val id=decision.optString("e",decision.optString("id"))
@@ -275,11 +304,13 @@ object AdminPayrollRequestSync {
                         else->""
                     }
                     if(id.isBlank()||state !in setOf("APPROVED","REJECTED"))continue
-                    OwnerPayrollStore.applyServerDecision(app,id,state,
+                    val applied=OwnerPayrollStore.applyServerDecision(app,id,state,
                         decision.optString("by",decision.optString("decided_by")),
                         wireTimestamp(decision.opt("at")?:decision.opt("decided_at")),
                         decision.optString("rr",decision.optString("rejection_reason")))
+                    if(applied)processedAdminDecisionAcks.add(id)
                 }
+                mergeAdminDecisionAcks(p,processedAdminDecisionAcks)
 
                 // Persistir los sobres antes de confirmar su recepción al servidor.
                 val reports=response.optJSONArray("b")?:response.optJSONArray("reports")?:JSONArray()
