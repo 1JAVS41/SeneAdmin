@@ -219,11 +219,19 @@ object AdminPayrollRequestSync {
                     } else OwnerPayrollStore.upsertServerRequest(app,req)
                     if(!persisted)requestsPersisted=false
                 }
+                // El cursor solo puede avanzar cuando TODOS los tipos de novedades
+                // quedaron guardados localmente. Si uno falla, el servidor debe reenviarlo.
+                var incomingEventsPersisted = true
                 val attendance=response.optJSONArray("h")?:response.optJSONArray("attendance")?:JSONArray()
                 val acceptedAttendance=JSONArray()
                 for(i in 0 until attendance.length()) {
-                    val event=attendance.optJSONObject(i)?:continue
-                    if(OwnerPayrollStore.applySyncedAttendance(app,event))acceptedAttendance.put(event.optString("e"))
+                    val event=attendance.optJSONObject(i)
+                    if(event == null) {
+                        incomingEventsPersisted = false
+                        continue
+                    }
+                    if(OwnerPayrollStore.applySyncedAttendance(app,event)) acceptedAttendance.put(event.optString("e"))
+                    else incomingEventsPersisted = false
                 }
                 mergeAcks(p,acceptedAttendance)
                 if (acceptedAttendance.length() > 0) flushAcks = true
@@ -232,8 +240,13 @@ object AdminPayrollRequestSync {
                 val inventory=response.optJSONArray("g")?:response.optJSONArray("inventory")?:JSONArray()
                 val acceptedInventory=JSONArray()
                 for(i in 0 until inventory.length()) {
-                    val event=inventory.optJSONObject(i)?:continue
-                    if(SharedInventoryManager.applySyncedInventoryEvent(app,event))acceptedInventory.put(event.optString("e"))
+                    val event=inventory.optJSONObject(i)
+                    if(event == null) {
+                        incomingEventsPersisted = false
+                        continue
+                    }
+                    if(SharedInventoryManager.applySyncedInventoryEvent(app,event)) acceptedInventory.put(event.optString("e"))
+                    else incomingEventsPersisted = false
                 }
                 mergeInventoryAcks(p,acceptedInventory)
                 if (acceptedInventory.length() > 0) flushAcks = true
@@ -243,6 +256,7 @@ object AdminPayrollRequestSync {
                 // Persistir los sobres antes de confirmar su recepción al servidor.
                 val reports=response.optJSONArray("b")?:response.optJSONArray("reports")?:JSONArray()
                 val acceptedReports = ReportInboxStore.accept(app,reports)
+                if (acceptedReports.length() != reports.length()) incomingEventsPersisted = false
                 if (acceptedReports.length() > 0) flushAcks = true
                 val reportAckConfirmations=response.optJSONArray(SeneWireProtocol.FIELD_REPORT_ACK_CONFIRMATIONS)?:response.optJSONArray("report_ack_acks")?:JSONArray()
                 ReportInboxStore.acknowledgeAcks(app,reportAckConfirmations)
@@ -250,7 +264,8 @@ object AdminPayrollRequestSync {
 
                 val cursor=response.optString(SeneWireProtocol.FIELD_NEXT_CURSOR,response.optString("next_cursor"))
                 // Si algún registro no quedó persistido, se conserva el cursor para que el servidor lo reenvíe.
-                if(cursor.isNotBlank()&&requestsPersisted)p.edit().putString("cursor",cursor).commit()
+                if(cursor.isNotBlank() && requestsPersisted && incomingEventsPersisted)
+                    p.edit().putString("cursor",cursor).commit()
             } catch(_:Exception) {
                 // Sin conexión: la cola local sigue intacta y se reintentará después.
             } finally {
