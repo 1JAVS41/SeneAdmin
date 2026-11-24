@@ -145,73 +145,112 @@ object OwnerPayrollStore {
         return importDailyAttendance(c,r,lines) && importAttendance(c,r,lines,stamp) && importPayrollRequests(c,r,lines) && importEarlyExit(c,r,lines)
     }
 
+    data class ShiftAttendance(val number:Int,val started:String,val closed:String,val status:String,val startedAt:Long,val closedAt:Long)
+    private fun shiftArray(record:JSONObject):JSONArray {
+        val stored=record.optJSONArray("shifts")
+        if(stored!=null&&stored.length()>0)return JSONArray(stored.toString())
+        val start=record.optLong("startedAt",0L).takeIf{it>0L}?:parseReportTimestamp(record.optString("started"))
+        if(start<=0L)return JSONArray()
+        val close=record.optLong("closedAt",0L).takeIf{it>0L}?:parseReportTimestamp(record.optString("closed"))
+        return JSONArray().put(JSONObject().put("startedAt",start).put("closedAt",close)
+            .put("started",record.optString("started")).put("closed",record.optString("closed"))
+            .put("status",record.optString("status").ifBlank{if(close>0L)"WORKED" else "WORKING"})
+            .put("reason",record.optString("closureReason")).put("source",record.optString("closureSource")))
+    }
+    private fun mergeShift(record:JSONObject,startedAt:Long,closedAt:Long,status:String,reason:String,source:String):JSONObject {
+        if(startedAt<=0L)return record
+        val shifts=shiftArray(record)
+        var shift:JSONObject?=null
+        for(i in 0 until shifts.length()){
+            val item=shifts.optJSONObject(i)?:continue
+            if(item.optLong("startedAt",0L)==startedAt){shift=item;break}
+        }
+        val target=shift?:JSONObject().put("startedAt",startedAt).also{shifts.put(it)}
+        val close=maxOf(target.optLong("closedAt",0L),closedAt)
+        target.put("startedAt",startedAt).put("started",SimpleDateFormat("HH:mm",Locale("es","MX")).format(Date(startedAt)))
+        if(close>0L){
+            target.put("closedAt",close).put("closed",SimpleDateFormat("HH:mm",Locale("es","MX")).format(Date(close)))
+            if(reason.isNotBlank())target.put("reason",reason)
+            if(source.isNotBlank())target.put("source",source)
+            if(status.isNotBlank())target.put("status",status)
+        }else target.put("closedAt",0L).put("closed","").put("status","WORKING")
+        val ordered=(0 until shifts.length()).mapNotNull{shifts.optJSONObject(it)}.sortedBy{it.optLong("startedAt",0L)}
+        val normalized=JSONArray()
+        ordered.forEachIndexed{index,item->item.put("number",index+1);normalized.put(item)}
+        record.put("shifts",normalized)
+        val open=ordered.any{it.optLong("closedAt",0L)<=0L}
+        val total=ordered.sumOf{(it.optLong("closedAt",0L)-it.optLong("startedAt",0L)).coerceAtLeast(0L)}
+        val latest=ordered.lastOrNull()
+        val aggregate=when{
+            open->"WORKING"
+            total>=8L*3600000L->"WORKED"
+            ordered.any{it.optString("status")=="EARLY_EXIT"}->"EARLY_EXIT"
+            latest?.optString("status")=="ADMIN_CLOSED"->"ADMIN_CLOSED"
+            else->latest?.optString("status")?.ifBlank{"WORKED"}?:"WORKED"
+        }
+        record.put("status",aggregate).put("started",ordered.firstOrNull()?.optString("started").orEmpty())
+            .put("closed",latest?.optString("closed").orEmpty())
+            .put("startedAt",ordered.firstOrNull()?.optLong("startedAt",0L)?:0L)
+            .put("closedAt",latest?.optLong("closedAt",0L)?:0L)
+        return record
+    }
     private fun importDailyAttendance(c:Context,r:SeneReport,lines:List<String>):Boolean {
         val type=r.type.uppercase(Locale.ROOT)
-        val isClosing=type=="EARLY_EXIT" || type.contains("CIERRE") || type.contains("FIN_TURNO") || type.contains("CLOSE")
-        val isStarting=type.contains("INICIO") || type.contains("PERIOD") || type.contains("START")
-        if(!isClosing && !isStarting)return true
+        val isClosing=type=="EARLY_EXIT"||type.contains("CIERRE")||type.contains("FIN_TURNO")||type.contains("CLOSE")
+        val isStarting=type.contains("INICIO")||type.contains("PERIOD")||type.contains("START")
+        if(!isClosing&&!isStarting)return true
         val entry=reportValue(lines,"HORA DE ENTRADA")
-        val exit=reportValue(lines,"HORA DE SALIDA").ifBlank { if(isClosing) r.date+" "+r.time else "" }
-        val day=isoDate(entry).takeIf { entry.isNotBlank() }?.takeIf { it.length==10 } ?: isoDate(r.date)
-        if(day.isBlank())return true
+        val exit=reportValue(lines,"HORA DE SALIDA").ifBlank{if(isClosing)r.date+" "+r.time else ""}
+        val startedAt=parseReportTimestamp(entry)
+        val closedAt=parseReportTimestamp(exit)
+        val day=isoDate(entry).takeIf{entry.isNotBlank()}?.takeIf{it.length==10}?:isoDate(r.date)
+        if(day.isBlank()||startedAt<=0L)return true
         val closingType=reportValue(lines,"TIPO DE CIERRE").trim().uppercase(Locale.ROOT)
-        val status=if(isStarting) "WORKING" else if(closingType=="EARLY_EXIT" || closingType=="EARLY EXIT" || type=="EARLY_EXIT") "EARLY_EXIT" else if(closingType=="ADMIN_FORCED" || closingType=="ADMINISTRATIVE") "ADMIN_CLOSED" else "WORKED"
-        val all=try{JSONObject(prefs(c).getString("attendance_days","{}")?:"{}")}catch(_:Exception){JSONObject()}
-        val worker=all.optJSONObject(r.workerId) ?: JSONObject()
-        val previous=worker.optJSONObject(day) ?: JSONObject()
-        val stamp=r.date+" "+r.time
-        val oldStamp=previous.optString("stamp")
-        val merged=JSONObject(previous.toString())
-        if(entry.isNotBlank())merged.put("started",entry)
-        if(exit.isNotBlank())merged.put("closed",exit)
-        if(oldStamp.isBlank() || stamp>=oldStamp) {
-            merged.put("status",status).put("stamp",stamp)
-        } else if(merged.optString("status").isBlank()) {
-            merged.put("status",status).put("stamp",stamp)
+        val status=when{
+            closingType=="EARLY_EXIT"||closingType=="EARLY EXIT"||type=="EARLY_EXIT"->"EARLY_EXIT"
+            closingType=="ADMIN_FORCED"||closingType=="ADMINISTRATIVE"->"ADMIN_CLOSED"
+            else->"WORKED"
         }
-        worker.put(day,merged)
-        all.put(r.workerId,worker)
+        val all=try{JSONObject(prefs(c).getString("attendance_days","{}")?:"{}")}catch(_:Exception){JSONObject()}
+        val worker=all.optJSONObject(r.workerId)?:JSONObject()
+        val record=worker.optJSONObject(day)?:JSONObject()
+        mergeShift(record,startedAt,if(isClosing)closedAt else 0L,if(isClosing)status else "WORKING",
+            reportValue(lines,"MOTIVO DE CIERRE"),"REPORT")
+        record.put("stamp",r.date+" "+r.time)
+        worker.put(day,record);all.put(r.workerId,worker)
         return prefs(c).edit().putString("attendance_days",all.toString()).commit()
     }
 
-    data class DayAttendance(val day:String,val date:String,val status:String,val started:String="",val closed:String="")
+    data class DayAttendance(val day:String,val date:String,val status:String,val started:String="",val closed:String="",val shifts:List<ShiftAttendance> = emptyList())
     fun weekAttendance(c:Context,p:Profile):List<DayAttendance> {
         val all=try{JSONObject(prefs(c).getString("attendance_days","{}")?:"{}")}catch(_:Exception){JSONObject()}
-        val worker=all.optJSONObject(p.id) ?: JSONObject()
-        val createdDate=payrollStartDate(p)
-        val today=Calendar.getInstance()
-        val payDay=payDayNumber(p.payDay)
-        val weekEnd=Calendar.getInstance().apply {
-            val delta=(payDay-get(Calendar.DAY_OF_WEEK)+7)%7
-            add(Calendar.DAY_OF_YEAR,delta)
-        }
-        val weekStart=Calendar.getInstance().apply {
-            timeInMillis=weekEnd.timeInMillis
-            add(Calendar.DAY_OF_YEAR,-6)
-        }
+        val worker=all.optJSONObject(p.id)?:JSONObject()
+        val createdDate=payrollStartDate(p);val today=Calendar.getInstance();val payDay=payDayNumber(p.payDay)
+        val weekEnd=Calendar.getInstance().apply{val delta=(payDay-get(Calendar.DAY_OF_WEEK)+7)%7;add(Calendar.DAY_OF_YEAR,delta)}
+        val weekStart=Calendar.getInstance().apply{timeInMillis=weekEnd.timeInMillis;add(Calendar.DAY_OF_YEAR,-6)}
         val scheduled=p.workDays.split(Regex("[,;|]")).map{it.trim().lowercase(Locale("es","MX"))
-            .replace("á","a").replace("é","e").replace("í","i").replace("ó","o").replace("ú","u")}
-            .filter{it.isNotBlank()}.toSet()
-        return (0..6).map { index ->
-            val date=Calendar.getInstance().apply { timeInMillis=weekStart.timeInMillis; add(Calendar.DAY_OF_YEAR,index) }
-            val dayName=when(date.get(Calendar.DAY_OF_WEEK)) {
-                Calendar.SUNDAY->"domingo";Calendar.MONDAY->"lunes";Calendar.TUESDAY->"martes"
-                Calendar.WEDNESDAY->"miercoles";Calendar.THURSDAY->"jueves";Calendar.FRIDAY->"viernes";else->"sabado"
-            }
+            .replace("á","a").replace("é","e").replace("í","i").replace("ó","o").replace("ú","u")}.filter{it.isNotBlank()}.toSet()
+        return (0..6).map{index->
+            val date=Calendar.getInstance().apply{timeInMillis=weekStart.timeInMillis;add(Calendar.DAY_OF_YEAR,index)}
+            val dayName=when(date.get(Calendar.DAY_OF_WEEK)){Calendar.SUNDAY->"domingo";Calendar.MONDAY->"lunes";Calendar.TUESDAY->"martes"
+                Calendar.WEDNESDAY->"miercoles";Calendar.THURSDAY->"jueves";Calendar.FRIDAY->"viernes";else->"sabado"}
             val key=SimpleDateFormat("yyyy-MM-dd",Locale.US).format(date.time)
-            val record=worker.optJSONObject(key) ?: JSONObject()
-            val stored=record.optString("status")
-            val isScheduled=scheduled.isEmpty() || dayName in scheduled
+            val record=worker.optJSONObject(key)?:JSONObject();val raw=shiftArray(record)
+            val shifts=(0 until raw.length()).mapNotNull{i->raw.optJSONObject(i)?.let{item->
+                ShiftAttendance(item.optInt("number",i+1),item.optString("started"),item.optString("closed"),
+                    item.optString("status"),item.optLong("startedAt"),item.optLong("closedAt"))}}
+            val stored=record.optString("status");val isScheduled=scheduled.isEmpty()||dayName in scheduled
             val todayKey=SimpleDateFormat("yyyy-MM-dd",Locale.US).format(today.time)
-            val status=when {
-                stored=="EARLY_EXIT" -> "EARLY_EXIT"
-                stored=="WORKED" -> "WORKED"
-                stored=="ADMIN_CLOSED" -> "ADMIN_CLOSED"
-                stored=="WORKING" -> "WORKING"
-                key>=todayKey || !isScheduled -> "FUTURE"
-                else -> if (createdDate.isNotBlank() && key < createdDate) "NO_RECORD" else "NOT_WORKED"
+            val status=when{
+                shifts.any{it.closedAt<=0L}->"WORKING"
+                shifts.isNotEmpty()&&shifts.sumOf{(it.closedAt-it.startedAt).coerceAtLeast(0L)}>=p.hours*3600000L->"WORKED"
+                shifts.any{it.status=="EARLY_EXIT"}||stored=="EARLY_EXIT"->"EARLY_EXIT"
+                stored=="WORKED"->"WORKED";stored=="ADMIN_CLOSED"->"ADMIN_CLOSED";stored=="WORKING"->"WORKING"
+                key>=todayKey||!isScheduled->"FUTURE"
+                else->if(createdDate.isNotBlank()&&key<createdDate)"NO_RECORD" else "NOT_WORKED"
             }
-            DayAttendance(dayName.uppercase(Locale("es","MX")),SimpleDateFormat("dd/MM",Locale("es","MX")).format(date.time),status,record.optString("started"),record.optString("closed"))
+            DayAttendance(dayName.uppercase(Locale("es","MX")),SimpleDateFormat("dd/MM",Locale("es","MX")).format(date.time),
+                status,record.optString("started"),record.optString("closed"),shifts)
         }
     }
 
@@ -266,36 +305,40 @@ object OwnerPayrollStore {
     }
 
     /** Descuenta solo el tiempo que faltó para completar una jornada cerrada anticipadamente. */
+    /** Recalcula un único descuento por día, sumando todos los turnos cerrados. */
     private fun importEarlyExit(c:Context,r:SeneReport,lines:List<String>):Boolean {
-        val closingType=reportValue(lines,"TIPO DE CIERRE").uppercase(Locale.ROOT)
-        if(closingType!="EARLY_EXIT")return true
         val p=profile(c,r.workerId)?:return true
         if(p.weeklySalaryCents<=0L||p.hours<=0)return true
-        val effectiveStart=payrollStartDate(p)
         val start=parseReportTimestamp(reportValue(lines,"HORA DE ENTRADA"))
-        val closed=parseReportTimestamp(reportValue(lines,"HORA DE SALIDA"))
-        val shiftDate=if(start>0L) SimpleDateFormat("yyyy-MM-dd",Locale.US).format(Date(start)) else ""
-        if(effectiveStart.isNotBlank() && shiftDate.isNotBlank() && shiftDate<effectiveStart)return true
-        if(start<=0L||closed<=0L||closed<=start)return true
-        val scheduledEnd=start+p.hours*3600000L
-        val missingMillis=(scheduledEnd-closed).coerceAtLeast(0L)
-        if(missingMillis<60000L)return true
-        val daysPerWeek=p.workDays.split(Regex("[,;|]")).map{it.trim()}.filter{it.isNotBlank()}.size
-        if(daysPerWeek<=0)return true
-        val period=periodForDate(SimpleDateFormat("yyyy-MM-dd",Locale.US).format(Date(start)),payDayNumber(p.payDay))
+        val day=if(start>0L)SimpleDateFormat("yyyy-MM-dd",Locale.US).format(Date(start)) else isoDate(r.date)
+        if(day.isBlank())return true
+        val effectiveStart=payrollStartDate(p)
+        if(effectiveStart.isNotBlank()&&day<effectiveStart)return true
+        val period=periodForDate(day,payDayNumber(p.payDay))
         if(period.isBlank()||payrolls(c,r.workerId).any{it.period==period&&it.status=="PAGADA"})return true
-        val amount=(p.weeklySalaryCents.toDouble()/daysPerWeek/p.hours*(missingMillis/3600000.0)).toLong()
-            .coerceAtMost(p.weeklySalaryCents)
-        if(amount<=0L)return true
-        val id="early-exit-"+r.id
-        val a=array(c,ENTRIES)
-        val index=(0 until a.length()).firstOrNull{a.optJSONObject(it)?.optString("id")==id}
-        val entry=JSONObject().put("id",id).put("profileId",r.workerId).put("type","SALIDA_ANTICIPADA")
-            .put("date",SimpleDateFormat("yyyy-MM-dd",Locale.US).format(Date(start)))
-            .put("description","Tiempo no trabajado: "+(missingMillis/60000L)+" minutos. Motivo: "+reportValue(lines,"MOTIVO DE CIERRE"))
-            .put("amount",amount).put("payrollId",index?.let{a.optJSONObject(it)?.optString("payrollId")}.orEmpty())
-        if(index==null)a.put(entry)else a.put(index,entry)
-        return saveArray(c,ENTRIES,a)
+        val all=try{JSONObject(prefs(c).getString("attendance_days","{}")?:"{}")}catch(_:Exception){JSONObject()}
+        val record=all.optJSONObject(r.workerId)?.optJSONObject(day)?:return true
+        val shifts=shiftArray(record)
+        val hasOpen=(0 until shifts.length()).any{shifts.optJSONObject(it)?.optLong("closedAt",0L)?.let{it<=0L}?:false}
+        val worked=(0 until shifts.length()).sumOf{i->shifts.optJSONObject(i)?.let{(it.optLong("closedAt",0L)-it.optLong("startedAt",0L)).coerceAtLeast(0L)}?:0L}
+        val missing=if(hasOpen)0L else(p.hours*3600000L-worked).coerceAtLeast(0L)
+        val days=p.workDays.split(Regex("[,;|]")).map{it.trim()}.filter{it.isNotBlank()}.distinct().size
+        if(days<=0)return true
+        val amount=if(missing<60000L)0L else(p.weeklySalaryCents.toDouble()/days/p.hours*(missing/3600000.0)).toLong().coerceAtLeast(0L)
+        val id="early-exit-"+r.workerId+"-"+day
+        val entries=array(c,ENTRIES)
+        for(i in entries.length()-1 downTo 0){
+            val item=entries.optJSONObject(i)?:continue
+            if(item.optString("profileId")==r.workerId&&item.optString("type")=="SALIDA_ANTICIPADA"&&
+                isoDate(item.optString("date"))==day&&item.optString("id")!=id)entries.remove(i)
+        }
+        val index=(0 until entries.length()).firstOrNull{entries.optJSONObject(it)?.optString("id")==id}
+        val old=index?.let{entries.optJSONObject(it)}
+        val entry=JSONObject().put("id",id).put("profileId",r.workerId).put("type","SALIDA_ANTICIPADA").put("date",day)
+            .put("description",if(hasOpen)"Descuento pendiente: hay un turno en curso" else "Tiempo no trabajado en el día: "+(missing/60000L)+" minutos")
+            .put("amount",amount).put("payrollId",old?.optString("payrollId").orEmpty())
+        if(index==null)entries.put(entry)else entries.put(index,entry)
+        return saveArray(c,ENTRIES,entries)
     }
 
     private fun importPayrollRequests(c:Context,r:SeneReport,lines:List<String>):Boolean {
@@ -498,54 +541,18 @@ object OwnerPayrollStore {
     data class AttendanceSummary(val period:String,val workedDays:Int,val absences:Int,val closingType:String,val closingReason:String,val started:String,val closed:String)
     /** Aplica un evento remoto de jornada sin modificar las reglas de cálculo de nómina. */
     @Synchronized fun applySyncedAttendance(c:Context,event:JSONObject):Boolean {
-        val eventId=event.optString("e")
-        val workerId=event.optString("w")
-        val day=event.optString("d")
-        val state=event.optString("x")
+        val eventId=event.optString("e");val workerId=event.optString("w");val day=event.optString("d");val state=event.optString("x")
         if(eventId.isBlank()||workerId.isBlank()||day.length!=10||event.optString("t")!=SeneWireProtocol.ATTENDANCE_SYNC)return false
         if(isDeletedProfile(c,workerId))return true
-        if(state !in setOf(SeneWireProtocol.IN_PROGRESS,SeneWireProtocol.FULL_SHIFT,
-                SeneWireProtocol.EARLY_CLOSE,SeneWireProtocol.ADMIN_CLOSE))return false
-        val startedAt=event.optLong("s",0L)
-        val closedAt=event.optLong("f",0L)
-        val eventStamp=maxOf(startedAt,closedAt)
-        if(eventStamp<=0L)return false
+        if(state !in setOf(SeneWireProtocol.IN_PROGRESS,SeneWireProtocol.FULL_SHIFT,SeneWireProtocol.EARLY_CLOSE,SeneWireProtocol.ADMIN_CLOSE))return false
+        val startedAt=event.optLong("s",0L);val closedAt=event.optLong("f",0L)
+        if(startedAt<=0L||maxOf(startedAt,closedAt)<=0L)return false
         val all=try{JSONObject(prefs(c).getString("attendance_days","{}")?:"{}")}catch(_:Exception){JSONObject()}
-        val worker=all.optJSONObject(workerId)?:JSONObject()
-        val old=worker.optJSONObject(day)?:JSONObject()
-        // El orden de llegada del servidor es autoritativo; no descartar por reloj del teléfono.
-        val merged=JSONObject(old.toString())
-        val previousStart=old.optLong("startedAt",0L)
-        val previousClose=old.optLong("closedAt",0L)
-        val start=when {
-            previousStart<=0L -> startedAt
-            startedAt<=0L -> previousStart
-            else -> minOf(previousStart,startedAt)
-        }
-        val close=maxOf(previousClose,closedAt)
-        if(start>0L) {
-            merged.put("startedAt",start)
-            merged.put("started",SimpleDateFormat("HH:mm",Locale("es","MX")).format(Date(start)))
-        }
-        if(close>0L) {
-            merged.put("closedAt",close)
-            merged.put("closed",SimpleDateFormat("HH:mm",Locale("es","MX")).format(Date(close)))
-        }
-        val status=when {
-            close<=0L -> "WORKING"
-            state==SeneWireProtocol.ADMIN_CLOSE -> "ADMIN_CLOSED"
-            state==SeneWireProtocol.FULL_SHIFT -> "WORKED"
-            state==SeneWireProtocol.EARLY_CLOSE -> "EARLY_EXIT"
-            else -> old.optString("status","WORKING")
-        }
-        merged.put("status",status).put("wireStamp",maxOf(old.optLong("wireStamp",0L),eventStamp))
-            .put("wireEventId",eventId)
-        if(closedAt>0L) {
-            merged.put("closureReason",event.optString("m"))
-                .put("closureSource",event.optString("o"))
-        }
-        worker.put(day,merged)
-        all.put(workerId,worker)
+        val worker=all.optJSONObject(workerId)?:JSONObject();val record=worker.optJSONObject(day)?:JSONObject()
+        val status=when(state){SeneWireProtocol.ADMIN_CLOSE->"ADMIN_CLOSED";SeneWireProtocol.FULL_SHIFT->"WORKED";SeneWireProtocol.EARLY_CLOSE->"EARLY_EXIT";else->"WORKING"}
+        mergeShift(record,startedAt,closedAt,status,event.optString("m"),event.optString("o"))
+        record.put("wireStamp",maxOf(record.optLong("wireStamp",0L),maxOf(startedAt,closedAt))).put("wireEventId",eventId)
+        worker.put(day,record);all.put(workerId,worker)
         return prefs(c).edit().putString("attendance_days",all.toString()).commit()
     }
 
@@ -683,7 +690,26 @@ object OwnerPayrollStore {
         val accruedEnd=if(todayStatus=="WORKED"||todayStatus=="EARLY_EXIT") minOf(todayKey,week) else
             SimpleDateFormat("yyyy-MM-dd",Locale.US).format(Calendar.getInstance().apply{add(Calendar.DAY_OF_YEAR,-1)}.time).let{minOf(it,week)}
         val accruedDays=if(accruedEnd>=payableStart)scheduledDayCount(payableStart,accruedEnd,p.workDays) else 0
-        val accruedGross=if(configuredDays>0)(p.weeklySalaryCents*accruedDays/configuredDays).coerceAtMost(periodMaximum) else 0L
+        val baseGross=if(configuredDays>0)(p.weeklySalaryCents*accruedDays/configuredDays).coerceAtMost(periodMaximum) else 0L
+        // Las horas extra se pagan al mismo valor por hora, sin tarifa premium.
+        val attendance=try{JSONObject(prefs(c).getString("attendance_days","{}")?:"{}").optJSONObject(profileId)?:JSONObject()}catch(_:Exception){JSONObject()}
+        val hourlyRate=if(configuredDays>0)p.weeklySalaryCents/(configuredDays.toLong()*p.hours) else 0L
+        var overtimeMillis=0L
+        if(accruedDays>0&&payableStart<=accruedEnd){
+            val cal=Calendar.getInstance().apply{time=SimpleDateFormat("yyyy-MM-dd",Locale.US).parse(payableStart)?:Date()}
+            val last=SimpleDateFormat("yyyy-MM-dd",Locale.US).parse(accruedEnd)?:Date()
+            while(!cal.time.after(last)){
+                val record=attendance.optJSONObject(SimpleDateFormat("yyyy-MM-dd",Locale.US).format(cal.time))
+                if(record!=null){
+                    val shifts=shiftArray(record)
+                    val worked=(0 until shifts.length()).sumOf{i->shifts.optJSONObject(i)?.let{(it.optLong("closedAt",0L)-it.optLong("startedAt",0L)).coerceAtLeast(0L)}?:0L}
+                    overtimeMillis+=(worked-p.hours*3600000L).coerceAtLeast(0L)
+                }
+                cal.add(Calendar.DAY_OF_YEAR,1)
+            }
+        }
+        val overtimeCents=(hourlyRate.toDouble()*overtimeMillis/3600000.0).toLong()
+        val accruedGross=baseGross+overtimeCents
         val payrollArray=array(c,PAYROLLS)
         // Sincroniza faltas desde el calendario diario antes de calcular los descuentos.
         syncUnrecordedAbsences(c,p,week,weekStart)
@@ -724,10 +750,14 @@ object OwnerPayrollStore {
         val earlyExit=relevant.filter{it.type=="SALIDA_ANTICIPADA"}.sumOf{it.amountCents}
         val loan=relevant.filter{it.type=="PRESTAMO"}.sumOf{it.amountCents}
         val consumption=relevant.filter{it.type=="CONSUMO"}.sumOf{it.amountCents}
-        val allowedAbsence=absence.coerceAtMost(accruedGross)
-        val allowedEarlyExit=earlyExit.coerceAtMost((accruedGross-allowedAbsence).coerceAtLeast(0L))
-        val net=(accruedGross-allowedAbsence-allowedEarlyExit-loan-consumption).coerceAtLeast(0L)
-        val payroll=Payroll(payrollId,profileId,week,accruedGross,allowedAbsence,allowedEarlyExit,loan,consumption,net,"PENDIENTE",
+        // El total de descuentos nunca supera el 50% del sueldo proporcional.
+        var discountRoom=accruedGross/2L
+        val allowedAbsence=absence.coerceAtMost(discountRoom);discountRoom-=allowedAbsence
+        val allowedEarlyExit=earlyExit.coerceAtMost(discountRoom);discountRoom-=allowedEarlyExit
+        val allowedLoan=loan.coerceAtMost(discountRoom);discountRoom-=allowedLoan
+        val allowedConsumption=consumption.coerceAtMost(discountRoom)
+        val net=(accruedGross-allowedAbsence-allowedEarlyExit-allowedLoan-allowedConsumption).coerceAtLeast(0L)
+        val payroll=Payroll(payrollId,profileId,week,accruedGross,allowedAbsence,allowedEarlyExit,allowedLoan,allowedConsumption,net,"PENDIENTE",
             existing?.optString("createdAt")?.takeIf{it.isNotBlank()}?:SimpleDateFormat("yyyy-MM-dd HH:mm:ss",Locale.US).format(Date()),"",0L)
         if(existingIndex==null) payrollArray.put(payrollJson(payroll)) else payrollArray.put(existingIndex,payrollJson(payroll))
         check(saveArray(c,PAYROLLS,payrollArray)){"No se pudo guardar la nómina"}
