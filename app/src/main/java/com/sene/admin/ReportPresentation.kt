@@ -61,12 +61,12 @@ object ReportPresentation {
             val k = normalize(key).replace(Regex("\\s+"), " ")
             return when {
                 k in setOf("CAJA INICIAL", "EFECTIVO INICIAL", "MONTO INICIAL") -> "Caja inicial"
-                k in setOf("VENTAS DEL DIA", "VENTA DEL DIA", "TOTAL DE VENTAS", "VENTAS TOTALES", "VENTA NETA DEL DIA", "VENTAS NETAS") -> "Ventas del día"
+                k in setOf("VENTAS DEL DIA", "VENTA DEL DIA", "TOTAL DE VENTAS", "VENTAS TOTALES", "VENTA NETA DEL DIA", "VENTAS NETAS") || k.startsWith("VENTAS NETAS ") -> "Ventas del día"
                 k.contains("GASTO") && (k.contains("PROVEEDOR") || k.contains("PROVEEDORES")) -> "Gastos proveedores"
                 k.contains("PAGO") && k.contains("PROVEEDOR") -> "Gastos proveedores"
                 k in setOf("EGRESOS", "TOTAL EGRESOS", "TOTAL DE EGRESOS") -> "Total de egresos"
                 k in setOf("INGRESOS", "TOTAL INGRESOS", "TOTAL DE INGRESOS") -> "Total de ingresos"
-                k in setOf("CAJA ACTUAL", "EFECTIVO ACTUAL", "CAJA FINAL", "EFECTIVO FINAL", "EFECTIVO EN CAJA") -> "Caja actual"
+                k in setOf("CAJA ACTUAL", "EFECTIVO ACTUAL", "CAJA FINAL", "EFECTIVO FINAL", "EFECTIVO EN CAJA", "EFECTIVO ESTIMADO") -> "Caja actual"
                 k in setOf("VENTAS EN EFECTIVO", "EFECTIVO DE VENTAS") -> "Ventas en efectivo"
                 k in setOf("TRANSFERENCIAS", "VENTAS POR TRANSFERENCIA") -> "Transferencias"
                 k in setOf("TARJETA", "VENTAS CON TARJETA") -> "Ventas con tarjeta"
