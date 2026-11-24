@@ -20,6 +20,7 @@ import java.util.Locale
 
 class MainActivity : AppCompatActivity() {
     @Volatile private var reportEnvelopeProcessing = false
+    private var showReportProcessingResult = false
     private lateinit var root: LinearLayout
     private var accessGranted = false
     private var biometricFallbackShown = false
@@ -486,7 +487,7 @@ class MainActivity : AppCompatActivity() {
             return
         }
         AdminPayrollRequestSync.sync(this, true, onComplete = {
-            if (!isFinishing && !isDestroyed) processServerReportEnvelopes()
+            if (!isFinishing && !isDestroyed) processServerReportEnvelopes(showResult = true)
         })
         Toast.makeText(this, "Actualizando información...", Toast.LENGTH_SHORT).show()
     }
@@ -526,7 +527,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     /** Descifra e importa reportes en segundo plano; el ACK de recepción ya es durable. */
-    private fun processServerReportEnvelopes() {
+    private fun processServerReportEnvelopes(showResult: Boolean = false) {
+        if (showResult) showReportProcessingResult = true
         if (reportEnvelopeProcessing) return
         reportEnvelopeProcessing = true
         val appContext = applicationContext
@@ -600,7 +602,9 @@ class MainActivity : AppCompatActivity() {
             } finally {
                 runOnUiThread {
                     reportEnvelopeProcessing = false
-                    if (!isFinishing && !isDestroyed && dialogTitle != null && dialogMessage != null) {
+                    val shouldShowResult = showReportProcessingResult
+                    showReportProcessingResult = false
+                    if (shouldShowResult && !isFinishing && !isDestroyed && dialogTitle != null && dialogMessage != null) {
                         AlertDialog.Builder(this@MainActivity).setTitle(dialogTitle)
                             .setMessage(dialogMessage).setPositiveButton("ACEPTAR", null).show()
                     }
@@ -1083,44 +1087,22 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showWorkerReports(workerId:String,name:String) {
-        val reports=SeneAdminStore.reports(this).filter { it.workerId==workerId }
-            .sortedWith(compareBy<SeneReport>{it.date}.thenBy{it.time}.thenBy{it.number}).asReversed()
-        val content=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(14,12,14,12); setBackgroundColor(0xFFF4F7FB.toInt()) }
-        val important=setOf("FECHA Y HORA","TRABAJADOR","NÚMERO DEL TRABAJADOR","TIPO","HORA DE ENTRADA","HORA DE SALIDA","HORA PROGRAMADA DE SALIDA","CAJA INICIAL","CAJA ACTUAL","CAJA FINAL","VENTAS","TOTAL DE VENTAS","VENTA TOTAL","DEVOLUCIONES","GASTOS","MOVIMIENTOS","EFECTIVO","TRANSFERENCIAS","TARJETA","TOTAL","TOTAL EN CAJA","CORTE","TIPO DE CIERRE","MOTIVO DE CIERRE","SUELDO SEMANAL","DÍA DE PAGO","DÍAS LABORALES","HORAS DE JORNADA")
-        if(reports.isEmpty()) addLabel(content,"REPORTES","Todavía no hay reportes para este trabajador.")
-        reports.forEach { report ->
-            val card=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(14,12,14,12); background=android.graphics.drawable.GradientDrawable().apply { setColor(-1); cornerRadius=18f } }
-            addLabel(card,"FECHA",report.date+" "+report.time,0xFFDCEBFA.toInt())
-            addLabel(card,"TIPO",if(report.type.equals("EARLY_EXIT",true)) "Cierre anticipado" else report.type,0xFFDDF4E5.toInt())
-            report.body.replace("\r","").lines().forEach { raw ->
-                val line=raw.trim()
-                if(line.startsWith("ETIQUETA:",true)) {
-                    val heading=line.substringAfter(":").trim()
-                    if(heading.contains("VENTA",true)||heading.contains("CAJA",true)||heading.contains("TURNO",true)||heading.contains("CIERRE",true))
-                        card.addView(TextView(this).apply { text=heading; textSize=13f; typeface=Typeface.DEFAULT_BOLD; setTextColor(0xFF123B68.toInt()); setPadding(2,9,2,5) })
-                } else if(line.contains(":")) {
-                    val key=line.substringBefore(":").trim()
-                    val normalized=key.uppercase(Locale.ROOT)
-                    val relevant=important.any { it.equals(key,true) } ||
-                        listOf("VENTA","CAJA","DEVOLU","GASTO","EFECTIVO","TRANSFERENCIA","CORTE","HORA DE ENTRADA","HORA DE SALIDA").any { normalized.contains(it) }
-                    if(relevant && !normalized.contains("DETALLE") && !normalized.contains("INVENTARIO") && !normalized.contains("ARCHIVO")) {
-                        val rawValue=line.substringAfter(":").trim()
-                        val displayValue=if(normalized=="TIPO DE CIERRE" && rawValue.equals("EARLY_EXIT",true)) "Cierre anticipado" else if(normalized=="HORA DE SALIDA" && (rawValue.isBlank() || rawValue.equals("Por definir",true)) && (report.type.equals("EARLY_EXIT",true) || report.type.contains("CIERRE",true) || report.type.contains("FIN_TURNO",true) || report.type.contains("CLOSE",true))) report.date+" "+report.time else rawValue
-                        val displayKey=when(normalized) {
-                            "HORA DE ENTRADA" -> "Hora de entrada"
-                            "HORA DE SALIDA" -> "Hora de salida"
-                            else -> key
-                        }
-                        if(normalized!="TIPO DE CIERRE" || !rawValue.equals("EARLY_EXIT",true))
-                            addLabel(card,displayKey,displayValue)
-                        else addLabel(card,"Tipo de cierre",displayValue,0xFFFFE8D6.toInt())
-                    }
-                }
-            }
-            if(card.childCount>2) { val lp=LinearLayout.LayoutParams(-1,-2); lp.bottomMargin=10; content.addView(card,lp) }
+        val reports = SeneAdminStore.reports(this).filter { it.workerId == workerId }
+            .sortedWith(compareBy<SeneReport> { it.date }.thenBy { it.time }.thenBy { it.number })
+            .asReversed()
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(14, 12, 14, 12)
+            setBackgroundColor(0xFFF4F7FB.toInt())
         }
-        AlertDialog.Builder(this).setTitle("REPORTES · "+name)
-            .setView(ScrollView(this).apply { addView(content) }).setPositiveButton("CERRAR",null).show()
+        if (reports.isEmpty()) {
+            addLabel(content, "REPORTES", "Todavía no hay reportes para este trabajador.")
+        } else {
+            reports.forEach { report -> ReportPresentation.addCard(this, content, report) }
+        }
+        AlertDialog.Builder(this).setTitle("REPORTES · " + name)
+            .setView(ScrollView(this).apply { addView(content) })
+            .setPositiveButton("CERRAR", null).show()
     }
 
     private fun showWorkerAdministration() {
