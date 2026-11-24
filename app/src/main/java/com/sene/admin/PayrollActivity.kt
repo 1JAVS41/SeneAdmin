@@ -501,18 +501,37 @@ class PayrollActivity : Activity() {
                 typeface=android.graphics.Typeface.DEFAULT_BOLD; setTextColor(accent)
             })
             card.addView(header)
-            if(day.started.isNotBlank()) card.addView(TextView(this).apply {
-                text="Entrada: "+day.started; textSize=13f; setTextColor(0xFF26364F.toInt()); setPadding(0,6,0,0)
-            })
-            val exitText=when {
-                day.status=="WORKING" -> "Salida: En curso"
-                day.closed.isNotBlank() -> "Salida: "+day.closed
-                day.started.isNotBlank() -> "Salida: Sin registro"
-                else -> ""
+            if(day.shifts.isNotEmpty()) {
+                day.shifts.forEach { shift ->
+                    card.addView(TextView(this).apply {
+                        text=when(shift.number){1->"PRIMER TURNO";2->"SEGUNDO TURNO";else->"TURNO "+shift.number}
+                        textSize=11f;typeface=android.graphics.Typeface.DEFAULT_BOLD
+                        setTextColor(0xFF24558A.toInt());setPadding(0,8,0,1)
+                    })
+                    card.addView(TextView(this).apply {
+                        text="Entrada: "+shift.started
+                        textSize=13f;setTextColor(0xFF26364F.toInt());setPadding(0,2,0,0)
+                    })
+                    card.addView(TextView(this).apply {
+                        text=if(shift.closedAt<=0L)"Salida: En curso" else "Salida: "+shift.closed
+                        textSize=13f;setTextColor(if(shift.closedAt<=0L)0xFF8A5A08.toInt() else 0xFF526579.toInt())
+                        setPadding(0,2,0,0)
+                    })
+                }
+            } else {
+                if(day.started.isNotBlank()) card.addView(TextView(this).apply {
+                    text="Entrada: "+day.started;textSize=13f;setTextColor(0xFF26364F.toInt());setPadding(0,6,0,0)
+                })
+                val exitText=when {
+                    day.status=="WORKING" -> "Salida: En curso"
+                    day.closed.isNotBlank() -> "Salida: "+day.closed
+                    day.started.isNotBlank() -> "Salida: Sin registro"
+                    else -> ""
+                }
+                if(exitText.isNotBlank()) card.addView(TextView(this).apply {
+                    text=exitText;textSize=13f;setTextColor(if(day.status=="WORKING")accent else 0xFF526579.toInt());setPadding(0,3,0,0)
+                })
             }
-            if(exitText.isNotBlank()) card.addView(TextView(this).apply {
-                text=exitText; textSize=13f; setTextColor(if(day.status=="WORKING")accent else 0xFF526579.toInt()); setPadding(0,3,0,0)
-            })
             val lp=LinearLayout.LayoutParams(-1,-2); lp.bottomMargin=7; box.addView(card,lp)
         }
 
