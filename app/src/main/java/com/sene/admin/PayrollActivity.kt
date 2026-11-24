@@ -426,6 +426,53 @@ class PayrollActivity : Activity() {
             if(summary.closingType.isNotBlank())tag("TIPO DE CIERRE",when(summary.closingType){"EARLY_EXIT"->"CIERRE DE TURNO ANTICIPADO";"ADMIN_FORCED","ADMINISTRATIVE"->"CIERRE ADMINISTRATIVO";else->summary.closingType})
             if(summary.closingReason.isNotBlank())tag("MOTIVO",summary.closingReason)
         }
+        if (pay != null) {
+            fun metricTile(label: String, value: String, expense: Boolean = false): LinearLayout {
+                val bg = if (expense) 0xFFFFE8E5.toInt() else 0xFFDDF4E5.toInt()
+                val fg = if (expense) 0xFF9C2F25.toInt() else 0xFF176344.toInt()
+                return LinearLayout(this).apply {
+                    orientation = LinearLayout.VERTICAL
+                    setPadding(14, 11, 14, 11)
+                    background = android.graphics.drawable.GradientDrawable().apply {
+                        setColor(bg)
+                        cornerRadius = 14f
+                    }
+                    addView(TextView(this@PayrollActivity).apply {
+                        text = label
+                        textSize = 10f
+                        typeface = android.graphics.Typeface.DEFAULT_BOLD
+                        setTextColor(fg)
+                    })
+                    addView(TextView(this@PayrollActivity).apply {
+                        text = value
+                        textSize = 18f
+                        typeface = android.graphics.Typeface.DEFAULT_BOLD
+                        setTextColor(fg)
+                        setPadding(0, 4, 0, 0)
+                    })
+                }
+            }
+            fun metricRow(left: LinearLayout, right: LinearLayout) {
+                val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+                row.addView(left, LinearLayout.LayoutParams(0, -2, 1f).apply { rightMargin = 7 })
+                row.addView(right, LinearLayout.LayoutParams(0, -2, 1f).apply { leftMargin = 7 })
+                box.addView(row, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = 8 })
+            }
+            metricRow(
+                metricTile("SUELDO BASE", OwnerPayrollStore.money(pay.grossCents)),
+                metricTile("TOTAL NETO", OwnerPayrollStore.money(pay.netCents))
+            )
+            metricRow(
+                metricTile("FALTAS", OwnerPayrollStore.money(pay.absenceCents), true),
+                metricTile("CIERRES ANTICIPADOS", OwnerPayrollStore.money(pay.earlyExitCents), true)
+            )
+            metricRow(
+                metricTile("PRÉSTAMOS", OwnerPayrollStore.money(pay.loanCents), true),
+                metricTile("CONSUMOS", OwnerPayrollStore.money(pay.consumptionCents), true)
+            )
+            tag("ESTADO DE NÓMINA", pay.status,
+                if (pay.status == "PAGADA") 0xFFDDF4E5.toInt() else 0xFFFFF1D6.toInt())
+        } else tag("NÓMINA","Falta configurar el sueldo semanal")
         val attendanceTitle=TextView(this).apply { text="ASISTENCIA DE LA SEMANA"; textSize=14f; typeface=android.graphics.Typeface.DEFAULT_BOLD; setTextColor(0xFF123B68.toInt()); setPadding(2,12,2,8) }
         box.addView(attendanceTitle)
         OwnerPayrollStore.weekAttendance(this,p).forEach { day ->
@@ -468,15 +515,7 @@ class PayrollActivity : Activity() {
             })
             val lp=LinearLayout.LayoutParams(-1,-2); lp.bottomMargin=7; box.addView(card,lp)
         }
-        if(pay!=null) {
-            tag("SUELDO BASE",OwnerPayrollStore.money(pay.grossCents))
-            tag("DESCUENTO POR FALTAS",OwnerPayrollStore.money(pay.absenceCents))
-            tag("DESCUENTO POR SALIDAS ANTICIPADAS",OwnerPayrollStore.money(pay.earlyExitCents))
-            tag("PRÉSTAMOS",OwnerPayrollStore.money(pay.loanCents))
-            tag("CONSUMOS",OwnerPayrollStore.money(pay.consumptionCents))
-            tag("TOTAL NETO",OwnerPayrollStore.money(pay.netCents),0xFFDDF4E5.toInt())
-            tag("ESTADO DE NÓMINA",pay.status,if(pay.status=="PAGADA")0xFFDDF4E5.toInt() else 0xFFFFF1D6.toInt())
-        } else tag("NÓMINA","Falta configurar el sueldo semanal")
+
         val movementTitle=TextView(this).apply { text="MOVIMIENTOS REGISTRADOS"; textSize=14f; typeface=android.graphics.Typeface.DEFAULT_BOLD; setTextColor(0xFF123B68.toInt()); setPadding(2,14,2,8) }
         box.addView(movementTitle)
         if(entries.isEmpty())tag("MOVIMIENTOS","Todavía no hay movimientos.")
