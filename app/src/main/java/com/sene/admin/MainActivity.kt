@@ -24,9 +24,11 @@ class MainActivity : AppCompatActivity() {
     private lateinit var root: LinearLayout
     private var accessGranted = false
     private var biometricFallbackShown = false
+    private var updateStatusView: TextView? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        SeneAdminAutoSyncScheduler.ensureScheduled(this)
         // No mostrar la pantalla principal hasta crear el PIN o autenticar al dueño.
         // La limpieza de archivos no debe retrasar el acceso inicial a SeneAdmin.
         val cleanupContext = applicationContext
@@ -119,8 +121,8 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
-        // Recuperar datos con el límite interno de 15 minutos; no consultar al servidor
-        // cada vez que el dueño cambia de pantalla. El buzón se procesa tras la descarga.
+        // La actualización se solicita automáticamente cada dos horas.
+        // Al volver a primer plano solo se comprueba si ya venció ese intervalo.
         if (ServerPairing.isLinked(this)) {
             AdminPayrollRequestSync.sync(this, false, onComplete = {
                 if (!isFinishing && !isDestroyed) processServerReportEnvelopes()
@@ -343,8 +345,8 @@ class MainActivity : AppCompatActivity() {
     private fun showPairingCodeDialog() {
         if(ServerPairing.isLinked(this)) {
             AlertDialog.Builder(this).setTitle(ServerPairing.businessName(this))
-                .setMessage("Conectado a SENE SERVER.\n\nEste negocio está vinculado a SeneAdmin en este dispositivo.")
-                .setPositiveButton("CERRAR",null).setNeutralButton("ACTUALIZAR"){_,_->updateFromServer()}.show()
+                .setMessage("Conectado a SENE SERVER.\n\nEste negocio está vinculado a SeneAdmin en este dispositivo. La información se actualiza automáticamente cada dos horas.")
+                .setPositiveButton("CERRAR",null).show()
             return
         }
         val code=EditText(this).apply {
@@ -420,7 +422,7 @@ class MainActivity : AppCompatActivity() {
         })
         root.addView(hero, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(20) })
 
-        fun mainOption(icon: String, label: String, action: () -> Unit) {
+        fun mainOption(icon: String, label: String, detail: String? = null, action: () -> Unit) {
             val card = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = android.view.Gravity.CENTER_VERTICAL
@@ -447,6 +449,15 @@ class MainActivity : AppCompatActivity() {
                 text = label; textSize = 15f; typeface = Typeface.DEFAULT_BOLD
                 setTextColor(0xFF194A39.toInt())
             })
+            if (!detail.isNullOrBlank()) {
+                val detailView = TextView(this).apply {
+                    text = detail; textSize = 11f
+                    setTextColor(0xFF64748B.toInt())
+                    setPadding(0, dp(4), 0, 0)
+                }
+                if (label == "ACTUALIZAR") updateStatusView = detailView
+                labels.addView(detailView)
+            }
             card.addView(labels, LinearLayout.LayoutParams(0, -2, 1f))
             card.addView(TextView(this).apply {
                 text = "›"; textSize = 28f; setTextColor(0xFF237A55.toInt())
@@ -460,8 +471,8 @@ class MainActivity : AppCompatActivity() {
         mainOption("↔", "VINCULAR") {
             showPairingDialog()
         }
-        mainOption("↻", "ACTUALIZAR") {
-            updateFromServer()
+        mainOption("↻", "ACTUALIZAR", autoUpdateSummary()) {
+            showAutoUpdateInfo()
         }
         mainOption("▦", "INVENTARIO") {
             showSeneInventory()
@@ -476,20 +487,35 @@ class MainActivity : AppCompatActivity() {
         setContentView(ScrollView(this).apply {
             isFillViewport = true; clipToPadding = false; addView(root)
         })
-        // Procesar una sola vez lo ya guardado localmente al mostrar Inicio.
-        // La consulta al servidor queda en onResume con límite de 15 minutos.
+        // Procesar lo ya recibido localmente; el Worker consulta SERVER-SENE cada dos horas.
         processServerReportEnvelopes()
     }
 
-    private fun updateFromServer() {
-        if(!ServerPairing.isLinked(this)) {
-            Toast.makeText(this, "Primero vincula SeneAdmin.", Toast.LENGTH_LONG).show()
-            return
+    private fun autoUpdateSummary(): String {
+        val reportCount = SeneAdminStore.reports(this).size
+        val pendingRequests = OwnerPayrollStore.requests(this)
+            .count { it.status == "PENDING" && it.ownerDecision.isBlank() }
+        return "Reportes recibidos: $reportCount · Solicitudes por revisar: $pendingRequests"
+    }
+
+    private fun showAutoUpdateInfo() {
+        val linked = ServerPairing.isLinked(this)
+        val lastSuccess = getSharedPreferences("sene_admin_payroll_sync", MODE_PRIVATE)
+            .getLong("last_success", 0L)
+        val nextText = if (!linked) {
+            "Vincula SeneAdmin para iniciar las actualizaciones."
+        } else if (lastSuccess <= 0L) {
+            "La primera solicitud automática se realizará en cuanto haya conexión."
+        } else {
+            val next = lastSuccess + 2L * 60L * 60L * 1000L
+            val remaining = (next - System.currentTimeMillis()).coerceAtLeast(0L)
+            val hours = remaining / 3600000L
+            val minutes = (remaining % 3600000L) / 60000L
+            "Próxima solicitud automática en ${hours} h ${minutes} min."
         }
-        AdminPayrollRequestSync.sync(this, true, onComplete = {
-            if (!isFinishing && !isDestroyed) processServerReportEnvelopes(showResult = true)
-        })
-        Toast.makeText(this, "Actualizando información...", Toast.LENGTH_SHORT).show()
+        info("ACTUALIZACIÓN AUTOMÁTICA", autoUpdateSummary() + "\n\n" +
+            "SeneAdmin solicita únicamente las novedades pendientes cada dos horas.\n" +
+            nextText + "\nNo necesitas pulsar nada para actualizar.")
     }
 
     private fun showServerReportInbox() {
@@ -602,6 +628,7 @@ class MainActivity : AppCompatActivity() {
             } finally {
                 runOnUiThread {
                     reportEnvelopeProcessing = false
+                    updateStatusView?.text = autoUpdateSummary()
                     val shouldShowResult = showReportProcessingResult
                     showReportProcessingResult = false
                     if (shouldShowResult && !isFinishing && !isDestroyed && dialogTitle != null && dialogMessage != null) {
