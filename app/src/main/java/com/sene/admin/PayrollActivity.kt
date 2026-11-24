@@ -143,6 +143,16 @@ class PayrollActivity : Activity() {
         dialog.show()
     }
 
+    private fun reportTimestamp(report: SeneReport): Long {
+        val value = report.date.trim() + " " + report.time.trim()
+        val patterns = listOf("yyyy-MM-dd HH:mm:ss", "dd/MM/yyyy HH:mm:ss", "yyyy-MM-dd HH:mm", "dd/MM/yyyy HH:mm")
+        for (pattern in patterns) try {
+            return java.text.SimpleDateFormat(pattern, Locale.US).apply { isLenient = false }
+                .parse(value)?.time ?: continue
+        } catch (_: Exception) { }
+        return 0L
+    }
+
     private fun showRequests(profileId: String? = null) {
         // Consulta solo datos guardados en el teléfono. Si se abre desde un perfil,
         // nunca mezcla solicitudes de otros trabajadores.
@@ -279,7 +289,7 @@ class PayrollActivity : Activity() {
         }
 
         val latestByWorker=reports.groupBy { it.workerId }.mapNotNull { (_,items) ->
-            items.sortedWith(compareByDescending<SeneReport>{it.date}.thenByDescending{it.time}.thenByDescending{it.number})
+            items.sortedWith(compareByDescending<SeneReport>{reportTimestamp(it)}.thenByDescending{it.number})
                 .firstOrNull { SharedInventoryManager.inventoryFromReport(it) != null }
         }
         val outOfStock=latestByWorker.flatMap { report ->
