@@ -12,7 +12,9 @@ import java.util.Locale
 object ReportPresentation {
     private data class Item(val label: String, val value: String, val kind: String)
 
-    fun addCard(context: Context, parent: LinearLayout, report: SeneReport) {
+    fun addCard(context: Context, parent: LinearLayout, reports: List<SeneReport>) {
+        if (reports.isEmpty()) return
+        val report = reports.last()
         fun dp(value: Int) = (value * context.resources.displayMetrics.density + 0.5f).toInt()
         val card = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
@@ -29,12 +31,12 @@ object ReportPresentation {
             gravity = Gravity.CENTER_VERTICAL
         }
         header.addView(TextView(context).apply {
-            text = report.date + " · " + report.time
+            text = "RESUMEN DEL DÍA · " + report.date
             textSize = 12f
             typeface = Typeface.DEFAULT_BOLD
             setTextColor(0xFF173C65.toInt())
         }, LinearLayout.LayoutParams(0, -2, 1f))
-        header.addView(chip(context, displayType(report.type), 0xFFE8F1FB.toInt(), 0xFF285A91.toInt()))
+        // No mostramos el tipo interno del evento: el patrón solo necesita el resumen diario.
         card.addView(header)
 
         val items = linkedMapOf<String, Item>()
@@ -74,7 +76,9 @@ object ReportPresentation {
             }
         }
 
-        for (raw in report.body.replace("\r", "").lines()) {
+        for (dailyReport in reports) {
+        section = ""
+        for (raw in dailyReport.body.replace("\r", "").lines()) {
             val line = raw.trim()
             if (line.isBlank()) continue
             if (line.startsWith("ETIQUETA:", true)) {
@@ -100,6 +104,7 @@ object ReportPresentation {
             } else if (section.contains("INGRES") && normalize(key) in setOf("IMPORTE", "MONTO", "TOTAL")) {
                 put("Total de ingresos", value, "INGRESO")
             }
+        }
         }
 
         // Evita que un total de egresos duplique el importe específico de proveedores.
