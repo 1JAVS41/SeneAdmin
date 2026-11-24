@@ -509,6 +509,12 @@ object OwnerPayrollStore {
     @Synchronized fun upsertServerRequest(c:Context,r:Request):Boolean {
         if(r.id.isBlank()||r.profileId.isBlank()||r.amountCents<=0L||
             r.type !in setOf("PRESTAMO","CONSUMO")||isDeletedProfile(c,r.profileId))return false
+        val owner=profile(c,r.profileId)
+        if(owner!=null && owner.payDay.isNotBlank()) {
+            val requestDate=isoDate(r.date)
+            val today=SimpleDateFormat("yyyy-MM-dd",Locale.US).format(Date())
+            if(requestDate.isNotBlank() && periodForDate(requestDate,payDayNumber(owner.payDay))<today)return true
+        }
         val a=array(c,REQUESTS);val index=(0 until a.length()).firstOrNull{a.optJSONObject(it)?.optString("id")==r.id}
         if(index==null)a.put(requestJson(r))
         else {
