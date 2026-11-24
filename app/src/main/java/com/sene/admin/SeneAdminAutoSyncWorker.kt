@@ -3,9 +3,9 @@ package com.sene.admin
 import android.content.Context
 import androidx.work.BackoffPolicy
 import androidx.work.Constraints
-import androidx.work.ExistingPeriodicWorkPolicy
+import androidx.work.ExistingWorkPolicy
 import androidx.work.NetworkType
-import androidx.work.PeriodicWorkRequestBuilder
+import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.Worker
 import androidx.work.WorkerParameters
@@ -41,28 +41,43 @@ class SeneAdminAutoSyncWorker(
         if (!completed) return Result.retry()
 
         val latestSuccess = prefs.getLong("last_success", 0L)
-        return if (latestSuccess > previousSuccess) Result.success() else Result.retry()
+        if (latestSuccess <= previousSuccess) return Result.retry()
+
+        // El siguiente contador de dos horas comienza después de una respuesta exitosa.
+        SeneAdminAutoSyncScheduler.scheduleNext(app)
+        return Result.success()
     }
 }
 
 object SeneAdminAutoSyncScheduler {
     private const val UNIQUE_WORK = "sene_admin_automatic_server_sync"
 
-    fun ensureScheduled(context: Context) {
-        val constraints = Constraints.Builder()
-            .setRequiredNetworkType(NetworkType.CONNECTED)
-            .build()
-        val request = PeriodicWorkRequestBuilder<SeneAdminAutoSyncWorker>(
-            2, TimeUnit.HOURS
-        )
-            .setConstraints(constraints)
+    private fun nextRequest() =
+        OneTimeWorkRequestBuilder<SeneAdminAutoSyncWorker>()
+            .setInitialDelay(2, TimeUnit.HOURS)
+            .setConstraints(
+                Constraints.Builder()
+                    .setRequiredNetworkType(NetworkType.CONNECTED)
+                    .build()
+            )
             .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 15, TimeUnit.MINUTES)
             .build()
 
-        WorkManager.getInstance(context.applicationContext).enqueueUniquePeriodicWork(
+    /** Programa el primer ciclo sin duplicarlo al abrir varias veces la aplicación. */
+    fun ensureScheduled(context: Context) {
+        WorkManager.getInstance(context.applicationContext).enqueueUniqueWork(
             UNIQUE_WORK,
-            ExistingPeriodicWorkPolicy.KEEP,
-            request
+            ExistingWorkPolicy.KEEP,
+            nextRequest()
+        )
+    }
+
+    /** Cada ciclo exitoso programa el siguiente dos horas después de finalizar. */
+    fun scheduleNext(context: Context) {
+        WorkManager.getInstance(context.applicationContext).enqueueUniqueWork(
+            UNIQUE_WORK,
+            ExistingWorkPolicy.APPEND_OR_REPLACE,
+            nextRequest()
         )
     }
 }
