@@ -624,7 +624,7 @@ class MainActivity : AppCompatActivity() {
         val local = SharedInventoryManager.localSnapshot(this, "INVENTARIO_SENE")
             ?: SharedInventoryManager.localSnapshot(this, "INVENTARIO_MAESTRO")
         val latest = SeneAdminStore.reports(this)
-            .sortedWith(compareByDescending<SeneReport> { it.date }.thenByDescending { it.time }.thenByDescending { it.number })
+            .sortedWith(compareByDescending<SeneReport> { reportTimestamp(it) }.thenByDescending { it.number })
             .firstNotNullOfOrNull { report ->
                 SharedInventoryManager.inventoryFromReport(report)?.let { report to it }
             }
@@ -692,6 +692,16 @@ class MainActivity : AppCompatActivity() {
         card.addView(TextView(this).apply{text=label.uppercase(Locale.ROOT);textSize=10f;typeface=Typeface.DEFAULT_BOLD;setTextColor(0xFF54708D.toInt())})
         card.addView(TextView(this).apply{text=value;textSize=14f;typeface=Typeface.DEFAULT_BOLD;setTextColor(0xFF173C65.toInt());setPadding(0,3,0,0)})
         val lp=LinearLayout.LayoutParams(-1,-2);lp.bottomMargin=8;parent.addView(card,lp)
+    }
+
+    private fun reportTimestamp(report: SeneReport): Long {
+        val value = report.date.trim() + " " + report.time.trim()
+        val patterns = listOf("yyyy-MM-dd HH:mm:ss", "dd/MM/yyyy HH:mm:ss", "yyyy-MM-dd HH:mm", "dd/MM/yyyy HH:mm")
+        for (pattern in patterns) try {
+            return java.text.SimpleDateFormat(pattern, Locale.US).apply { isLenient = false }
+                .parse(value)?.time ?: continue
+        } catch (_: Exception) { }
+        return 0L
     }
 
     private fun showSeneInventory() {
