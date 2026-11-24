@@ -19,7 +19,7 @@ import android.widget.Toast
 import java.util.Locale
 
 class MainActivity : AppCompatActivity() {
-    @Volatile private var reportEnvelopeProcessing = false
+    @Volatile @Volatile private var reportEnvelopeProcessing = false
     private lateinit var root: LinearLayout
     private var accessGranted = false
     private var biometricFallbackShown = false
@@ -525,73 +525,88 @@ class MainActivity : AppCompatActivity() {
         builder.show()
     }
 
-    /** Procesa automáticamente los sobres persistidos; el ACK de recepción ya es durable. */
+    /** Descifra e importa reportes en segundo plano; el ACK de recepción ya es durable. */
     private fun processServerReportEnvelopes() {
         if (reportEnvelopeProcessing) return
         reportEnvelopeProcessing = true
-        try {
-        val legacyKey = OwnerKeyStore.read(this)
-        // La retención local se ejecuta en segundo plano y solo cuando existe la clave
-        // necesaria para verificar los respaldos; nunca se limpian datos sin validarlos.
-        if (!legacyKey.isNullOrBlank() && SharedInventoryManager.savedTree(this) != null) {
-            Thread {
-                try { SharedInventoryManager.cleanupAllIfDue(applicationContext, legacyKey) }
-                catch (_: Exception) { }
-            }.start()
-        }
-        val events = ReportInboxStore.events(this)
-        val imported = mutableListOf<SeneReport>()
-        val removeIds = mutableSetOf<String>()
-        val failures = mutableListOf<String>()
-        for (i in 0 until events.length()) {
-            val event = events.optJSONObject(i) ?: continue
-            val id = event.optString("e")
+        val appContext = applicationContext
+        Thread {
+            var dialogTitle: String? = null
+            var dialogMessage: String? = null
             try {
-                val encryptedPayload = event.optString("b")
-                val report = if (encryptedPayload.trimStart().startsWith("SENE-ADMIN-REPORT|2")) {
-                    SeneReportV2Reader.read(encryptedPayload)
-                } else {
-                    val key = legacyKey?.takeIf { it.isNotBlank() }
-                        ?: throw IllegalStateException("Este reporte histórico requiere la clave de cifrado anterior.")
-                    SeneReportReader.read(encryptedPayload, key)
+                val legacyKey = OwnerKeyStore.read(appContext)
+                // La retención también queda fuera del hilo principal y nunca borra
+                // respaldos sin disponer de la clave necesaria para verificarlos.
+                if (!legacyKey.isNullOrBlank() && SharedInventoryManager.savedTree(appContext) != null) {
+                    Thread {
+                        try { SharedInventoryManager.cleanupAllIfDue(appContext, legacyKey) }
+                        catch (_: Exception) { }
+                    }.start()
                 }
-                val envelopeWorker = event.optString("w")
-                require(envelopeWorker.isBlank() || envelopeWorker == report.workerId) {
-                    "El trabajador del sobre no coincide con el reporte cifrado."
+                val events = ReportInboxStore.events(appContext)
+                val imported = mutableListOf<SeneReport>()
+                val removeIds = mutableSetOf<String>()
+                val failures = mutableListOf<String>()
+                for (i in 0 until events.length()) {
+                    val event = events.optJSONObject(i) ?: continue
+                    val id = event.optString("e")
+                    try {
+                        val encryptedPayload = event.optString("b")
+                        val report = if (encryptedPayload.trimStart().startsWith("SENE-ADMIN-REPORT|2")) {
+                            SeneReportV2Reader.read(encryptedPayload)
+                        } else {
+                            val key = legacyKey?.takeIf { it.isNotBlank() }
+                                ?: throw IllegalStateException("Este reporte histórico requiere la clave de cifrado anterior.")
+                            SeneReportReader.read(encryptedPayload, key)
+                        }
+                        val envelopeWorker = event.optString("w")
+                        require(envelopeWorker.isBlank() || envelopeWorker == report.workerId) {
+                            "El trabajador del sobre no coincide con el reporte cifrado."
+                        }
+                        val ok = when {
+                            report.body.startsWith("SENE-ORDER|1") -> OwnerPayrollStore.importOrder(appContext, report)
+                            report.type == SeneWireProtocol.SYNC && report.body.startsWith("SENE VENTAS  •  REPORTE DE MOVIMIENTOS") -> true
+                            else -> OwnerPayrollStore.importProfile(appContext, report)
+                        }
+                        if (!ok) {
+                            failures.add("No se pudieron aplicar los datos del reporte ${report.number}.")
+                            continue
+                        }
+                        imported.add(report)
+                        removeIds.add(id)
+                    } catch (e: Exception) {
+                        failures.add(e.message ?: "No se pudo leer un reporte.")
+                    }
                 }
-                val ok = when {
-                    report.body.startsWith("SENE-ORDER|1") -> OwnerPayrollStore.importOrder(this, report)
-                    report.type == SeneWireProtocol.SYNC && report.body.startsWith("SENE VENTAS  •  REPORTE DE MOVIMIENTOS") -> true
-                    else -> OwnerPayrollStore.importProfile(this, report)
+                if (imported.isNotEmpty() && !SeneAdminStore.saveReports(appContext, imported)) {
+                    dialogTitle = "NO SE PUDO GUARDAR"
+                    dialogMessage = "Los reportes siguen en el buzón para volver a intentar."
+                    return@Thread
                 }
-                if (!ok) {
-                    failures.add("No se pudieron aplicar los datos del reporte ${report.number}.")
-                    continue
+                if (!ReportInboxStore.removeImported(appContext, removeIds)) {
+                    dialogTitle = "IMPORTACIÓN PARCIAL"
+                    dialogMessage = "Los reportes se importaron, pero no se pudo actualizar el buzón. No se borraron los datos recibidos."
+                    return@Thread
                 }
-                imported.add(report)
-                removeIds.add(id)
+                if (imported.isNotEmpty() || failures.isNotEmpty()) {
+                    dialogTitle = "REPORTES PROCESADOS AUTOMÁTICAMENTE"
+                    dialogMessage = "Reportes importados: ${imported.size}" +
+                        if (failures.isEmpty()) "\nTodos los reportes válidos quedaron registrados."
+                        else "\n\nPendientes por revisar:\n" + failures.take(5).joinToString("\n")
+                }
             } catch (e: Exception) {
-                failures.add(e.message ?: "No se pudo leer un reporte.")
+                dialogTitle = "NO SE PUDO PROCESAR"
+                dialogMessage = e.message ?: "Los reportes permanecen guardados para volver a intentar."
+            } finally {
+                runOnUiThread {
+                    reportEnvelopeProcessing = false
+                    if (!isFinishing && !isDestroyed && dialogTitle != null && dialogMessage != null) {
+                        AlertDialog.Builder(this@MainActivity).setTitle(dialogTitle)
+                            .setMessage(dialogMessage).setPositiveButton("ACEPTAR", null).show()
+                    }
+                }
             }
-        }
-        if (imported.isNotEmpty() && !SeneAdminStore.saveReports(this, imported)) {
-            info("NO SE PUDO GUARDAR", "Los reportes siguen en el buzón para volver a intentar.")
-            return
-        }
-        if (!ReportInboxStore.removeImported(this, removeIds)) {
-            info("IMPORTACIÓN PARCIAL", "Los reportes se importaron, pero no se pudo actualizar el buzón. No se borraron los datos recibidos.")
-            return
-        }
-        val summary = "Reportes importados: ${imported.size}" +
-            if (failures.isEmpty()) "\nTodos los reportes válidos quedaron registrados."
-            else "\n\nPendientes por revisar:\n" + failures.take(5).joinToString("\n")
-        if (imported.isNotEmpty() || failures.isNotEmpty()) {
-            AlertDialog.Builder(this).setTitle("REPORTES PROCESADOS AUTOMÁTICAMENTE")
-                .setMessage(summary).setPositiveButton("ACEPTAR", null).show()
-        }
-        } finally {
-            reportEnvelopeProcessing = false
-        }
+        }.start()
     }
 
     private fun showPendingReviews() {
