@@ -90,7 +90,9 @@ object AdminPayrollRequestSync {
     private const val ADMIN_DECISION_ACKS="admin_decision_acks"
     private fun firstBatch(source:JSONArray,limit:Int):JSONArray {
         val out=JSONArray()
-        for(i in 0 until minOf(source.length(),limit))try{out.put(source.get(i))}catch(_:Exception){}
+        for(i in 0 until minOf(source.length(),limit)) {
+            try { out.put(source.get(i)) } catch(_:Exception) { }
+        }
         return out
     }
     private fun pendingAdminDecisionAcks(p:android.content.SharedPreferences):JSONArray =
