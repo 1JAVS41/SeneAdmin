@@ -88,6 +88,11 @@ object AdminPayrollRequestSync {
     private const val ATTENDANCE_ACKS="attendance_acks"
     private const val INVENTORY_ACKS="inventory_acks"
     private const val ADMIN_DECISION_ACKS="admin_decision_acks"
+    private fun firstBatch(source:JSONArray,limit:Int):JSONArray {
+        val out=JSONArray()
+        for(i in 0 until minOf(source.length(),limit))try{out.put(source.get(i))}catch(_:Exception){}
+        return out
+    }
     private fun pendingAdminDecisionAcks(p:android.content.SharedPreferences):JSONArray =
         try{JSONArray(p.getString(ADMIN_DECISION_ACKS,"[]")?:"[]")}catch(_:Exception){JSONArray()}
     private fun mergeAdminDecisionAcks(p:android.content.SharedPreferences,ids:Set<String>) {
@@ -196,17 +201,17 @@ object AdminPayrollRequestSync {
             var flushAcks = false
             try {
                 val decisions=JSONArray()
-                OwnerPayrollStore.decisionsPendingSync(app).forEach{r->
+                OwnerPayrollStore.decisionsPendingSync(app).take(100).forEach{r->
                     decisions.put(JSONObject().put("e",r.id)
                         .put("x",if(r.ownerDecision=="APPROVE") SeneWireProtocol.APPROVED else SeneWireProtocol.REJECTED)
                         .put("r",r.ownerDecisionReason))
                 }
                 val payload=JSONObject().put(SeneWireProtocol.FIELD_VERSION,SeneWireProtocol.VERSION).put(SeneWireProtocol.FIELD_TYPE,SeneWireProtocol.SYNC)
                     .put(SeneWireProtocol.FIELD_ADMIN_TOKEN,token).put(SeneWireProtocol.FIELD_CURSOR,p.getString("cursor","").orEmpty()).put(SeneWireProtocol.FIELD_DECISIONS,decisions)
-                    .put(SeneWireProtocol.FIELD_ATTENDANCE_ACKS,try{JSONArray(p.getString(ATTENDANCE_ACKS,"[]")?:"[]")}catch(_:Exception){JSONArray()})
-                    .put(SeneWireProtocol.FIELD_INVENTORY_ACKS,try{JSONArray(p.getString(INVENTORY_ACKS,"[]")?:"[]")}catch(_:Exception){JSONArray()})
-                    .put(SeneWireProtocol.FIELD_REPORT_ACKS,ReportInboxStore.pendingAcks(app))
-                    .put("ad",pendingAdminDecisionAcks(p))
+                    .put(SeneWireProtocol.FIELD_ATTENDANCE_ACKS,firstBatch(try{JSONArray(p.getString(ATTENDANCE_ACKS,"[]")?:"[]")}catch(_:Exception){JSONArray()},300))
+                    .put(SeneWireProtocol.FIELD_INVENTORY_ACKS,firstBatch(try{JSONArray(p.getString(INVENTORY_ACKS,"[]")?:"[]")}catch(_:Exception){JSONArray()},300))
+                    .put(SeneWireProtocol.FIELD_REPORT_ACKS,firstBatch(ReportInboxStore.pendingAcks(app),100))
+                    .put("ad",firstBatch(pendingAdminDecisionAcks(p),100))
                     .put(SeneWireProtocol.FIELD_REPORT_PUBLIC_KEY,ReportKeyPairStore.publicKeyBase64())
                 p.edit().putLong("last_attempt",now).commit()
                 val response=ServerPairing.post("/admin/payroll/requests/sync",payload)
