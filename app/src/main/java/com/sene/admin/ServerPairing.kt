@@ -196,7 +196,10 @@ object AdminPayrollRequestSync {
                         else -> "PENDING"
                     }
                     val profile=o.optString("w",o.optString("worker_id",o.optString("profile_id")))
-                    if(id.isBlank()||profile.isBlank())continue
+                    if(id.isBlank()||profile.isBlank()) {
+                        requestsPersisted=false
+                        continue
+                    }
                     // Un perfil eliminado se ignora deliberadamente: no debe recrearse desde un evento antiguo.
                     if(OwnerPayrollStore.isDeletedProfile(app,profile))continue
                     val date=wireDate(o.opt("i") ?: o.opt("created_at") ?: o.opt("date"))
@@ -206,7 +209,10 @@ object AdminPayrollRequestSync {
                         "[C$]","CONSUMPTION","CONSUMO" -> "CONSUMO"
                         else -> ""
                     }
-                    if(type.isBlank()||amount<=0L)continue
+                    if(type.isBlank()||amount<=0L) {
+                        requestsPersisted=false
+                        continue
+                    }
                     val req=OwnerPayrollStore.Request(id,profile,type,date,
                         o.optString("z",o.optString("description",o.optString("r",o.optString("reason")))),amount,
                         o.optString("p",o.optString("product_code",o.optString("productCode"))),
