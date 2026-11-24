@@ -538,9 +538,12 @@ object OwnerPayrollStore {
             state==SeneWireProtocol.EARLY_CLOSE -> "EARLY_EXIT"
             else -> old.optString("status","WORKING")
         }
-        merged.put("status",status).put("wireStamp",eventStamp)
-            .put("wireEventId",eventId).put("closureReason",event.optString("m"))
-            .put("closureSource",event.optString("o"))
+        merged.put("status",status).put("wireStamp",maxOf(old.optLong("wireStamp",0L),eventStamp))
+            .put("wireEventId",eventId)
+        if(closedAt>0L) {
+            merged.put("closureReason",event.optString("m"))
+                .put("closureSource",event.optString("o"))
+        }
         worker.put(day,merged)
         all.put(workerId,worker)
         return prefs(c).edit().putString("attendance_days",all.toString()).commit()
