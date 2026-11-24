@@ -188,7 +188,11 @@ object AdminPayrollRequestSync {
                 val requests=response.optJSONArray("items")?:response.optJSONArray("requests")?:JSONArray()
                 var requestsPersisted=true
                 for(i in 0 until requests.length()) {
-                    val o=requests.optJSONObject(i)?:continue
+                    val o=requests.optJSONObject(i)
+                    if(o == null) {
+                        requestsPersisted=false
+                        continue
+                    }
                     val id=o.optString("e",o.optString("request_id",o.optString("id")))
                     val state=when(o.optString("x",o.optString("status","PENDING")).uppercase()) {
                         SeneWireProtocol.APPROVED,"APPROVED" -> "APPROVED"
