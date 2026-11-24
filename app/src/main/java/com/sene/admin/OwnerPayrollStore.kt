@@ -453,8 +453,16 @@ object OwnerPayrollStore {
         val index=(0 until a.length()).firstOrNull{a.optJSONObject(it)?.optString("id")==id}?:return false
         val old=decodeRequest(a.optJSONObject(index)!!)?:return false
         if(old.status==normalized) {
-            if(normalized=="APPROVED")return finishApprovedRequest(c,old)
-            return true
+            if(normalized=="APPROVED" && !finishApprovedRequest(c,old))return false
+            // La respuesta del servidor confirma la decisión y detiene los reintentos locales.
+            val confirmed=old.copy(
+                decidedBy=decidedBy.ifBlank{old.decidedBy},
+                decidedAt=if(decidedAt>0L)decidedAt else old.decidedAt,
+                rejectionReason=rejectionReason.ifBlank{old.rejectionReason},
+                ownerDecision="",ownerDecisionReason=""
+            )
+            a.put(index,requestJson(confirmed))
+            return saveArray(c,REQUESTS,a)
         }
         if(old.status!="PENDING")return false
         if(normalized=="APPROVED" && !finishApprovedRequest(c,old))return false
