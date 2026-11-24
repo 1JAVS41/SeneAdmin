@@ -106,8 +106,12 @@ class PayrollActivity : Activity() {
         val profile=OwnerPayrollStore.profile(this,id)?:return
         AlertDialog.Builder(this)
             .setTitle(profile.name)
-            .setItems(arrayOf("Consultar nómina y asistencia","Ver reportes")) { _,which ->
-                if(which==0)showProfile(id) else showReportsForWorker(id)
+            .setItems(arrayOf("Consultar nómina y asistencia","Ver reportes","Ver solicitudes")) { _,which ->
+                when(which) {
+                    0 -> showProfile(id)
+                    1 -> showReportsForWorker(id)
+                    2 -> showRequests(id)
+                }
             }.show()
     }
 
@@ -138,21 +142,49 @@ class PayrollActivity : Activity() {
         dialog.show()
     }
 
-    private fun showRequests() {
-        AdminPayrollRequestSync.sync(this,true)
+    private fun showRequests(profileId: String? = null) {
+        // Consulta solo datos guardados en el teléfono. Si se abre desde un perfil,
+        // nunca mezcla solicitudes de otros trabajadores.
+        val all = OwnerPayrollStore.requests(this, profileId)
+            .filter { it.type == "PRESTAMO" || it.type == "CONSUMO" }
+        val reports = SeneAdminStore.reports(this)
+            .filter { profileId.isNullOrBlank() || it.workerId == profileId }
+            .sortedWith(compareBy<SeneReport> { it.date }.thenBy { it.time }.thenBy { it.number })
         fun dp(value:Int)=(value*resources.displayMetrics.density+0.5f).toInt()
-        val all=OwnerPayrollStore.requests(this)
         val content=LinearLayout(this).apply {
             orientation=LinearLayout.VERTICAL
             setPadding(dp(14),dp(12),dp(14),dp(18))
             setBackgroundColor(0xFFF1F5FB.toInt())
         }
-        if(all.isEmpty()) {
+        var visibleItems = 0
+        fun section(label:String) {
             content.addView(TextView(this).apply {
-                text="No hay solicitudes recibidas todavía. Cuando SENE VENTAS sincronice una solicitud, aparecerá aquí."
-                textSize=14f;setTextColor(0xFF53657D.toInt());setPadding(dp(12),dp(16),dp(12),dp(16))
+                text=label; textSize=12f; typeface=android.graphics.Typeface.DEFAULT_BOLD
+                setTextColor(0xFF60738F.toInt()); setPadding(dp(3),dp(10),0,dp(8))
             })
         }
+        fun infoCard(title:String, workerId:String, detail:String, accent:Int=0xFFE8F1FB.toInt()) {
+            val worker=OwnerPayrollStore.profile(this,workerId)?.name ?: workerId.ifBlank { "Trabajador" }
+            val card=LinearLayout(this).apply {
+                orientation=LinearLayout.VERTICAL;setPadding(dp(15),dp(13),dp(15),dp(13))
+                background=android.graphics.drawable.GradientDrawable().apply {
+                    setColor(-1);cornerRadius=dp(17).toFloat();setStroke(dp(1),0xFFD9E3F0.toInt())
+                }
+            }
+            card.addView(TextView(this).apply {
+                text="$title · $worker";textSize=15f;typeface=android.graphics.Typeface.DEFAULT_BOLD
+                setTextColor(0xFF173A68.toInt())
+            })
+            card.addView(TextView(this).apply {
+                text=detail;textSize=13f;setTextColor(0xFF53657D.toInt())
+                background=android.graphics.drawable.GradientDrawable().apply { setColor(accent);cornerRadius=dp(10).toFloat() }
+                setPadding(dp(9),dp(8),dp(9),dp(8))
+            })
+            content.addView(card,LinearLayout.LayoutParams(-1,-2).apply{bottomMargin=dp(9)})
+            visibleItems++
+        }
+
+        if(all.isNotEmpty()) section("PRÉSTAMOS Y CONSUMOS")
         all.forEach { request ->
             val worker=OwnerPayrollStore.profile(this,request.profileId)?.name ?: request.profileId
             val kind=if(request.type=="PRESTAMO")"PRÉSTAMO" else "CONSUMO"
@@ -175,9 +207,9 @@ class PayrollActivity : Activity() {
             })
             val details=buildString {
                 append("Fecha: ").append(request.date).append("\n")
-                append("Importe: ").append(OwnerPayrollStore.money(request.amountCents)).append("\n")
+                if(request.type=="PRESTAMO") append("Importe: ").append(OwnerPayrollStore.money(request.amountCents)).append("\n")
                 if(request.description.isNotBlank())append("Detalle: ").append(request.description).append("\n")
-                if(request.productCode.isNotBlank())append("Código: ").append(request.productCode).append(" · Cantidad: ").append(request.quantity).append("\n")
+                if(request.productCode.isNotBlank())append("Producto: ").append(request.productCode).append(" · Cantidad: ").append(request.quantity).append("\n")
                 append("Estado: ").append(state)
                 if(request.decidedBy.isNotBlank())append("\nAutorizó: ").append(request.decidedBy)
                 if(request.rejectionReason.isNotBlank())append("\nMotivo de rechazo: ").append(request.rejectionReason)
@@ -199,7 +231,7 @@ class PayrollActivity : Activity() {
                                         Toast.makeText(this@PayrollActivity,"Autorización guardada. Enviando decisión al servidor...",Toast.LENGTH_LONG).show()
                                         AdminPayrollRequestSync.sync(this@PayrollActivity,true)
                                     }
-                                    showRequests()
+                                    showRequests(profileId)
                                 }
                             }.setNegativeButton("CANCELAR",null).show()
                     }
@@ -215,7 +247,7 @@ class PayrollActivity : Activity() {
                                         Toast.makeText(this@PayrollActivity,"Rechazo guardado. Enviando decisión al servidor...",Toast.LENGTH_LONG).show()
                                         AdminPayrollRequestSync.sync(this@PayrollActivity,true)
                                     }
-                                    showRequests()
+                                    showRequests(profileId)
                                 }
                             }.setNegativeButton("CANCELAR",null).show()
                     }
@@ -223,8 +255,53 @@ class PayrollActivity : Activity() {
                 card.addView(actions)
             }
             content.addView(card,LinearLayout.LayoutParams(-1,-2).apply{bottomMargin=dp(10)})
+            visibleItems++
         }
-        AlertDialog.Builder(this).setTitle("SOLICITUDES · AUTORIZACIÓN")
+
+        val damaged = mutableListOf<Triple<String,String,List<String>>>()
+        reports.forEach { report ->
+            val lines=report.body.replace("\r","").lines()
+            val marker=lines.indexOfLast { it.trim().equals("PRODUCTOS_DANADOS_SENE_V1",true) }
+            if(marker<0)return@forEach
+            for(raw in lines.drop(marker+1)) {
+                val line=raw.trim()
+                if(line.isBlank()||line.startsWith("ETIQUETA:",true)||line.startsWith("Guarde este reporte",true))break
+                if(line.startsWith("CODIGO",true)||line.startsWith("CÓDIGO",true))continue
+                val parts=line.split("|").map{it.trim()}
+                if(parts.size>=6)damaged.add(Triple(report.workerId,report.date+" "+report.time,parts))
+            }
+        }
+        if(damaged.isNotEmpty()) section("PRODUCTOS DAÑADOS")
+        damaged.forEach { (workerId,date,parts) ->
+            infoCard("PRODUCTO DAÑADO",workerId,
+                "Producto: ${parts[1]}\nCódigo: ${parts[0]}\nCantidad: ${parts[2]}\nFecha: ${parts[3].ifBlank{date}}\nMotivo: ${parts[4]}",0xFFFFE8E5.toInt())
+        }
+
+        val latestByWorker=reports.groupBy { it.workerId }.mapNotNull { (_,items) ->
+            items.maxWithOrNull(compareBy<SeneReport>{it.date}.thenBy{it.time}.thenBy{it.number})
+        }
+        val outOfStock=latestByWorker.flatMap { report ->
+            val snapshot=SharedInventoryManager.inventoryFromReport(report) ?: return@flatMap emptyList()
+            snapshot.items.filter { it.stock<=0 }.map { item -> Triple(report.workerId,report.date+" "+report.time,item) }
+        }
+        if(outOfStock.isNotEmpty()) section("PRODUCTOS SIN STOCK")
+        outOfStock.forEach { (workerId,date,item) ->
+            infoCard("PRODUCTO SIN STOCK",workerId,
+                "Producto: ${item.name}\nCódigo: ${item.code}\nExistencia: ${item.stock}\nInventario del: $date",0xFFFFE8E5.toInt())
+        }
+
+        if(visibleItems==0) {
+            content.addView(TextView(this).apply {
+                text=if(profileId.isNullOrBlank())
+                    "No hay solicitudes de trabajadores guardadas todavía. Solo aparecerán préstamos, consumos, productos dañados y productos sin stock recibidos."
+                else
+                    "Este trabajador todavía no tiene solicitudes ni registros de productos dañados o sin stock."
+                textSize=14f;setTextColor(0xFF53657D.toInt());setPadding(dp(12),dp(16),dp(12),dp(16))
+            })
+        }
+        val title=if(profileId.isNullOrBlank())"SOLICITUDES DE TRABAJADORES"
+            else "SOLICITUDES · "+(OwnerPayrollStore.profile(this,profileId)?.name ?: profileId)
+        AlertDialog.Builder(this).setTitle(title)
             .setView(ScrollView(this).apply{addView(content)})
             .setPositiveButton("CERRAR",null).show()
     }
