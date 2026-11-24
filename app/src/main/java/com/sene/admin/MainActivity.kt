@@ -622,6 +622,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun showOutOfStockProducts() {
         val local = SharedInventoryManager.localSnapshot(this, "INVENTARIO_SENE")
+            ?: SharedInventoryManager.localSnapshot(this, "INVENTARIO_MAESTRO")
         val latest = SeneAdminStore.reports(this)
             .sortedWith(compareByDescending<SeneReport> { it.date }.thenByDescending { it.time }.thenByDescending { it.number })
             .firstNotNullOfOrNull { report ->
@@ -800,6 +801,7 @@ class MainActivity : AppCompatActivity() {
         // Esta pantalla consulta exclusivamente la caché local que SeneAdmin recibió
         // mediante sincronización. No lee carpetas compartidas ni consulta SERVER-SENE.
         val latest = InventoryLocalStore.snapshot(this, category)
+            ?: if (category == "INVENTARIO_SENE") InventoryLocalStore.snapshot(this, "INVENTARIO_MAESTRO") else null
         if (latest == null) {
             info(title, "Todavía no hay una copia local recibida. Cuando llegue la próxima sincronización, el inventario quedará guardado aquí para consultarlo sin conexión.")
             return
@@ -810,6 +812,7 @@ class MainActivity : AppCompatActivity() {
             setBackgroundColor(0xFFF4F7FB.toInt())
         }
         addLabel(content, "Última actualización", latest.updated, 0xFFDCEBFA.toInt())
+        if (latest.category != category) addLabel(content, "Origen de la copia", "Inventario maestro", 0xFFDCEBFA.toInt())
         addLabel(content, "Productos registrados", latest.items.size.toString(), 0xFFDDF4E5.toInt())
         latest.items.sortedBy { it.name.lowercase(Locale.ROOT) }.forEach { item ->
             val card = LinearLayout(this).apply {
