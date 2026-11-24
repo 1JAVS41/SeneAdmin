@@ -159,15 +159,19 @@ object OwnerPayrollStore {
     }
     private fun mergeShift(record:JSONObject,startedAt:Long,closedAt:Long,status:String,reason:String,source:String,expectedHours:Int=8):JSONObject {
         if(startedAt<=0L)return record
+        // Los reportes imprimen segundos y el evento compacto puede traer milisegundos.
+        // Normalizar evita guardar dos veces el mismo turno al recibir ambos canales.
+        val stableStart=(startedAt/1000L)*1000L
+        val stableClose=if(closedAt>0L)(closedAt/1000L)*1000L else 0L
         val shifts=shiftArray(record)
         var shift:JSONObject?=null
         for(i in 0 until shifts.length()){
             val item=shifts.optJSONObject(i)?:continue
-            if(item.optLong("startedAt",0L)==startedAt){shift=item;break}
+            if(item.optLong("startedAt",0L)==stableStart){shift=item;break}
         }
-        val target=shift?:JSONObject().put("startedAt",startedAt).also{shifts.put(it)}
-        val close=maxOf(target.optLong("closedAt",0L),closedAt)
-        target.put("startedAt",startedAt).put("started",SimpleDateFormat("HH:mm",Locale("es","MX")).format(Date(startedAt)))
+        val target=shift?:JSONObject().put("startedAt",stableStart).also{shifts.put(it)}
+        val close=maxOf(target.optLong("closedAt",0L),stableClose)
+        target.put("startedAt",stableStart).put("started",SimpleDateFormat("HH:mm",Locale("es","MX")).format(Date(stableStart)))
         if(close>0L){
             target.put("closedAt",close).put("closed",SimpleDateFormat("HH:mm",Locale("es","MX")).format(Date(close)))
             if(reason.isNotBlank())target.put("reason",reason)
