@@ -454,12 +454,12 @@ object OwnerPayrollStore {
         val old=decodeRequest(a.optJSONObject(index)!!)?:return false
         if(old.status==normalized) {
             if(normalized=="APPROVED" && !finishApprovedRequest(c,old))return false
-            // La respuesta del servidor confirma la decisión y detiene los reintentos locales.
+            // Mantener la decisión local hasta que el servidor confirme que recibió
+            // el ACK de esta aplicación; así un fallo de almacenamiento no la pierde.
             val confirmed=old.copy(
                 decidedBy=decidedBy.ifBlank{old.decidedBy},
                 decidedAt=if(decidedAt>0L)decidedAt else old.decidedAt,
-                rejectionReason=rejectionReason.ifBlank{old.rejectionReason},
-                ownerDecision="",ownerDecisionReason=""
+                rejectionReason=rejectionReason.ifBlank{old.rejectionReason}
             )
             a.put(index,requestJson(confirmed))
             return saveArray(c,REQUESTS,a)
@@ -467,9 +467,25 @@ object OwnerPayrollStore {
         if(old.status!="PENDING")return false
         if(normalized=="APPROVED" && !finishApprovedRequest(c,old))return false
         val updated=old.copy(status=normalized,decidedBy=decidedBy,decidedAt=decidedAt,
-            rejectionReason=rejectionReason,ownerDecision="",ownerDecisionReason="")
+            rejectionReason=rejectionReason)
         a.put(index,requestJson(updated))
         return saveArray(c,REQUESTS,a)
+    }
+
+    @Synchronized fun confirmAdminDecisionReceipt(c:Context,ids:JSONArray):Boolean {
+        if(ids.length()==0)return true
+        val a=array(c,REQUESTS)
+        var changed=false
+        for(i in 0 until ids.length()) {
+            val id=ids.optString(i)
+            if(id.isBlank())continue
+            val index=(0 until a.length()).firstOrNull{a.optJSONObject(it)?.optString("id")==id}?:continue
+            val old=decodeRequest(a.optJSONObject(index)!!)?:continue
+            if(old.ownerDecision.isBlank()&&old.ownerDecisionReason.isBlank())continue
+            a.put(index,requestJson(old.copy(ownerDecision="",ownerDecisionReason="")))
+            changed=true
+        }
+        return !changed||saveArray(c,REQUESTS,a)
     }
     private fun addEntryWithId(c:Context,id:String,profileId:String,type:String,amountCents:Long,description:String,date:String):Boolean {
         val a=array(c,ENTRIES)
