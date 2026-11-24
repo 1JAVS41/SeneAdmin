@@ -620,9 +620,23 @@ class MainActivity : AppCompatActivity() {
             }.setNegativeButton("CERRAR", null).show()
     }
 
+    private fun inventoryTimestamp(value: String): Long {
+        val patterns = listOf("yyyy-MM-dd HH:mm:ss", "dd/MM/yyyy HH:mm:ss", "yyyy-MM-dd", "dd/MM/yyyy")
+        for (pattern in patterns) {
+            val parsed = try {
+                java.text.SimpleDateFormat(pattern, Locale.US).apply { isLenient = false }
+                    .parse(value.trim())?.time
+            } catch (_: Exception) { null }
+            if (parsed != null) return parsed
+        }
+        return 0L
+    }
+
     private fun showOutOfStockProducts() {
-        val local = SharedInventoryManager.localSnapshot(this, "INVENTARIO_SENE")
-            ?: SharedInventoryManager.localSnapshot(this, "INVENTARIO_MAESTRO")
+        val local = listOfNotNull(
+            SharedInventoryManager.localSnapshot(this, "INVENTARIO_SENE"),
+            SharedInventoryManager.localSnapshot(this, "INVENTARIO_MAESTRO")
+        ).maxByOrNull { inventoryTimestamp(it.updated) }
         val latest = SeneAdminStore.reports(this)
             .sortedWith(compareByDescending<SeneReport> { reportTimestamp(it) }.thenByDescending { it.number })
             .firstNotNullOfOrNull { report ->
@@ -711,7 +725,7 @@ class MainActivity : AppCompatActivity() {
         // Inventario por trabajador: se construye únicamente con reportes que ya fueron
         // recibidos, descifrados e importados en la caché local de SeneAdmin.
         val candidates = SeneAdminStore.reports(this)
-            .sortedWith(compareByDescending<SeneReport> { it.date }.thenByDescending { it.time }.thenByDescending { it.number })
+            .sortedWith(compareByDescending<SeneReport> { reportTimestamp(it) }.thenByDescending { it.number })
             .mapNotNull { report ->
                 SharedInventoryManager.inventoryFromReport(report)?.let { report to it }
             }
@@ -894,8 +908,11 @@ class MainActivity : AppCompatActivity() {
         val title = if (category == "INVENTARIO_MAESTRO") "INVENTARIO MAESTRO" else "INVENTARIO SENE"
         // Esta pantalla consulta exclusivamente la caché local que SeneAdmin recibió
         // mediante sincronización. No lee carpetas compartidas ni consulta SERVER-SENE.
-        val latest = InventoryLocalStore.snapshot(this, category)
-            ?: if (category == "INVENTARIO_SENE") InventoryLocalStore.snapshot(this, "INVENTARIO_MAESTRO") else null
+        val requested = InventoryLocalStore.snapshot(this, category)
+        val latest = if (category == "INVENTARIO_SENE") {
+            listOfNotNull(requested, InventoryLocalStore.snapshot(this, "INVENTARIO_MAESTRO"))
+                .maxByOrNull { inventoryTimestamp(it.updated) }
+        } else requested
         if (latest == null) {
             info(title, "Todavía no hay una copia local recibida. Cuando llegue la próxima sincronización, el inventario quedará guardado aquí para consultarlo sin conexión.")
             return
