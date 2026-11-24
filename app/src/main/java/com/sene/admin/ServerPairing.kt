@@ -144,7 +144,11 @@ object AdminPayrollRequestSync {
     }
     fun sync(c:Context,force:Boolean=false,onComplete:(()->Unit)?=null) {
         val app=c.applicationContext
-        val token=ServerPairing.token(app);if(token.isBlank())return
+        val token=ServerPairing.token(app)
+        if(token.isBlank()) {
+            if(onComplete!=null) android.os.Handler(android.os.Looper.getMainLooper()).post { onComplete.invoke() }
+            return
+        }
         val p=app.getSharedPreferences(PREFS,Context.MODE_PRIVATE)
         val now=System.currentTimeMillis()
         val throttled = !force && now-p.getLong("last_attempt",0L)<15L*60L*1000L
