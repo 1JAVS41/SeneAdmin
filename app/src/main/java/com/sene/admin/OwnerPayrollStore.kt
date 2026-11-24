@@ -419,12 +419,51 @@ object OwnerPayrollStore {
         val ownerDecision:String="",val ownerDecisionReason:String=""
     )
     private const val REQUESTS="server_payroll_requests"
+
+    /** Las solicitudes y movimientos siguen visibles durante todo el ciclo, incluso
+     * después del cierre de turno. Se limpian al día siguiente del día de pago.
+     * Las nóminas pagadas permanecen como historial protegido.
+     */
+    @Synchronized private fun cleanupExpiredPayrollCycles(c:Context) {
+        val today=SimpleDateFormat("yyyy-MM-dd",Locale.US).format(Date())
+        fun expired(profileId:String,date:String):Boolean {
+            val p=profile(c,profileId) ?: return false
+            val day=isoDate(date)
+            if(day.isBlank()) return false
+            val end=periodForDate(day,payDayNumber(p.payDay))
+            return end.isNotBlank() && end<today
+        }
+        val requests=array(c,REQUESTS);val keptRequests=JSONArray();var requestChanged=false
+        for(i in 0 until requests.length()) {
+            val item=requests.optJSONObject(i) ?: continue
+            if(expired(item.optString("profileId"),item.optString("date"))) requestChanged=true
+            else keptRequests.put(item)
+        }
+        if(requestChanged) saveArray(c,REQUESTS,keptRequests)
+
+        val entries=array(c,ENTRIES);val keptEntries=JSONArray();var entryChanged=false
+        for(i in 0 until entries.length()) {
+            val item=entries.optJSONObject(i) ?: continue
+            if(expired(item.optString("profileId"),item.optString("date"))) entryChanged=true
+            else keptEntries.put(item)
+        }
+        if(entryChanged) saveArray(c,ENTRIES,keptEntries)
+
+        val movements=array(c,APPROVED_MOVEMENTS);val keptMovements=JSONArray();var movementChanged=false
+        for(i in 0 until movements.length()) {
+            val item=movements.optJSONObject(i) ?: continue
+            if(expired(item.optString("profileId"),item.optString("date"))) movementChanged=true
+            else keptMovements.put(item)
+        }
+        if(movementChanged) saveArray(c,APPROVED_MOVEMENTS,keptMovements)
+    }
     data class ApprovedMovement(
         val id:String,val profileId:String,val type:String,val date:String,val description:String,
         val amountCents:Long,val productCode:String="",val quantity:Int=0
     )
     private const val APPROVED_MOVEMENTS="approved_request_movements"
     fun approvedMovements(c:Context,profileId:String?=null):List<ApprovedMovement> {
+        cleanupExpiredPayrollCycles(c)
         val a=array(c,APPROVED_MOVEMENTS)
         return (0 until a.length()).mapNotNull{i->
             val o=a.optJSONObject(i)?:return@mapNotNull null
@@ -460,6 +499,7 @@ object OwnerPayrollStore {
         .put("ownerDecision",r.ownerDecision).put("ownerDecisionReason",r.ownerDecisionReason)
 
     fun requests(c:Context,profileId:String?=null):List<Request> {
+        cleanupExpiredPayrollCycles(c)
         val a=array(c,REQUESTS)
         return (0 until a.length()).mapNotNull{i->decodeRequest(a.optJSONObject(i)?:return@mapNotNull null)}
             .filter{profileId.isNullOrBlank()||it.profileId==profileId}
@@ -582,6 +622,7 @@ object OwnerPayrollStore {
         return saveArray(c,ENTRIES,a)
     }
     fun entries(c:Context,profileId:String):List<Entry>{
+        cleanupExpiredPayrollCycles(c)
         val a=array(c,ENTRIES);return (0 until a.length()).mapNotNull{i->try{val o=a.getJSONObject(i);if(o.getString("profileId")!=profileId)null else Entry(o.getString("id"),profileId,o.getString("type"),o.getString("date"),o.optString("description"),o.optLong("amount"),o.optString("payrollId"))}catch(_:Exception){null}}
     }
     fun payrolls(c:Context,profileId:String):List<Payroll>{
