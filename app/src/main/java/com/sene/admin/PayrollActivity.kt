@@ -209,10 +209,20 @@ class PayrollActivity : Activity() {
                 request.ownerDecision=="REJECT" -> "RECHAZO PENDIENTE DE ENVÍO"
                 else -> "PENDIENTE DE AUTORIZACIÓN"
             }
+            val requestTint=when(request.status) {
+                "APPROVED" -> 0xFFDDF4E5.toInt()
+                "REJECTED" -> 0xFFFFE4E1.toInt()
+                else -> 0xFFDCEBFA.toInt()
+            }
+            val requestText=when(request.status) {
+                "APPROVED" -> 0xFF176344.toInt()
+                "REJECTED" -> 0xFFB3261E.toInt()
+                else -> 0xFF245B9A.toInt()
+            }
             val card=LinearLayout(this).apply {
                 orientation=LinearLayout.VERTICAL;setPadding(dp(15),dp(13),dp(15),dp(13))
                 background=android.graphics.drawable.GradientDrawable().apply {
-                    setColor(-1);cornerRadius=dp(17).toFloat();setStroke(dp(1),0xFFD9E3F0.toInt())
+                    setColor(requestTint);cornerRadius=dp(17).toFloat();setStroke(dp(1),requestText)
                 }
             }
             card.addView(TextView(this).apply {
@@ -229,7 +239,7 @@ class PayrollActivity : Activity() {
                 if(request.rejectionReason.isNotBlank())append("\nMotivo de rechazo: ").append(request.rejectionReason)
             }
             card.addView(TextView(this).apply {
-                text=details;textSize=13f;setTextColor(0xFF53657D.toInt());setPadding(0,dp(7),0,dp(7))
+                text=details;textSize=13f;setTextColor(requestText);setPadding(0,dp(7),0,dp(7))
             })
             if(request.status=="PENDING"&&request.ownerDecision.isBlank()) {
                 val actions=LinearLayout(this).apply{orientation=LinearLayout.HORIZONTAL}
