@@ -46,10 +46,10 @@ object InventorySyncEngine {
             if (index >= 0) {
                 val old = items[index]
                 items[index] = old.copy(stock = stock,
-                    name = row.optString("n").ifBlank { old.name },
+                    name = if (row.has("n")) row.optString("n") else old.name,
                     price = if (row.has("a")) row.optLong("a", 0L).toDouble() / 100.0 else old.price,
-                    aisle = row.optString("l").ifBlank { old.aisle },
-                    shelf = row.optString("h").ifBlank { old.shelf })
+                    aisle = if (row.has("l")) row.optString("l") else old.aisle,
+                    shelf = if (row.has("h")) row.optString("h") else old.shelf)
             } else items.add(SharedInventoryManager.Item(code, row.optString("n"),
                 row.optLong("a", 0L).toDouble() / 100.0, stock, row.optString("l"), row.optString("h")))
         }
