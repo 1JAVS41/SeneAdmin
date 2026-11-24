@@ -187,7 +187,7 @@ object AdminPayrollRequestSync {
         }
         val p=app.getSharedPreferences(PREFS,Context.MODE_PRIVATE)
         val now=System.currentTimeMillis()
-        val throttled = !force && now-p.getLong("last_attempt",0L)<15L*60L*1000L
+        val throttled = !force && now-p.getLong("last_attempt",0L)<2L*60L*60L*1000L
         synchronized(syncLock) {
             // Si ya hay una consulta en curso, espera a que termine para refrescar
             // también la pantalla del trabajador sin iniciar otra llamada al servidor.
@@ -340,6 +340,8 @@ object AdminPayrollRequestSync {
                 // Si algún registro no quedó persistido, se conserva el cursor para que el servidor lo reenvíe.
                 if(cursor.isNotBlank() && requestsPersisted && incomingEventsPersisted)
                     p.edit().putString("cursor",cursor).commit()
+                if(requestsPersisted && incomingEventsPersisted)
+                    p.edit().putLong("last_success",System.currentTimeMillis()).commit()
             } catch(_:Exception) {
                 // Sin conexión: la cola local sigue intacta y se reintentará después.
             } finally {
