@@ -426,6 +426,48 @@ class PayrollActivity : Activity() {
             if(summary.closingType.isNotBlank())tag("TIPO DE CIERRE",when(summary.closingType){"EARLY_EXIT"->"CIERRE DE TURNO ANTICIPADO";"ADMIN_FORCED","ADMINISTRATIVE"->"CIERRE ADMINISTRATIVO";else->summary.closingType})
             if(summary.closingReason.isNotBlank())tag("MOTIVO",summary.closingReason)
         }
+        val attendanceTitle=TextView(this).apply { text="ASISTENCIA DE LA SEMANA"; textSize=14f; typeface=android.graphics.Typeface.DEFAULT_BOLD; setTextColor(0xFF123B68.toInt()); setPadding(2,12,2,8) }
+        box.addView(attendanceTitle)
+        OwnerPayrollStore.weekAttendance(this,p).forEach { day ->
+            val (bg,accent,statusText)=when(day.status) {
+                "WORKED" -> Triple(0xFFDDF4E5.toInt(),0xFF176344.toInt(),"Jornada completada")
+                "EARLY_EXIT" -> Triple(0xFFFFE8D6.toInt(),0xFF9C4A16.toInt(),"Cierre anticipado")
+                "ADMIN_CLOSED" -> Triple(0xFFDCEBFA.toInt(),0xFF24558A.toInt(),"Cierre administrativo")
+                "WORKING" -> Triple(0xFFFFF1D6.toInt(),0xFF8A5A08.toInt(),"En curso")
+                "NOT_WORKED" -> Triple(0xFFFFE4E6.toInt(),0xFF9C2F35.toInt(),"No asistió")
+                "NO_RECORD" -> Triple(0xFFE8EDF3.toInt(),0xFF526579.toInt(),"Aún no tenía registro")
+                else -> Triple(0xFFE8EDF3.toInt(),0xFF526579.toInt(),"Día no iniciado")
+            }
+            val card=LinearLayout(this).apply {
+                orientation=LinearLayout.VERTICAL
+                setPadding(14,11,14,11)
+                background=android.graphics.drawable.GradientDrawable().apply { setColor(bg); cornerRadius=16f }
+            }
+            val header=LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL; gravity=android.view.Gravity.CENTER_VERTICAL }
+            header.addView(TextView(this).apply {
+                text=day.day+" · "+day.date
+                textSize=13f; typeface=android.graphics.Typeface.DEFAULT_BOLD
+                setTextColor(0xFF26364F.toInt())
+            },LinearLayout.LayoutParams(0,-2,1f))
+            header.addView(TextView(this).apply {
+                text=statusText.uppercase(Locale.ROOT); textSize=10f
+                typeface=android.graphics.Typeface.DEFAULT_BOLD; setTextColor(accent)
+            })
+            card.addView(header)
+            if(day.started.isNotBlank()) card.addView(TextView(this).apply {
+                text="Entrada: "+day.started; textSize=13f; setTextColor(0xFF26364F.toInt()); setPadding(0,6,0,0)
+            })
+            val exitText=when {
+                day.status=="WORKING" -> "Salida: En curso"
+                day.closed.isNotBlank() -> "Salida: "+day.closed
+                day.started.isNotBlank() -> "Salida: Sin registro"
+                else -> ""
+            }
+            if(exitText.isNotBlank()) card.addView(TextView(this).apply {
+                text=exitText; textSize=13f; setTextColor(if(day.status=="WORKING")accent else 0xFF526579.toInt()); setPadding(0,3,0,0)
+            })
+            val lp=LinearLayout.LayoutParams(-1,-2); lp.bottomMargin=7; box.addView(card,lp)
+        }
         if(pay!=null) {
             tag("SUELDO BASE",OwnerPayrollStore.money(pay.grossCents))
             tag("DESCUENTO POR FALTAS",OwnerPayrollStore.money(pay.absenceCents))
@@ -435,25 +477,6 @@ class PayrollActivity : Activity() {
             tag("TOTAL NETO",OwnerPayrollStore.money(pay.netCents),0xFFDDF4E5.toInt())
             tag("ESTADO DE NÓMINA",pay.status,if(pay.status=="PAGADA")0xFFDDF4E5.toInt() else 0xFFFFF1D6.toInt())
         } else tag("NÓMINA","Falta configurar el sueldo semanal")
-        val attendanceTitle=TextView(this).apply { text="ASISTENCIA DE LA SEMANA"; textSize=14f; typeface=android.graphics.Typeface.DEFAULT_BOLD; setTextColor(0xFF123B68.toInt()); setPadding(2,12,2,8) }
-        box.addView(attendanceTitle)
-        OwnerPayrollStore.weekAttendance(this,p).forEach { day ->
-            val symbol=when(day.status){"WORKED"->"🟢";"EARLY_EXIT"->"🟢";"ADMIN_CLOSED"->"🔵";"NOT_WORKED"->"❌️";"WORKING"->"🔁";"NO_RECORD"->"—";else->"—"}
-            val bg=when(day.status){"WORKED"->0xFFDDF4E5.toInt();"EARLY_EXIT"->0xFFFFE8D6.toInt();"ADMIN_CLOSED"->0xFFDCEBFA.toInt();"NOT_WORKED"->0xFFFFE4E6.toInt();"WORKING"->0xFFFFF1D6.toInt();else->0xFFE8EDF3.toInt()}
-            val statusText=when(day.status) {
-                "NO_RECORD" -> "Aún no tenía registro"
-                "EARLY_EXIT" -> "Cierre anticipado"
-                "WORKING" -> "En curso"
-                "WORKED" -> "Jornada completada"
-                "ADMIN_CLOSED" -> "Cierre administrativo"
-                "NOT_WORKED" -> "Sin registro de asistencia"
-                else -> ""
-            }
-            val times=listOf(day.started.takeIf{it.isNotBlank()}?.let{"Entrada: $it"},day.closed.takeIf{it.isNotBlank()}?.let{"Salida: $it"}).filterNotNull().joinToString(" · ")
-            val detail=listOf(statusText,times).filter{it.isNotBlank()}.joinToString(" · ")
-            val chip=TextView(this).apply { text=day.day+" - ["+symbol+"]"+if(detail.isBlank()) "" else " · "+detail; textSize=13f; typeface=android.graphics.Typeface.DEFAULT_BOLD; setTextColor(0xFF26364F.toInt()); setPadding(14,9,14,9); background=android.graphics.drawable.GradientDrawable().apply{setColor(bg);cornerRadius=14f} }
-            val lp=LinearLayout.LayoutParams(-1,-2);lp.bottomMargin=5;box.addView(chip,lp)
-        }
         val movementTitle=TextView(this).apply { text="MOVIMIENTOS REGISTRADOS"; textSize=14f; typeface=android.graphics.Typeface.DEFAULT_BOLD; setTextColor(0xFF123B68.toInt()); setPadding(2,14,2,8) }
         box.addView(movementTitle)
         if(entries.isEmpty())tag("MOVIMIENTOS","Todavía no hay movimientos.")
