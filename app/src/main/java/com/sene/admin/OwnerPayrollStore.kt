@@ -513,7 +513,7 @@ object OwnerPayrollStore {
         val all=try{JSONObject(prefs(c).getString("attendance_days","{}")?:"{}")}catch(_:Exception){JSONObject()}
         val worker=all.optJSONObject(workerId)?:JSONObject()
         val old=worker.optJSONObject(day)?:JSONObject()
-        if(eventStamp<old.optLong("wireStamp",0L))return true
+        // El orden de llegada del servidor es autoritativo; no descartar por reloj del teléfono.
         val merged=JSONObject(old.toString())
         val previousStart=old.optLong("startedAt",0L)
         val previousClose=old.optLong("closedAt",0L)
