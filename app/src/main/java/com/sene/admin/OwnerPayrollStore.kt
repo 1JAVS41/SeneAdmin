@@ -718,7 +718,16 @@ object OwnerPayrollStore {
             }
         }
         val overtimeCents=(hourlyRate.toDouble()*overtimeMillis/3600000.0).toLong()
-        val accruedGross=baseGross+overtimeCents
+        // Si hay un segundo turno abierto hoy, paga las horas de los turnos ya cerrados;
+        // no da por terminada la jornada ni adelanta el resto de horas.
+        val partialTodayMillis=if(todayStatus=="WORKING"&&todayKey>=payableStart&&todayKey<=week){
+            val record=attendance.optJSONObject(todayKey)
+            val shifts=if(record!=null)shiftArray(record) else JSONArray()
+            (0 until shifts.length()).sumOf{i->shifts.optJSONObject(i)?.let{if(it.optLong("closedAt",0L)>0L)
+                (it.optLong("closedAt")-it.optLong("startedAt")).coerceAtLeast(0L) else 0L}?:0L}
+        }else 0L
+        val partialTodayCents=(hourlyRate.toDouble()*partialTodayMillis/3600000.0).toLong()
+        val accruedGross=baseGross+overtimeCents+partialTodayCents
         val payrollArray=array(c,PAYROLLS)
         // Sincroniza faltas desde el calendario diario antes de calcular los descuentos.
         syncUnrecordedAbsences(c,p,week,weekStart)
