@@ -303,7 +303,7 @@ object AdminPayrollRequestSync {
 
                 // Aplicar decisiones después de guardar inventario: un consumo aprobado
                 // puede depender de la fotografía o del delta recibido en este mismo lote.
-                clearAdminDecisionAcks(p,response.optJSONArray("adak")?:response.optJSONArray("admin_decision_ack_acks"))
+                val adminDecisionAckConfirmations=response.optJSONArray("adak")?:response.optJSONArray("admin_decision_ack_acks")?:JSONArray()
                 val decisionAcks=response.optJSONArray("ada")?:response.optJSONArray("admin_decision_acks")?:JSONArray()
                 val processedAdminDecisionAcks=mutableSetOf<String>()
                 for(i in 0 until decisionAcks.length()) {
@@ -322,6 +322,10 @@ object AdminPayrollRequestSync {
                     if(applied)processedAdminDecisionAcks.add(id)
                 }
                 if(mergeAdminDecisionAcks(p,processedAdminDecisionAcks))flushAcks=true
+                // Solo borrar la decisión local y su ACK pendiente después de guardar
+                // la confirmación del servidor en el almacén de solicitudes.
+                if(OwnerPayrollStore.confirmAdminDecisionReceipt(app,adminDecisionAckConfirmations))
+                    clearAdminDecisionAcks(p,adminDecisionAckConfirmations)
 
                 // Persistir los sobres antes de confirmar su recepción al servidor.
                 val reports=response.optJSONArray("b")?:response.optJSONArray("reports")?:JSONArray()
