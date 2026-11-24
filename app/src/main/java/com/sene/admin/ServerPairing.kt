@@ -210,7 +210,7 @@ object AdminPayrollRequestSync {
                     .put(SeneWireProtocol.FIELD_ADMIN_TOKEN,token).put(SeneWireProtocol.FIELD_CURSOR,p.getString("cursor","").orEmpty()).put(SeneWireProtocol.FIELD_DECISIONS,decisions)
                     .put(SeneWireProtocol.FIELD_ATTENDANCE_ACKS,firstBatch(try{JSONArray(p.getString(ATTENDANCE_ACKS,"[]")?:"[]")}catch(_:Exception){JSONArray()},300))
                     .put(SeneWireProtocol.FIELD_INVENTORY_ACKS,firstBatch(try{JSONArray(p.getString(INVENTORY_ACKS,"[]")?:"[]")}catch(_:Exception){JSONArray()},300))
-                    .put(SeneWireProtocol.FIELD_REPORT_ACKS,firstBatch(ReportInboxStore.pendingAcks(app),100))
+                    .put(SeneWireProtocol.FIELD_REPORT_ACKS,firstBatch(ReportInboxStore.pendingAcks(app),10))
                     .put("ad",firstBatch(pendingAdminDecisionAcks(p),100))
                     .put(SeneWireProtocol.FIELD_REPORT_PUBLIC_KEY,ReportKeyPairStore.publicKeyBase64())
                 p.edit().putLong("last_attempt",now).commit()
