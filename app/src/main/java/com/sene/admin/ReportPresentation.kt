@@ -151,14 +151,8 @@ object ReportPresentation {
             }
             card.addView(row, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) })
         }
-        if (items.isEmpty()) {
-            card.addView(TextView(context).apply {
-                text = "Este reporte no contiene cifras de caja resumidas."
-                textSize = 12f
-                setTextColor(0xFF718096.toInt())
-                setPadding(0, dp(9), 0, 0)
-            })
-        }
+        // Si los registros del día solo contienen eventos técnicos, no se muestra una tarjeta vacía.
+        if (items.isEmpty()) return
         parent.addView(card, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(10) })
     }
 
