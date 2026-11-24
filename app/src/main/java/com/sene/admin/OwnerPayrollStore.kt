@@ -157,7 +157,7 @@ object OwnerPayrollStore {
             .put("status",record.optString("status").ifBlank{if(close>0L)"WORKED" else "WORKING"})
             .put("reason",record.optString("closureReason")).put("source",record.optString("closureSource")))
     }
-    private fun mergeShift(record:JSONObject,startedAt:Long,closedAt:Long,status:String,reason:String,source:String):JSONObject {
+    private fun mergeShift(record:JSONObject,startedAt:Long,closedAt:Long,status:String,reason:String,source:String,expectedHours:Int=8):JSONObject {
         if(startedAt<=0L)return record
         val shifts=shiftArray(record)
         var shift:JSONObject?=null
@@ -183,7 +183,7 @@ object OwnerPayrollStore {
         val latest=ordered.lastOrNull()
         val aggregate=when{
             open->"WORKING"
-            total>=8L*3600000L->"WORKED"
+            total>=expectedHours.coerceAtLeast(1)*3600000L->"WORKED"
             ordered.any{it.optString("status")=="EARLY_EXIT"}->"EARLY_EXIT"
             latest?.optString("status")=="ADMIN_CLOSED"->"ADMIN_CLOSED"
             else->latest?.optString("status")?.ifBlank{"WORKED"}?:"WORKED"
@@ -215,7 +215,7 @@ object OwnerPayrollStore {
         val worker=all.optJSONObject(r.workerId)?:JSONObject()
         val record=worker.optJSONObject(day)?:JSONObject()
         mergeShift(record,startedAt,if(isClosing)closedAt else 0L,if(isClosing)status else "WORKING",
-            reportValue(lines,"MOTIVO DE CIERRE"),"REPORT")
+            reportValue(lines,"MOTIVO DE CIERRE"),"REPORT",profile(c,r.workerId)?.hours?:8)
         record.put("stamp",r.date+" "+r.time)
         worker.put(day,record);all.put(r.workerId,worker)
         return prefs(c).edit().putString("attendance_days",all.toString()).commit()
@@ -307,6 +307,10 @@ object OwnerPayrollStore {
     /** Descuenta solo el tiempo que faltó para completar una jornada cerrada anticipadamente. */
     /** Recalcula un único descuento por día, sumando todos los turnos cerrados. */
     private fun importEarlyExit(c:Context,r:SeneReport,lines:List<String>):Boolean {
+        val reportType=r.type.uppercase(Locale.ROOT)
+        val isAttendanceReport=reportType=="EARLY_EXIT"||reportType.contains("CIERRE")||reportType.contains("FIN_TURNO")||
+            reportType.contains("CLOSE")||reportType.contains("INICIO")||reportType.contains("START")||reportValue(lines,"HORA DE ENTRADA").isNotBlank()
+        if(!isAttendanceReport)return true
         val p=profile(c,r.workerId)?:return true
         if(p.weeklySalaryCents<=0L||p.hours<=0)return true
         val start=parseReportTimestamp(reportValue(lines,"HORA DE ENTRADA"))
@@ -550,7 +554,7 @@ object OwnerPayrollStore {
         val all=try{JSONObject(prefs(c).getString("attendance_days","{}")?:"{}")}catch(_:Exception){JSONObject()}
         val worker=all.optJSONObject(workerId)?:JSONObject();val record=worker.optJSONObject(day)?:JSONObject()
         val status=when(state){SeneWireProtocol.ADMIN_CLOSE->"ADMIN_CLOSED";SeneWireProtocol.FULL_SHIFT->"WORKED";SeneWireProtocol.EARLY_CLOSE->"EARLY_EXIT";else->"WORKING"}
-        mergeShift(record,startedAt,closedAt,status,event.optString("m"),event.optString("o"))
+        mergeShift(record,startedAt,closedAt,status,event.optString("m"),event.optString("o"),profile(c,workerId)?.hours?:8)
         record.put("wireStamp",maxOf(record.optLong("wireStamp",0L),maxOf(startedAt,closedAt))).put("wireEventId",eventId)
         worker.put(day,record);all.put(workerId,worker)
         return prefs(c).edit().putString("attendance_days",all.toString()).commit()
