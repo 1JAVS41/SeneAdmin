@@ -324,8 +324,9 @@ object OwnerPayrollStore {
         val record=all.optJSONObject(r.workerId)?.optJSONObject(day)?:return true
         val shifts=shiftArray(record)
         val hasOpen=(0 until shifts.length()).any{shifts.optJSONObject(it)?.optLong("closedAt",0L)?.let{it<=0L}?:false}
+        val hasEarlyExit=(0 until shifts.length()).any{shifts.optJSONObject(it)?.optString("status")=="EARLY_EXIT"}
         val worked=(0 until shifts.length()).sumOf{i->shifts.optJSONObject(i)?.let{(it.optLong("closedAt",0L)-it.optLong("startedAt",0L)).coerceAtLeast(0L)}?:0L}
-        val missing=if(hasOpen)0L else(p.hours*3600000L-worked).coerceAtLeast(0L)
+        val missing=if(hasOpen||!hasEarlyExit)0L else(p.hours*3600000L-worked).coerceAtLeast(0L)
         val days=p.workDays.split(Regex("[,;|]")).map{it.trim()}.filter{it.isNotBlank()}.distinct().size
         if(days<=0)return true
         val amount=if(missing<60000L)0L else(p.weeklySalaryCents.toDouble()/days/p.hours*(missing/3600000.0)).toLong().coerceAtLeast(0L)
