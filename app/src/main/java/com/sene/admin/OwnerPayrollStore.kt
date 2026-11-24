@@ -174,7 +174,7 @@ object OwnerPayrollStore {
         return prefs(c).edit().putString("attendance_days",all.toString()).commit()
     }
 
-    data class DayAttendance(val day:String,val status:String,val started:String="",val closed:String="")
+    data class DayAttendance(val day:String,val date:String,val status:String,val started:String="",val closed:String="")
     fun weekAttendance(c:Context,p:Profile):List<DayAttendance> {
         val all=try{JSONObject(prefs(c).getString("attendance_days","{}")?:"{}")}catch(_:Exception){JSONObject()}
         val worker=all.optJSONObject(p.id) ?: JSONObject()
@@ -211,7 +211,7 @@ object OwnerPayrollStore {
                 key>=todayKey || !isScheduled -> "FUTURE"
                 else -> if (createdDate.isNotBlank() && key < createdDate) "NO_RECORD" else "NOT_WORKED"
             }
-            DayAttendance(dayName.uppercase(Locale("es","MX")),status,record.optString("started"),record.optString("closed"))
+            DayAttendance(dayName.uppercase(Locale("es","MX")),SimpleDateFormat("dd/MM",Locale("es","MX")).format(date.time),status,record.optString("started"),record.optString("closed"))
         }
     }
 
