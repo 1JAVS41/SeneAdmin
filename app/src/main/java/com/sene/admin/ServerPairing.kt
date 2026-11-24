@@ -97,12 +97,14 @@ object AdminPayrollRequestSync {
     }
     private fun pendingAdminDecisionAcks(p:android.content.SharedPreferences):JSONArray =
         try{JSONArray(p.getString(ADMIN_DECISION_ACKS,"[]")?:"[]")}catch(_:Exception){JSONArray()}
-    private fun mergeAdminDecisionAcks(p:android.content.SharedPreferences,ids:Set<String>) {
-        if(ids.isEmpty())return
+    private fun mergeAdminDecisionAcks(p:android.content.SharedPreferences,ids:Set<String>):Boolean {
+        if(ids.isEmpty())return false
         val old=pendingAdminDecisionAcks(p);val merged=linkedSetOf<String>()
         for(i in 0 until old.length())old.optString(i).takeIf{it.isNotBlank()}?.let{merged.add(it)}
+        val previousSize=merged.size
         merged.addAll(ids.filter{it.isNotBlank()})
-        p.edit().putString(ADMIN_DECISION_ACKS,JSONArray(merged.toList()).toString()).commit()
+        if(merged.size==previousSize)return false
+        return p.edit().putString(ADMIN_DECISION_ACKS,JSONArray(merged.toList()).toString()).commit()
     }
     private fun clearAdminDecisionAcks(p:android.content.SharedPreferences,ids:JSONArray?) {
         if(ids==null||ids.length()==0)return
@@ -317,7 +319,7 @@ object AdminPayrollRequestSync {
                         decision.optString("rr",decision.optString("rejection_reason")))
                     if(applied)processedAdminDecisionAcks.add(id)
                 }
-                mergeAdminDecisionAcks(p,processedAdminDecisionAcks)
+                if(mergeAdminDecisionAcks(p,processedAdminDecisionAcks))flushAcks=true
 
                 // Persistir los sobres antes de confirmar su recepción al servidor.
                 val reports=response.optJSONArray("b")?:response.optJSONArray("reports")?:JSONArray()
