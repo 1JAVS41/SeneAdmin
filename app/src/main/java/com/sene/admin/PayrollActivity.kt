@@ -473,39 +473,117 @@ class PayrollActivity : Activity() {
     }
 
     private fun showReportsForWorker(id: String) {
-        val lines = SeneAdminStore.reports(this).filter { it.workerId == id }
+        val reports = SeneAdminStore.reports(this).filter { it.workerId == id }
             .sortedWith(compareBy<SeneReport> { it.date }.thenBy { it.time }.thenBy { it.number })
-        val content=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setPadding(14,12,14,12);setBackgroundColor(0xFFF4F7FB.toInt())}
-        if(lines.isEmpty()) {
-            val empty=TextView(this).apply{text="Todavía no hay reportes recibidos para este trabajador.";textSize=14f;setTextColor(0xFF526579.toInt());setPadding(8,16,8,16)}
-            content.addView(empty)
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(14, 12, 14, 12)
+            setBackgroundColor(0xFFF4F7FB.toInt())
         }
-        lines.asReversed().forEach { report ->
-            val card=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setPadding(14,12,14,12)
-                background=android.graphics.drawable.GradientDrawable().apply{setColor(-1);cornerRadius=18f}}
-            fun label(name:String,value:String) {
-                val chip=LinearLayout(this).apply{orientation=1;setPadding(12,9,12,9)
-                    background=android.graphics.drawable.GradientDrawable().apply{setColor(0xFFE8F1FB.toInt());cornerRadius=14f}}
-                chip.addView(TextView(this).apply{text=name.uppercase(Locale.ROOT);textSize=10f;typeface=android.graphics.Typeface.DEFAULT_BOLD;setTextColor(0xFF54708D.toInt())})
-                chip.addView(TextView(this).apply{text=value;textSize=13f;setTextColor(0xFF173C65.toInt());setPadding(0,2,0,0)})
-                val lp=LinearLayout.LayoutParams(-1,-2);lp.bottomMargin=6;card.addView(chip,lp)
+        if (reports.isEmpty()) {
+            content.addView(TextView(this).apply {
+                text = "Todavía no hay reportes recibidos para este trabajador."
+                textSize = 14f
+                setTextColor(0xFF526579.toInt())
+                setPadding(8, 16, 8, 16)
+            })
+        }
+        reports.asReversed().forEach { report ->
+            val card = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(14, 12, 14, 12)
+                background = android.graphics.drawable.GradientDrawable().apply {
+                    setColor(-1)
+                    cornerRadius = 18f
+                }
             }
-            label("FECHA",report.date+" "+report.time)
-            label("TIPO",report.type)
-            label("NÚMERO",report.number.toString())
-            report.body.replace("\r","").lines().forEach { raw ->
-                val value=raw.trim()
-                if(value.isBlank()||value.startsWith("SENE-ORDER|1"))return@forEach
-                if(value.startsWith("ETIQUETA:",true)) {
-                    card.addView(TextView(this).apply{text=value.substringAfter(":").trim();textSize=13f;typeface=android.graphics.Typeface.DEFAULT_BOLD;setTextColor(0xFF123B68.toInt());setPadding(2,9,2,5)})
-                } else if(value.contains(":")) label(value.substringBefore(":").trim(),value.substringAfter(":").trim())
-                else label("DETALLE",value)
+            fun label(name: String, value: String) {
+                if (value.isBlank()) return
+                val row = TextView(this).apply {
+                    text = "$name: $value"
+                    textSize = 13f
+                    setTextColor(0xFF173C65.toInt())
+                    setPadding(3, 5, 3, 5)
+                }
+                card.addView(row)
             }
-            val lp=LinearLayout.LayoutParams(-1,-2);lp.bottomMargin=10;content.addView(card,lp)
+            label("Fecha", report.date + " " + report.time)
+            label("Tipo", report.type)
+
+            var saleKind = ""
+            var saleTime = ""
+            var product = ""
+            var quantity = ""
+            var amount = ""
+            fun flushSale() {
+                if (product.isNotBlank() || amount.isNotBlank()) {
+                    val detail = buildString {
+                        append(saleKind.ifBlank { "VENTA" })
+                        if (saleTime.isNotBlank()) append(" · ").append(saleTime)
+                        if (product.isNotBlank()) append(" · ").append(product)
+                        if (quantity.isNotBlank()) append(" × ").append(quantity)
+                        if (amount.isNotBlank()) append(" · ").append(amount)
+                    }
+                    label("Movimiento", detail)
+                }
+                saleKind = ""
+                saleTime = ""
+                product = ""
+                quantity = ""
+                amount = ""
+            }
+
+            for (raw in report.body.replace("\r", "").lines()) {
+                val value = raw.trim()
+                if (value.isBlank()) continue
+                if (value.startsWith("ETIQUETA:", true)) {
+                    flushSale()
+                    continue
+                }
+                if (value.startsWith("[") && value.contains("]")) {
+                    flushSale()
+                    saleKind = value.substringAfter("[").substringBefore("]").trim()
+                    saleTime = value.substringAfter("]", "").trim()
+                    continue
+                }
+                when {
+                    value.startsWith("PRODUCTO:", true) ->
+                        product = value.substringAfter(":").trim()
+                    value.startsWith("CANTIDAD:", true) ->
+                        quantity = value.substringAfter(":").trim()
+                    value.startsWith("IMPORTE:", true) ->
+                        amount = value.substringAfter(":").trim()
+                    value.startsWith("VENTAS NETAS", true) ->
+                        label("Ventas netas", value.substringAfter(":").trim())
+                    value.startsWith("PAGOS A PROVEEDORES:", true) ->
+                        label("Gastos a proveedores", value.substringAfter(":").trim())
+                    value.startsWith("PRÉSTAMOS ENTREGADOS:", true) ->
+                        label("Préstamos entregados", value.substringAfter(":").trim())
+                    value.startsWith("EFECTIVO ESTIMADO:", true) ->
+                        label("Efectivo estimado", value.substringAfter(":").trim())
+                    value.startsWith("CAJA INICIAL:", true) ->
+                        label("Caja inicial", value.substringAfter(":").trim())
+                    value.startsWith("INICIO:", true) ->
+                        label("Inicio de turno", value.substringAfter(":").trim())
+                    value.startsWith("CIERRE:", true) ->
+                        label("Cierre de turno", value.substringAfter(":").trim())
+                    value.contains(" x") && value.contains("|") && saleKind.isNotBlank() -> {
+                        val item = value.substringBefore("|").trim()
+                        product = item.substringBeforeLast(" x").trim()
+                        quantity = item.substringAfterLast(" x").trim()
+                        amount = value.substringAfter("|").trim()
+                    }
+                }
+            }
+            flushSale()
+            val lp = LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = 10 }
+            content.addView(card, lp)
         }
         AlertDialog.Builder(this).setTitle("REPORTES DEL TRABAJADOR")
-            .setView(ScrollView(this).apply{addView(content)}).setPositiveButton("CERRAR",null).show()
+            .setView(ScrollView(this).apply { addView(content) })
+            .setPositiveButton("CERRAR", null).show()
     }
+
     private fun addEntry(p:OwnerPayrollStore.Profile,type:String){
         val amount=field("Importe a descontar",true);val desc=field("Motivo o descripción")
         val box=LinearLayout(this).apply{orientation=1;setPadding(20,8,20,4);addView(amount);addView(desc)}
