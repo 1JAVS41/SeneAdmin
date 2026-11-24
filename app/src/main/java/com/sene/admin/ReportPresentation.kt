@@ -72,6 +72,15 @@ object ReportPresentation {
 
         var movementKind = ""
         var movementParts = linkedMapOf<String, String>()
+        var sectionKind = ""
+        var sectionParts = linkedMapOf<String, String>()
+        fun flushSection() {
+            if (sectionKind.isNotBlank() && sectionParts.isNotEmpty()) {
+                val detail = sectionParts.entries.joinToString(" · ") { (key, value) -> "$key: $value" }
+                addTag(sectionKind, detail)
+            }
+            sectionParts = linkedMapOf()
+        }
         fun flushMovement() {
             if (movementKind.isNotBlank() && movementParts.isNotEmpty()) {
                 val detail = movementParts.entries.joinToString(" · ") { (key, value) -> "$key: $value" }
@@ -88,9 +97,14 @@ object ReportPresentation {
             if (line.isBlank()) continue
             if (line.startsWith("ETIQUETA:", true)) {
                 flushMovement()
+                flushSection()
                 val heading = line.substringAfter(":").trim()
-                if (heading.contains("INGRES", true)) addTag("INGRESO", heading)
-                else if (heading.contains("EGRES", true) || heading.contains("GAST", true)) addTag("EGRESO", heading)
+                sectionKind = when {
+                    heading.contains("EGRES", true) || heading.contains("GAST", true) || heading.contains("PROVEEDOR", true) -> "EGRESO"
+                    heading.contains("INGRES", true) || heading.contains("VENTA", true) -> "INGRESO"
+                    else -> ""
+                }
+                if (sectionKind.isNotBlank()) addTag(sectionKind, heading)
                 continue
             }
             if (line.startsWith("[") && line.contains("]")) {
@@ -107,10 +121,17 @@ object ReportPresentation {
                 when {
                     normalized in setOf("PRODUCTO", "PROVEEDOR", "CANTIDAD", "IMPORTE", "MONTO", "FECHA", "MOTIVO", "DESCRIPCIÓN", "DESCRIPCION", "HORA") && movementKind.isNotBlank() ->
                         movementParts[key.replaceFirstChar { it.uppercase() }] = value
+                    sectionKind.isNotBlank() && normalized in setOf("PROVEEDOR", "CONCEPTO", "DESCRIPCIÓN", "DESCRIPCION", "MOTIVO", "FECHA", "IMPORTE", "MONTO", "TOTAL", "CANTIDAD") -> {
+                        if (normalized == "PROVEEDOR" && sectionParts.isNotEmpty() && sectionParts.containsKey("Importe")) flushSection()
+                        sectionParts[key.replaceFirstChar { it.uppercase() }] = value
+                    }
                     normalized.contains("PAGO") && normalized.contains("PROVEEDOR") ->
                         addTag("EGRESO", "$key: $value")
-                    classify(key) != "DATO" ->
-                        addTag(classify(key), "$key: $value")
+                    classify(key) != "DATO" -> {
+                        val kind = classify(key)
+                        addTag(kind, "$key: $value")
+                        if (kind == "EGRESO" && normalized.contains("PROVEEDOR")) sectionKind = "EGRESO"
+                    }
                     normalized in setOf("EFECTIVO", "TRANSFERENCIAS", "TRANSFERENCIA", "TARJETA", "CAJA INICIAL", "CAJA FINAL", "CAJA ACTUAL", "EFECTIVO ESTIMADO") ->
                         addTag("DATO", "$key: $value")
                 }
@@ -126,6 +147,7 @@ object ReportPresentation {
             }
         }
         flushMovement()
+        flushSection()
 
         if (seen.isEmpty()) {
             card.addView(TextView(context).apply {
