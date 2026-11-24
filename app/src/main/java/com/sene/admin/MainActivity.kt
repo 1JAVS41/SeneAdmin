@@ -19,7 +19,7 @@ import android.widget.Toast
 import java.util.Locale
 
 class MainActivity : AppCompatActivity() {
-    @Volatile @Volatile private var reportEnvelopeProcessing = false
+    @Volatile private var reportEnvelopeProcessing = false
     private lateinit var root: LinearLayout
     private var accessGranted = false
     private var biometricFallbackShown = false
