@@ -695,8 +695,89 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showSeneInventory() {
-        // La consulta usa exclusivamente la última copia cifrada guardada en este teléfono.
-        showInventory("INVENTARIO_SENE")
+        // Inventario por trabajador: se construye únicamente con reportes que ya fueron
+        // recibidos, descifrados e importados en la caché local de SeneAdmin.
+        val candidates = SeneAdminStore.reports(this)
+            .sortedWith(compareByDescending<SeneReport> { it.date }.thenByDescending { it.time }.thenByDescending { it.number })
+            .mapNotNull { report ->
+                SharedInventoryManager.inventoryFromReport(report)?.let { report to it }
+            }
+        val latestByWorker = candidates.groupBy { it.first.workerId }.mapNotNull { (workerId, items) ->
+            val latest = items.firstOrNull() ?: return@mapNotNull null
+            val reportName = latest.first.body.replace("\\r", "").lineSequence()
+                .firstOrNull { it.trim().startsWith("TRABAJADOR:", true) }
+                ?.substringAfter(":")?.trim().orEmpty()
+            val name = OwnerPayrollStore.profile(this, workerId)?.name
+                ?: reportName.ifBlank { workerId }
+            Triple(name, latest.second, latest.first.date + " " + latest.first.time)
+        }.sortedBy { it.first.lowercase(Locale.ROOT) }
+
+        if (latestByWorker.isEmpty()) {
+            // Si todavía no llegó un reporte individual, muestra la copia compacta
+            // del inventario general recibida del servidor, sin hacer otra consulta.
+            showInventory("INVENTARIO_SENE")
+            return
+        }
+
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(14, 12, 14, 12)
+            setBackgroundColor(0xFFF4F7FB.toInt())
+        }
+        latestByWorker.forEach { (workerName, snapshot, reportDate) ->
+            val card = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(14, 12, 14, 12)
+                background = android.graphics.drawable.GradientDrawable().apply {
+                    setColor(-1)
+                    cornerRadius = 18f
+                    setStroke(1, 0xFFDCE6F3.toInt())
+                }
+                isClickable = true
+                isFocusable = true
+                setOnClickListener { showWorkerInventory(workerName, snapshot) }
+            }
+            addLabel(card, "TRABAJADOR", workerName, 0xFFDCEBFA.toInt())
+            addLabel(card, "ÚLTIMA ACTUALIZACIÓN", reportDate)
+            addLabel(card, "PRODUCTOS", snapshot.items.size.toString(), 0xFFDDF4E5.toInt())
+            content.addView(card, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = 10 })
+        }
+        AlertDialog.Builder(this).setTitle("INVENTARIO SENE · POR TRABAJADOR")
+            .setMessage("Selecciona un trabajador para consultar su inventario más reciente guardado en este teléfono.")
+            .setView(ScrollView(this).apply { addView(content) })
+            .setPositiveButton("CERRAR", null).show()
+    }
+
+    private fun showWorkerInventory(workerName: String, snapshot: SharedInventoryManager.Snapshot) {
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(14, 12, 14, 12)
+            setBackgroundColor(0xFFF4F7FB.toInt())
+        }
+        addLabel(content, "TRABAJADOR", workerName, 0xFFDCEBFA.toInt())
+        addLabel(content, "ÚLTIMA ACTUALIZACIÓN", snapshot.updated, 0xFFDCEBFA.toInt())
+        addLabel(content, "PRODUCTOS REGISTRADOS", snapshot.items.size.toString(), 0xFFDDF4E5.toInt())
+        snapshot.items.sortedBy { it.name.lowercase(Locale.ROOT) }.forEach { item ->
+            val card = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(14, 12, 14, 12)
+                background = android.graphics.drawable.GradientDrawable().apply {
+                    setColor(-1)
+                    cornerRadius = 18f
+                }
+            }
+            addLabel(card, "PRODUCTO", item.name)
+            addLabel(card, "CÓDIGO", item.code)
+            addLabel(card, "PRECIO", OwnerPayrollStore.money((item.price * 100.0).toLong()))
+            addLabel(card, "EXISTENCIA", item.stock.toString(),
+                if (item.stock > 0) 0xFFDDF4E5.toInt() else 0xFFFFE8E5.toInt())
+            if (item.aisle.isNotBlank()) addLabel(card, "PASILLO", item.aisle)
+            if (item.shelf.isNotBlank()) addLabel(card, "ESTANTE", item.shelf)
+            content.addView(card, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = 10 })
+        }
+        AlertDialog.Builder(this).setTitle("INVENTARIO · " + workerName)
+            .setView(ScrollView(this).apply { addView(content) })
+            .setPositiveButton("CERRAR", null).show()
     }
 
     private fun showSettings() {
