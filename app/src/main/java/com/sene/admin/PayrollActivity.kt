@@ -400,10 +400,15 @@ class PayrollActivity : Activity() {
         val entries = OwnerPayrollStore.entries(this, id)
         val allPayrolls = OwnerPayrollStore.payrolls(this, id).sortedByDescending { it.createdAt }
         val box = LinearLayout(this).apply { orientation = 1; setPadding(16, 12, 16, 12); setBackgroundColor(0xFFF4F7FB.toInt()) }
-        fun tag(label:String,value:String,accent:Int=0xFFE8F1FB.toInt()) {
-            val chip=LinearLayout(this).apply { orientation=1; setPadding(14,10,14,10); background=android.graphics.drawable.GradientDrawable().apply { setColor(accent); cornerRadius=18f } }
+        fun tag(label:String,value:String,accent:Int?=null) {
+            val normalized=label.uppercase(Locale.ROOT)
+            val expense=listOf("FALTA","SALIDA ANTICIPADA","PRÉSTAMO","CONSUMO","DESCUENTO").any{normalized.contains(it)}
+            val income=listOf("SUELDO BASE","TOTAL NETO").any{normalized.contains(it)}
+            val tint=accent ?: if(expense)0xFFFFE8E5.toInt() else if(income)0xFFDDF4E5.toInt() else 0xFFE8F1FB.toInt()
+            val foreground=if(expense)0xFF9C2F25.toInt() else if(income)0xFF176344.toInt() else 0xFF173C65.toInt()
+            val chip=LinearLayout(this).apply { orientation=1; setPadding(14,10,14,10); background=android.graphics.drawable.GradientDrawable().apply { setColor(tint); cornerRadius=18f } }
             chip.addView(TextView(this).apply { text=label.uppercase(Locale.ROOT); textSize=10f; setTextColor(0xFF54708D.toInt()); typeface=android.graphics.Typeface.DEFAULT_BOLD })
-            chip.addView(TextView(this).apply { text=value; textSize=15f; setTextColor(0xFF173C65.toInt()); typeface=android.graphics.Typeface.DEFAULT_BOLD; setPadding(0,3,0,0) })
+            chip.addView(TextView(this).apply { text=value; textSize=15f; setTextColor(foreground); typeface=android.graphics.Typeface.DEFAULT_BOLD; setPadding(0,3,0,0) })
             val lp=LinearLayout.LayoutParams(-1,-2); lp.bottomMargin=8; box.addView(chip,lp)
         }
         tag("TRABAJADOR",p.name,0xFFDCEBFA.toInt())
@@ -465,7 +470,6 @@ class PayrollActivity : Activity() {
             })
         }
         option("CONSULTAR / PAGAR NÓMINA") { payroll(p) }
-        option("VER REPORTES") { showReportsForWorker(p.id) }
         dialog = AlertDialog.Builder(this).setTitle("TRABAJADOR · " + p.name)
             .setView(ScrollView(this).apply { addView(box) })
             .setPositiveButton("CERRAR", null).create()
