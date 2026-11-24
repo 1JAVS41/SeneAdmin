@@ -85,6 +85,7 @@ object AdminPayrollRequestSync {
     private val syncLock = Any()
     private val completionCallbacks = mutableListOf<() -> Unit>()
     private var syncRunning = false
+    private var rerunRequested = false
     private const val ATTENDANCE_ACKS="attendance_acks"
     private const val INVENTORY_ACKS="inventory_acks"
     private const val ADMIN_DECISION_ACKS="admin_decision_acks"
@@ -191,6 +192,7 @@ object AdminPayrollRequestSync {
             // Si ya hay una consulta en curso, espera a que termine para refrescar
             // también la pantalla del trabajador sin iniciar otra llamada al servidor.
             if (syncRunning) {
+                if (force) rerunRequested = true
                 if (onComplete != null) completionCallbacks.add(onComplete)
                 return
             }
@@ -337,16 +339,21 @@ object AdminPayrollRequestSync {
             } catch(_:Exception) {
                 // Sin conexión: la cola local sigue intacta y se reintentará después.
             } finally {
-                val callbacks = synchronized(syncLock) {
+                val completion = synchronized(syncLock) {
                     syncRunning = false
-                    completionCallbacks.toList().also { completionCallbacks.clear() }
+                    val callbacks = completionCallbacks.toList().also { completionCallbacks.clear() }
+                    val rerun = rerunRequested
+                    rerunRequested = false
+                    callbacks to rerun
                 }
-                if (callbacks.isNotEmpty() || flushAcks) {
+                val callbacks = completion.first
+                val rerun = completion.second
+                if (callbacks.isNotEmpty() || flushAcks || rerun) {
                     android.os.Handler(android.os.Looper.getMainLooper()).post {
                         callbacks.forEach { callback -> try { callback.invoke() } catch (_: Exception) { } }
-                        // Confirma al servidor lo que ya quedó guardado localmente. Así la
-                        // siguiente pulsación de ACTUALIZAR no vuelve a descargar el mismo lote.
-                        if (flushAcks) sync(app, true)
+                        // Confirma al servidor lo guardado y atiende cualquier actualización
+                        // forzada que se haya solicitado mientras otra consulta estaba activa.
+                        if (flushAcks || rerun) sync(app, true)
                     }
                 }
             }
