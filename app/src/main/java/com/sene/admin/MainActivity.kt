@@ -819,6 +819,7 @@ class MainActivity : AppCompatActivity() {
             addLabel(card, "TRABAJADOR", workerName, 0xFFDCEBFA.toInt())
             addLabel(card, "ÚLTIMA ACTUALIZACIÓN", reportDate)
             addLabel(card, "PRODUCTOS", snapshot.items.size.toString(), 0xFFDDF4E5.toInt())
+            addLabel(card, "EXISTENCIAS TOTALES", snapshot.items.sumOf { it.stock.coerceAtLeast(0).toLong() }.toString(), 0xFFDDF4E5.toInt())
             content.addView(card, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = 10 })
         }
         AlertDialog.Builder(this).setTitle("INVENTARIO SENE · POR TRABAJADOR")
@@ -836,6 +837,7 @@ class MainActivity : AppCompatActivity() {
         addLabel(content, "TRABAJADOR", workerName, 0xFFDCEBFA.toInt())
         addLabel(content, "ÚLTIMA ACTUALIZACIÓN", snapshot.updated, 0xFFDCEBFA.toInt())
         addLabel(content, "PRODUCTOS REGISTRADOS", snapshot.items.size.toString(), 0xFFDDF4E5.toInt())
+        addLabel(content, "EXISTENCIAS TOTALES", snapshot.items.sumOf { it.stock.coerceAtLeast(0).toLong() }.toString(), 0xFFDDF4E5.toInt())
         snapshot.items.sortedBy { it.name.lowercase(Locale.ROOT) }.forEach { item ->
             val card = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
@@ -977,6 +979,7 @@ class MainActivity : AppCompatActivity() {
         addLabel(content, "Última actualización", latest.updated, 0xFFDCEBFA.toInt())
         if (latest.category != category) addLabel(content, "Origen de la copia", "Inventario maestro", 0xFFDCEBFA.toInt())
         addLabel(content, "Productos registrados", latest.items.size.toString(), 0xFFDDF4E5.toInt())
+        addLabel(content, "Existencias totales", latest.items.sumOf { it.stock.coerceAtLeast(0).toLong() }.toString(), 0xFFDDF4E5.toInt())
         latest.items.sortedBy { it.name.lowercase(Locale.ROOT) }.forEach { item ->
             val card = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
