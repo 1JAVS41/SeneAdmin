@@ -146,10 +146,13 @@ class PayrollActivity : Activity() {
     private fun reportTimestamp(report: SeneReport): Long {
         val value = report.date.trim() + " " + report.time.trim()
         val patterns = listOf("yyyy-MM-dd HH:mm:ss", "dd/MM/yyyy HH:mm:ss", "yyyy-MM-dd HH:mm", "dd/MM/yyyy HH:mm")
-        for (pattern in patterns) try {
-            return java.text.SimpleDateFormat(pattern, Locale.US).apply { isLenient = false }
-                .parse(value)?.time ?: continue
-        } catch (_: Exception) { }
+        for (pattern in patterns) {
+            val parsed = try {
+                java.text.SimpleDateFormat(pattern, Locale.US).apply { isLenient = false }
+                    .parse(value)?.time
+            } catch (_: Exception) { null }
+            if (parsed != null) return parsed
+        }
         return 0L
     }
 
