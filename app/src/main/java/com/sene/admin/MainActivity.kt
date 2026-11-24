@@ -1140,7 +1140,18 @@ class MainActivity : AppCompatActivity() {
                     ?: "Ayer no hay un registro de inventario disponible.",
                 0xFFE8F1FB.toInt()
             )
-            reports.forEach { report -> ReportPresentation.addCard(this, content, report) }
+            // Un solo resumen por fecha; se omiten únicamente eventos técnicos de sincronización.
+            val businessReports = reports.filterNot { report ->
+                val type = report.type.uppercase(Locale.ROOT)
+                type.contains("SYNC") || type == "[AT_SYNC]" || type == "[IN_SYNC]" || type == "[SYNC]"
+            }
+            businessReports.groupBy { normalizeReportDate(it.date) }
+                .filterKeys { it.isNotBlank() }
+                .toSortedMap(compareByDescending<String> { it })
+                .values.forEach { dayReports ->
+                    val ordered = dayReports.sortedBy { reportTimestamp(it) }
+                    ReportPresentation.addCard(this, content, ordered)
+                }
         }
         AlertDialog.Builder(this).setTitle("REPORTES · " + name)
             .setView(ScrollView(this).apply { addView(content) })
