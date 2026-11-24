@@ -229,24 +229,6 @@ object AdminPayrollRequestSync {
                     } else OwnerPayrollStore.upsertServerRequest(app,req)
                     if(!persisted)requestsPersisted=false
                 }
-                // El servidor confirma las decisiones del patrón por ID. Solo se limpian
-                // localmente cuando la decisión y sus efectos (nómina/inventario) se aplican.
-                val decisionAcks=response.optJSONArray("da")?:response.optJSONArray("decision_acks")?:JSONArray()
-                for(i in 0 until decisionAcks.length()) {
-                    val decision=decisionAcks.optJSONObject(i)?:continue
-                    val id=decision.optString("e",decision.optString("id"))
-                    val state=when(decision.optString("x",decision.optString("status")).uppercase()) {
-                        SeneWireProtocol.APPROVED,"APPROVED"->"APPROVED"
-                        SeneWireProtocol.REJECTED,"REJECTED"->"REJECTED"
-                        else->""
-                    }
-                    if(id.isBlank()||state !in setOf("APPROVED","REJECTED"))continue
-                    OwnerPayrollStore.applyServerDecision(app,id,state,
-                        decision.optString("by",decision.optString("decided_by")),
-                        wireTimestamp(decision.opt("at")?:decision.opt("decided_at")),
-                        decision.optString("rr",decision.optString("rejection_reason")))
-                }
-
                 // El cursor solo puede avanzar cuando TODOS los tipos de novedades
                 // quedaron guardados localmente. Si uno falla, el servidor debe reenviarlo.
                 var incomingEventsPersisted = true
@@ -280,6 +262,24 @@ object AdminPayrollRequestSync {
                 if (acceptedInventory.length() > 0) flushAcks = true
                 val inventoryServerAck=response.optJSONArray(SeneWireProtocol.FIELD_INVENTORY_ACK_CONFIRMATIONS)?:response.optJSONArray("inventory_ack_acks")?:JSONArray()
                 clearInventoryAcks(p,inventoryServerAck)
+
+                // Aplicar decisiones después de guardar inventario: un consumo aprobado
+                // puede depender de la fotografía o del delta recibido en este mismo lote.
+                val decisionAcks=response.optJSONArray("da")?:response.optJSONArray("decision_acks")?:JSONArray()
+                for(i in 0 until decisionAcks.length()) {
+                    val decision=decisionAcks.optJSONObject(i)?:continue
+                    val id=decision.optString("e",decision.optString("id"))
+                    val state=when(decision.optString("x",decision.optString("status")).uppercase()) {
+                        SeneWireProtocol.APPROVED,"APPROVED"->"APPROVED"
+                        SeneWireProtocol.REJECTED,"REJECTED"->"REJECTED"
+                        else->""
+                    }
+                    if(id.isBlank()||state !in setOf("APPROVED","REJECTED"))continue
+                    OwnerPayrollStore.applyServerDecision(app,id,state,
+                        decision.optString("by",decision.optString("decided_by")),
+                        wireTimestamp(decision.opt("at")?:decision.opt("decided_at")),
+                        decision.optString("rr",decision.optString("rejection_reason")))
+                }
 
                 // Persistir los sobres antes de confirmar su recepción al servidor.
                 val reports=response.optJSONArray("b")?:response.optJSONArray("reports")?:JSONArray()
