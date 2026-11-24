@@ -14,7 +14,6 @@ import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
-import java.util.concurrent.atomic.AtomicBoolean
 
 /** Identidad y credencial de SeneAdmin, protegidas por Android Keystore. */
 object ServerPairing {
@@ -83,7 +82,9 @@ object ServerPairing {
 /** Sincroniza solicitudes y decisiones en lotes; conserva la cola local cuando no hay red. */
 object AdminPayrollRequestSync {
     private const val PREFS="sene_admin_payroll_sync"
-    private val running=AtomicBoolean(false)
+    private val syncLock = Any()
+    private val completionCallbacks = mutableListOf<() -> Unit>()
+    private var syncRunning = false
     private const val ATTENDANCE_ACKS="attendance_acks"
     private const val INVENTORY_ACKS="inventory_acks"
     private fun mergeAcks(p:android.content.SharedPreferences,ids:JSONArray) {
@@ -146,13 +147,21 @@ object AdminPayrollRequestSync {
         val token=ServerPairing.token(app);if(token.isBlank())return
         val p=app.getSharedPreferences(PREFS,Context.MODE_PRIVATE)
         val now=System.currentTimeMillis()
-        if(!force&&now-p.getLong("last_attempt",0L)<15L*60L*1000L) {
-            // Aunque no toque consultar al servidor, MainActivity debe procesar
-            // el buzón cifrado que PayrollActivity pudo guardar en la última consulta.
-            if(onComplete!=null) android.os.Handler(android.os.Looper.getMainLooper()).post { onComplete.invoke() }
-            return
+        val throttled = !force && now-p.getLong("last_attempt",0L)<15L*60L*1000L
+        synchronized(syncLock) {
+            // Si ya hay una consulta en curso, espera a que termine para refrescar
+            // también la pantalla del trabajador sin iniciar otra llamada al servidor.
+            if (syncRunning) {
+                if (onComplete != null) completionCallbacks.add(onComplete)
+                return
+            }
+            if (throttled) {
+                if (onComplete != null) android.os.Handler(android.os.Looper.getMainLooper()).post { onComplete.invoke() }
+                return
+            }
+            if (onComplete != null) completionCallbacks.add(onComplete)
+            syncRunning = true
         }
-        if(!running.compareAndSet(false,true))return
         Thread {
             try {
                 val decisions=JSONArray()
@@ -229,17 +238,24 @@ object AdminPayrollRequestSync {
                 ReportInboxStore.accept(app,reports)
                 val reportAckConfirmations=response.optJSONArray(SeneWireProtocol.FIELD_REPORT_ACK_CONFIRMATIONS)?:response.optJSONArray("report_ack_acks")?:JSONArray()
                 ReportInboxStore.acknowledgeAcks(app,reportAckConfirmations)
-                // Solo después de persistir los sobres cifrados se solicita su organización local.
-                if (onComplete != null) {
-                    android.os.Handler(android.os.Looper.getMainLooper()).post { onComplete.invoke() }
-                }
+                // La pantalla se refresca desde la caché después de que termine toda la consulta.
 
                 val cursor=response.optString(SeneWireProtocol.FIELD_NEXT_CURSOR,response.optString("next_cursor"))
                 // Si algún registro no quedó persistido, se conserva el cursor para que el servidor lo reenvíe.
                 if(cursor.isNotBlank()&&requestsPersisted)p.edit().putString("cursor",cursor).commit()
             } catch(_:Exception) {
                 // Sin conexión: la cola local sigue intacta y se reintentará después.
-            } finally {running.set(false)}
+            } finally {
+                val callbacks = synchronized(syncLock) {
+                    syncRunning = false
+                    completionCallbacks.toList().also { completionCallbacks.clear() }
+                }
+                if (callbacks.isNotEmpty()) {
+                    android.os.Handler(android.os.Looper.getMainLooper()).post {
+                        callbacks.forEach { callback -> try { callback.invoke() } catch (_: Exception) { } }
+                    }
+                }
+            }
         }.start()
     }
 }
