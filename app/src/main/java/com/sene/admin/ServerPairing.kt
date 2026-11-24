@@ -217,7 +217,7 @@ object AdminPayrollRequestSync {
                     .put(SeneWireProtocol.FIELD_ATTENDANCE_ACKS,firstBatch(try{JSONArray(p.getString(ATTENDANCE_ACKS,"[]")?:"[]")}catch(_:Exception){JSONArray()},300))
                     .put(SeneWireProtocol.FIELD_INVENTORY_ACKS,firstBatch(try{JSONArray(p.getString(INVENTORY_ACKS,"[]")?:"[]")}catch(_:Exception){JSONArray()},300))
                     .put(SeneWireProtocol.FIELD_REPORT_ACKS,firstBatch(ReportInboxStore.pendingAcks(app),10))
-                    .put("ad",firstBatch(pendingAdminDecisionAcks(p),100))
+                    .put(SeneWireProtocol.FIELD_ADMIN_DECISION_ACKS,firstBatch(pendingAdminDecisionAcks(p),100))
                     .put(SeneWireProtocol.FIELD_REPORT_PUBLIC_KEY,ReportKeyPairStore.publicKeyBase64())
                 p.edit().putLong("last_attempt",now).commit()
                 val response=ServerPairing.post("/admin/payroll/requests/sync",payload)
@@ -303,8 +303,8 @@ object AdminPayrollRequestSync {
 
                 // Aplicar decisiones después de guardar inventario: un consumo aprobado
                 // puede depender de la fotografía o del delta recibido en este mismo lote.
-                val adminDecisionAckConfirmations=response.optJSONArray("adak")?:response.optJSONArray("admin_decision_ack_acks")?:JSONArray()
-                val decisionAcks=response.optJSONArray("ada")?:response.optJSONArray("admin_decision_acks")?:JSONArray()
+                val adminDecisionAckConfirmations=response.optJSONArray(SeneWireProtocol.FIELD_ADMIN_DECISION_ACK_RECEIPTS)?:response.optJSONArray("admin_decision_ack_acks")?:JSONArray()
+                val decisionAcks=response.optJSONArray(SeneWireProtocol.FIELD_ADMIN_DECISION_ACK_CONFIRMATIONS)?:response.optJSONArray("admin_decision_acks")?:JSONArray()
                 val processedAdminDecisionAcks=mutableSetOf<String>()
                 for(i in 0 until decisionAcks.length()) {
                     val decision=decisionAcks.optJSONObject(i)?:continue
