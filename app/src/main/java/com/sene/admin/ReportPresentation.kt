@@ -8,13 +8,15 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import java.util.Locale
 
-/** Presentación compacta de reportes: etiquetas visuales para ingresos, egresos y movimientos. */
+/** Resumen visual: únicamente cifras operativas importantes del cierre. */
 object ReportPresentation {
+    private data class Item(val label: String, val value: String, val kind: String)
+
     fun addCard(context: Context, parent: LinearLayout, report: SeneReport) {
         fun dp(value: Int) = (value * context.resources.displayMetrics.density + 0.5f).toInt()
         val card = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(15), dp(13), dp(15), dp(13))
+            setPadding(dp(15), dp(13), dp(15), dp(14))
             background = GradientDrawable().apply {
                 setColor(0xFFFFFFFF.toInt())
                 cornerRadius = dp(18).toFloat()
@@ -28,130 +30,106 @@ object ReportPresentation {
         }
         header.addView(TextView(context).apply {
             text = report.date + " · " + report.time
-            textSize = 13f
+            textSize = 12f
             typeface = Typeface.DEFAULT_BOLD
             setTextColor(0xFF173C65.toInt())
         }, LinearLayout.LayoutParams(0, -2, 1f))
-        header.addView(chip(context, displayType(report.type), 0xFFDDF4E5.toInt(), 0xFF176344.toInt()))
+        header.addView(chip(context, displayType(report.type), 0xFFE8F1FB.toInt(), 0xFF285A91.toInt()))
         card.addView(header)
 
-        val seen = linkedSetOf<String>()
-        fun addTag(kind: String, value: String) {
+        val items = linkedMapOf<String, Item>()
+        var section = ""
+        fun normalize(raw: String) = raw.uppercase(Locale.ROOT)
+            .replace("Á", "A").replace("É", "E").replace("Í", "I")
+            .replace("Ó", "O").replace("Ú", "U").trim()
+        fun put(label: String, value: String, kind: String) {
             val clean = value.trim()
-            if (clean.isBlank()) return
-            val identity = (kind + "|" + clean).lowercase(Locale.ROOT)
-            if (!seen.add(identity)) return
-            val expense = kind == "EGRESO"
-            val income = kind == "INGRESO"
-            val bg = if (expense) 0xFFFFE8E5.toInt() else if (income) 0xFFDDF4E5.toInt() else 0xFFE8F1FB.toInt()
-            val fg = if (expense) 0xFF9C2F25.toInt() else if (income) 0xFF176344.toInt() else 0xFF285A91.toInt()
-            val row = LinearLayout(context).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
-                setPadding(0, dp(7), 0, 0)
-            }
-            row.addView(chip(context, kind, bg, fg))
-            row.addView(TextView(context).apply {
-                text = clean
-                textSize = 13f
-                setTextColor(0xFF344B63.toInt())
-                setPadding(dp(8), dp(5), 0, dp(5))
-            }, LinearLayout.LayoutParams(0, -2, 1f))
-            card.addView(row)
+            if (clean.isBlank() || clean == "-" || clean.equals("N/A", true)) return
+            items[label] = Item(label, clean, kind)
         }
-
-        fun classify(key: String): String {
-            val k = key.uppercase(Locale.ROOT)
+        fun classify(label: String): String {
+            val key = normalize(label)
             return when {
-                listOf("EGRESO", "PROVEEDOR", "GASTO", "COMPRA", "DEVOLUCIÓN", "DEVOLUCION",
-                    "PRÉSTAMO ENTREGADO", "PRESTAMO ENTREGADO", "SALIDA DE CAJA", "PAGO A").any { k.contains(it) } -> "EGRESO"
-                listOf("INGRESO", "VENTA", "ENTRADA DE CAJA").any { k.contains(it) } -> "INGRESO"
+                listOf("GASTO", "EGRESO", "PROVEEDOR", "COMPRA", "DEVOLUCION", "PRESTAMO ENTREGADO", "SALIDA DE CAJA").any { key.contains(it) } -> "EGRESO"
+                listOf("VENTA", "INGRESO", "COBRO").any { key.contains(it) } -> "INGRESO"
                 else -> "DATO"
             }
         }
-
-        var movementKind = ""
-        var movementParts = linkedMapOf<String, String>()
-        var sectionKind = ""
-        var sectionParts = linkedMapOf<String, String>()
-        fun flushSection() {
-            if (sectionKind.isNotBlank() && sectionParts.isNotEmpty()) {
-                val detail = sectionParts.entries.joinToString(" · ") { (key, value) -> "$key: $value" }
-                addTag(sectionKind, detail)
+        fun friendly(key: String): String? {
+            val k = normalize(key).replace(Regex("\\s+"), " ")
+            return when {
+                k in setOf("CAJA INICIAL", "EFECTIVO INICIAL", "MONTO INICIAL") -> "Caja inicial"
+                k in setOf("VENTAS DEL DIA", "VENTA DEL DIA", "TOTAL DE VENTAS", "VENTAS TOTALES", "VENTA NETA DEL DIA", "VENTAS NETAS") -> "Ventas del día"
+                k.contains("GASTO") && (k.contains("PROVEEDOR") || k.contains("PROVEEDORES")) -> "Gastos proveedores"
+                k.contains("PAGO") && k.contains("PROVEEDOR") -> "Gastos proveedores"
+                k in setOf("EGRESOS", "TOTAL EGRESOS", "TOTAL DE EGRESOS") -> "Total de egresos"
+                k in setOf("INGRESOS", "TOTAL INGRESOS", "TOTAL DE INGRESOS") -> "Total de ingresos"
+                k in setOf("CAJA ACTUAL", "EFECTIVO ACTUAL", "CAJA FINAL", "EFECTIVO FINAL", "EFECTIVO EN CAJA") -> "Caja actual"
+                k in setOf("VENTAS EN EFECTIVO", "EFECTIVO DE VENTAS") -> "Ventas en efectivo"
+                k in setOf("TRANSFERENCIAS", "VENTAS POR TRANSFERENCIA") -> "Transferencias"
+                k in setOf("TARJETA", "VENTAS CON TARJETA") -> "Ventas con tarjeta"
+                k in setOf("TOTAL", "TOTAL GASTOS", "TOTAL DE GASTOS") && section.contains("EGRES") -> "Total de egresos"
+                k in setOf("TOTAL", "TOTAL VENTAS") && section.contains("INGRES") -> "Total de ingresos"
+                else -> null
             }
-            sectionParts = linkedMapOf()
-        }
-        fun flushMovement() {
-            if (movementKind.isNotBlank() && movementParts.isNotEmpty()) {
-                val detail = movementParts.entries.joinToString(" · ") { (key, value) -> "$key: $value" }
-                addTag(if (classify(movementKind) == "DATO") "MOVIMIENTO" else classify(movementKind),
-                    movementKind + if (detail.isBlank()) "" else " · $detail")
-            }
-            movementKind = ""
-            movementParts = linkedMapOf()
         }
 
-        val lines = report.body.replace("\r", "").lines()
-        for (raw in lines) {
+        for (raw in report.body.replace("\r", "").lines()) {
             val line = raw.trim()
             if (line.isBlank()) continue
             if (line.startsWith("ETIQUETA:", true)) {
-                flushMovement()
-                flushSection()
-                val heading = line.substringAfter(":").trim()
-                sectionKind = when {
-                    heading.contains("EGRES", true) || heading.contains("GAST", true) || heading.contains("PROVEEDOR", true) -> "EGRESO"
-                    heading.contains("INGRES", true) || heading.contains("VENTA", true) -> "INGRESO"
-                    else -> ""
+                section = normalize(line.substringAfter(":"))
+                continue
+            }
+            if (line.startsWith("[") && line.contains("]")) continue
+            val separator = line.indexOf(':')
+            if (separator <= 0) continue
+            val key = line.substring(0, separator).trim()
+            val value = line.substring(separator + 1).trim()
+            if (value.isBlank()) continue
+            val label = friendly(key)
+            if (label != null) {
+                val kind = when (label) {
+                    "Ventas del día", "Ventas en efectivo", "Ventas con tarjeta", "Transferencias", "Total de ingresos" -> "INGRESO"
+                    "Gastos proveedores", "Total de egresos" -> "EGRESO"
+                    else -> "DATO"
                 }
-                if (sectionKind.isNotBlank()) addTag(sectionKind, heading)
-                continue
-            }
-            if (line.startsWith("[") && line.contains("]")) {
-                flushMovement()
-                movementKind = line.substringAfter("[").substringBefore("]").trim()
-                val tail = line.substringAfter("]", "").trim()
-                if (tail.isNotBlank()) movementParts["Hora"] = tail
-                continue
-            }
-            val key = line.substringBefore(":", "").trim()
-            val value = if (line.contains(":")) line.substringAfter(":").trim() else ""
-            if (key.isNotBlank() && value.isNotBlank()) {
-                val normalized = key.uppercase(Locale.ROOT)
-                when {
-                    normalized in setOf("PRODUCTO", "PROVEEDOR", "CANTIDAD", "IMPORTE", "MONTO", "FECHA", "MOTIVO", "DESCRIPCIÓN", "DESCRIPCION", "HORA") && movementKind.isNotBlank() ->
-                        movementParts[key.replaceFirstChar { it.uppercase() }] = value
-                    sectionKind.isNotBlank() && normalized in setOf("PROVEEDOR", "CONCEPTO", "DESCRIPCIÓN", "DESCRIPCION", "MOTIVO", "FECHA", "IMPORTE", "MONTO", "TOTAL", "CANTIDAD") -> {
-                        if (normalized == "PROVEEDOR" && sectionParts.isNotEmpty() && sectionParts.containsKey("Importe")) flushSection()
-                        sectionParts[key.replaceFirstChar { it.uppercase() }] = value
-                    }
-                    normalized.contains("PAGO") && normalized.contains("PROVEEDOR") ->
-                        addTag("EGRESO", "$key: $value")
-                    classify(key) != "DATO" -> {
-                        val kind = classify(key)
-                        addTag(kind, "$key: $value")
-                        if (kind == "EGRESO" && normalized.contains("PROVEEDOR")) sectionKind = "EGRESO"
-                    }
-                    normalized in setOf("EFECTIVO", "TRANSFERENCIAS", "TRANSFERENCIA", "TARJETA", "CAJA INICIAL", "CAJA FINAL", "CAJA ACTUAL", "EFECTIVO ESTIMADO") ->
-                        addTag("DATO", "$key: $value")
-                }
-                continue
-            }
-            if (movementKind.isNotBlank() && line.contains("|")) {
-                val parts = line.split("|").map { it.trim() }.filter { it.isNotBlank() }
-                if (parts.isNotEmpty()) movementParts["Detalle"] = parts.joinToString(" · ")
-            } else if (line.contains("PROVEEDOR", true) || line.contains("EGRESO", true) || line.contains("GASTO", true)) {
-                addTag("EGRESO", line)
-            } else if (line.contains("INGRESO", true) || line.contains("VENTA NETA", true)) {
-                addTag("INGRESO", line)
+                put(label, value, kind)
+            } else if (section.contains("EGRES") && normalize(key) in setOf("IMPORTE", "MONTO", "TOTAL")) {
+                put(if (section.contains("PROVEEDOR")) "Gastos proveedores" else "Total de egresos", value, "EGRESO")
+            } else if (section.contains("INGRES") && normalize(key) in setOf("IMPORTE", "MONTO", "TOTAL")) {
+                put("Total de ingresos", value, "INGRESO")
             }
         }
-        flushMovement()
-        flushSection()
 
-        if (seen.isEmpty()) {
+        // Evita que un total de egresos duplique el importe específico de proveedores.
+        if (items.containsKey("Gastos proveedores") && items["Total de egresos"]?.value == items["Gastos proveedores"]?.value) {
+            items.remove("Total de egresos")
+        }
+        items.values.forEach { item ->
+            val (bg, fg) = when (item.kind) {
+                "EGRESO" -> 0xFFFFE8E5.toInt() to 0xFF9C2F25.toInt()
+                "INGRESO" -> 0xFFDDF4E5.toInt() to 0xFF176344.toInt()
+                else -> 0xFFE8F1FB.toInt() to 0xFF285A91.toInt()
+            }
+            val row = LinearLayout(context).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(0, dp(9), 0, 0)
+            }
+            row.addView(chip(context, item.label.uppercase(Locale.ROOT), bg, fg))
+            row.addView(TextView(context).apply {
+                text = item.value
+                textSize = 14f
+                typeface = Typeface.DEFAULT_BOLD
+                setTextColor(fg)
+                setPadding(dp(9), dp(5), 0, dp(5))
+            }, LinearLayout.LayoutParams(0, -2, 1f))
+            card.addView(row)
+        }
+        if (items.isEmpty()) {
             card.addView(TextView(context).apply {
-                text = "Sin movimientos resumidos en este reporte."
+                text = "Este reporte no contiene cifras de caja resumidas."
                 textSize = 12f
                 setTextColor(0xFF718096.toInt())
                 setPadding(0, dp(9), 0, 0)
@@ -165,11 +143,11 @@ object ReportPresentation {
         fun dp(value: Int) = (value * density + 0.5f).toInt()
         return TextView(context).apply {
             this.text = text
-            textSize = 10f
+            textSize = 9f
             typeface = Typeface.DEFAULT_BOLD
             letterSpacing = 0.035f
             setTextColor(foreground)
-            setPadding(dp(9), dp(6), dp(9), dp(6))
+            setPadding(dp(8), dp(6), dp(8), dp(6))
             this.background = GradientDrawable().apply {
                 setColor(background)
                 cornerRadius = dp(20).toFloat()
