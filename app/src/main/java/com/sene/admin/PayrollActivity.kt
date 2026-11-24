@@ -516,11 +516,88 @@ class PayrollActivity : Activity() {
                 setPadding(8, 16, 8, 16)
             })
         } else {
+            // Resume solo el último inventario real de cada día. No se calculan
+            // cantidades a partir de reportes que no incluyan un inventario válido.
+            fun dayKey(raw: String): String {
+                val patterns = listOf("yyyy-MM-dd", "dd/MM/yyyy", "yyyy-MM-dd HH:mm:ss", "dd/MM/yyyy HH:mm:ss")
+                for (pattern in patterns) {
+                    val parsed = try {
+                        java.text.SimpleDateFormat(pattern, Locale.US).apply { isLenient = false }.parse(raw.trim())
+                    } catch (_: Exception) { null }
+                    if (parsed != null) return java.text.SimpleDateFormat("yyyy-MM-dd", Locale.US).format(parsed)
+                }
+                return ""
+            }
+            val inventoryByDay = reports.mapNotNull { report ->
+                val snapshot = SharedInventoryManager.inventoryFromReport(report) ?: return@mapNotNull null
+                val day = dayKey(report.date)
+                if (day.isBlank()) null else Triple(day, report, snapshot)
+            }.groupBy { it.first }.mapValues { (_, entries) ->
+                entries.maxByOrNull { report ->
+                    val stamp = reportTimestampForInventory(report.second)
+                    stamp
+                }!!
+            }
+            val today = java.text.SimpleDateFormat("yyyy-MM-dd", Locale.US).format(java.util.Date())
+            val yesterdayCalendar = java.util.Calendar.getInstance().apply {
+                add(java.util.Calendar.DAY_OF_YEAR, -1)
+            }
+            val yesterday = java.text.SimpleDateFormat("yyyy-MM-dd", Locale.US).format(yesterdayCalendar.time)
+
+            fun inventoryLabel(title: String, day: String, todayLabel: Boolean) {
+                val snapshot = inventoryByDay[day]?.third
+                val bg = if (todayLabel) 0xFFDDF4E5.toInt() else 0xFFE8F1FB.toInt()
+                val fg = if (todayLabel) 0xFF176344.toInt() else 0xFF285A91.toInt()
+                val card = LinearLayout(this).apply {
+                    orientation = LinearLayout.VERTICAL
+                    setPadding(14, 11, 14, 11)
+                    background = android.graphics.drawable.GradientDrawable().apply {
+                        setColor(bg)
+                        cornerRadius = 16f
+                    }
+                }
+                card.addView(TextView(this).apply {
+                    text = title
+                    textSize = 10f
+                    typeface = android.graphics.Typeface.DEFAULT_BOLD
+                    setTextColor(fg)
+                })
+                val total = snapshot?.items?.sumOf { it.stock.coerceAtLeast(0).toLong() }
+                card.addView(TextView(this).apply {
+                    text = when {
+                        total == null && todayLabel -> "No hay registro de inventario de hoy."
+                        total == null -> "No hay registro de inventario de ayer."
+                        todayLabel -> "Tienes $total productos el día de hoy en total. Puedes consultar cuáles son en la sección Inventario."
+                        else -> "Ayer tenías $total productos en total."
+                    }
+                    textSize = 13f
+                    typeface = android.graphics.Typeface.DEFAULT_BOLD
+                    setTextColor(0xFF26364F.toInt())
+                    setPadding(0, 5, 0, 0)
+                })
+                content.addView(card, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = 8 })
+            }
+            inventoryLabel("INVENTARIO DE HOY", today, true)
+            inventoryLabel("INVENTARIO DE AYER", yesterday, false)
+
             reports.forEach { report -> ReportPresentation.addCard(this, content, report) }
         }
         AlertDialog.Builder(this).setTitle("REPORTES DEL TRABAJADOR")
             .setView(ScrollView(this).apply { addView(content) })
             .setPositiveButton("CERRAR", null).show()
+    }
+
+    private fun reportTimestampForInventory(report: SeneReport): Long {
+        val value = report.date.trim() + " " + report.time.trim()
+        val patterns = listOf("yyyy-MM-dd HH:mm:ss", "dd/MM/yyyy HH:mm:ss", "yyyy-MM-dd HH:mm", "dd/MM/yyyy HH:mm")
+        for (pattern in patterns) {
+            val parsed = try {
+                java.text.SimpleDateFormat(pattern, Locale.US).apply { isLenient = false }
+                    .parse(value)?.time
+            } catch (_: Exception) { null }
+            if (parsed != null) return parsed
+        }
+        return 0L
     }
 
     private fun addEntry(p:OwnerPayrollStore.Profile,type:String){
