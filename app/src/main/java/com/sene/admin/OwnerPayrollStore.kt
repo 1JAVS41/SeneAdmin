@@ -428,6 +428,7 @@ object OwnerPayrollStore {
         val today=SimpleDateFormat("yyyy-MM-dd",Locale.US).format(Date())
         fun expired(profileId:String,date:String):Boolean {
             val p=profile(c,profileId) ?: return false
+            if(p.payDay.isBlank()) return false
             val day=isoDate(date)
             if(day.isBlank()) return false
             val end=periodForDate(day,payDayNumber(p.payDay))
