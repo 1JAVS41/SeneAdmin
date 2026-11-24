@@ -278,7 +278,8 @@ class PayrollActivity : Activity() {
         }
 
         val latestByWorker=reports.groupBy { it.workerId }.mapNotNull { (_,items) ->
-            items.maxWithOrNull(compareBy<SeneReport>{it.date}.thenBy{it.time}.thenBy{it.number})
+            items.sortedWith(compareByDescending<SeneReport>{it.date}.thenByDescending{it.time}.thenByDescending{it.number})
+                .firstOrNull { SharedInventoryManager.inventoryFromReport(it) != null }
         }
         val outOfStock=latestByWorker.flatMap { report ->
             val snapshot=SharedInventoryManager.inventoryFromReport(report) ?: return@flatMap emptyList()
