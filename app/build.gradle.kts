@@ -19,6 +19,7 @@ dependencies {
     implementation("androidx.appcompat:appcompat:1.7.0")
     implementation("androidx.core:core-ktx:1.15.0")
     implementation("androidx.biometric:biometric:1.1.0")
+    implementation("androidx.work:work-runtime-ktx:2.10.1")
 }
 
 // La APK y su etiqueta de instalación se identifican como SeneAdmin.
