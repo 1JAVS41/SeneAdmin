@@ -265,7 +265,7 @@ object AdminPayrollRequestSync {
 
                 // Aplicar decisiones después de guardar inventario: un consumo aprobado
                 // puede depender de la fotografía o del delta recibido en este mismo lote.
-                val decisionAcks=response.optJSONArray("da")?:response.optJSONArray("decision_acks")?:JSONArray()
+                val decisionAcks=response.optJSONArray("ada")?:response.optJSONArray("admin_decision_acks")?:JSONArray()
                 for(i in 0 until decisionAcks.length()) {
                     val decision=decisionAcks.optJSONObject(i)?:continue
                     val id=decision.optString("e",decision.optString("id"))
