@@ -749,6 +749,17 @@ class MainActivity : AppCompatActivity() {
         val lp=LinearLayout.LayoutParams(-1,-2);lp.bottomMargin=8;parent.addView(card,lp)
     }
 
+    private fun normalizeReportDate(value: String): String {
+        val patterns = listOf("yyyy-MM-dd", "dd/MM/yyyy", "yyyy-MM-dd HH:mm:ss", "dd/MM/yyyy HH:mm:ss")
+        for (pattern in patterns) {
+            val parsed = try {
+                java.text.SimpleDateFormat(pattern, Locale.US).apply { isLenient = false }.parse(value.trim())
+            } catch (_: Exception) { null }
+            if (parsed != null) return java.text.SimpleDateFormat("yyyy-MM-dd", Locale.US).format(parsed)
+        }
+        return ""
+    }
+
     private fun reportTimestamp(report: SeneReport): Long {
         val value = report.date.trim() + " " + report.time.trim()
         val patterns = listOf("yyyy-MM-dd HH:mm:ss", "dd/MM/yyyy HH:mm:ss", "yyyy-MM-dd HH:mm", "dd/MM/yyyy HH:mm")
@@ -1098,6 +1109,34 @@ class MainActivity : AppCompatActivity() {
         if (reports.isEmpty()) {
             addLabel(content, "REPORTES", "Todavía no hay reportes para este trabajador.")
         } else {
+            // Resumen de existencias del día y del día anterior, usando únicamente
+            // inventarios incluidos en reportes ya recibidos y guardados localmente.
+            val today = java.text.SimpleDateFormat("yyyy-MM-dd", Locale.US).format(java.util.Date())
+            val yesterdayCalendar = java.util.Calendar.getInstance().apply { add(java.util.Calendar.DAY_OF_YEAR, -1) }
+            val yesterday = java.text.SimpleDateFormat("yyyy-MM-dd", Locale.US).format(yesterdayCalendar.time)
+            fun inventoryFor(date: String): SharedInventoryManager.Snapshot? =
+                reports.asSequence()
+                    .filter { normalizeReportDate(it.date) == date }
+                    .sortedByDescending { reportTimestamp(it) }
+                    .mapNotNull { SharedInventoryManager.inventoryFromReport(it) }
+                    .firstOrNull()
+
+            val todayInventory = inventoryFor(today)
+            val yesterdayInventory = inventoryFor(yesterday)
+            addLabel(
+                content,
+                "INVENTARIO DE HOY",
+                todayInventory?.let { "Tienes ${it.items.size} productos en total. Puedes consultar cuáles son en la sección Inventario." }
+                    ?: "Aún no hay registro de inventario de hoy.",
+                0xFFDDF4E5.toInt()
+            )
+            addLabel(
+                content,
+                "INVENTARIO DE AYER",
+                yesterdayInventory?.let { "Ayer tenías ${it.items.size} productos en total." }
+                    ?: "Ayer no hay un registro de inventario disponible.",
+                0xFFE8F1FB.toInt()
+            )
             reports.forEach { report -> ReportPresentation.addCard(this, content, report) }
         }
         AlertDialog.Builder(this).setTitle("REPORTES · " + name)
