@@ -642,7 +642,7 @@ class MainActivity : AppCompatActivity() {
             }
         val latestByWorker = candidates.groupBy { it.first.workerId }.mapNotNull { (workerId, items) ->
             val latest = items.firstOrNull() ?: return@mapNotNull null
-            val reportName = latest.first.body.replace("\\r", "").lineSequence()
+            val reportName = latest.first.body.replace("\r", "").lineSequence()
                 .firstOrNull { it.trim().startsWith("TRABAJADOR:", true) }
                 ?.substringAfter(":")?.trim().orEmpty()
             val name = OwnerPayrollStore.profile(this, workerId)?.name ?: reportName.ifBlank { workerId }
