@@ -433,7 +433,7 @@ object OwnerPayrollStore {
         a.put(index,requestJson(old.copy(ownerDecision=if(approve)"APPROVE" else "REJECT",ownerDecisionReason=reason.trim())))
         return saveArray(c,REQUESTS,a)
     }
-    fun decisionsPendingSync(c:Context):List<Request> = requests(c).filter{it.status=="PENDING"&&it.ownerDecision.isNotBlank()}
+    fun decisionsPendingSync(c:Context):List<Request> = requests(c).filter{it.status in setOf("PENDING","APPROVED","REJECTED")&&it.ownerDecision.isNotBlank()}
 
     /** Solo la confirmación final del servidor materializa el descuento de nómina. */
     private fun finishApprovedRequest(c:Context,r:Request):Boolean {
