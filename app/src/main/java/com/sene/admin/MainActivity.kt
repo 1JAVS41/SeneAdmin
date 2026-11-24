@@ -11,6 +11,7 @@ import android.os.Bundle
 import android.text.InputType
 import android.view.ViewGroup
 import android.widget.EditText
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.ScrollView
@@ -410,16 +411,33 @@ class MainActivity : AppCompatActivity() {
             elevation = dp(5).toFloat()
         }
         val linked = ServerPairing.isLinked(this)
-        hero.addView(TextView(this).apply {
+        val headerRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+        }
+        val logo = ImageView(this).apply {
+            setImageResource(R.drawable.sene_admin_icon)
+            scaleType = android.widget.ImageView.ScaleType.FIT_CENTER
+            contentDescription = "Logo de SENE"
+        }
+        headerRow.addView(logo, LinearLayout.LayoutParams(dp(68), dp(68)).apply {
+            rightMargin = dp(16)
+        })
+        val headerText = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+        }
+        headerText.addView(TextView(this).apply {
             text = if(linked) ServerPairing.businessName(this@MainActivity) else "SENE ADMIN"
             textSize = 24f; typeface = Typeface.DEFAULT_BOLD; setTextColor(-1)
         })
-        hero.addView(TextView(this).apply {
+        headerText.addView(TextView(this).apply {
             text = if(linked) "Conectado a SENE SERVER" else "Sin conexión con SENE SERVER"
             textSize = 13f; typeface = Typeface.DEFAULT_BOLD
             setTextColor(if(linked) 0xFFDDF4E5.toInt() else 0xFFFFE5D8.toInt())
             setPadding(0, dp(7), 0, 0)
         })
+        headerRow.addView(headerText, LinearLayout.LayoutParams(0, -2, 1f))
+        hero.addView(headerRow)
         root.addView(hero, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(20) })
 
         fun mainOption(icon: String, label: String, detail: String? = null, action: () -> Unit) {
