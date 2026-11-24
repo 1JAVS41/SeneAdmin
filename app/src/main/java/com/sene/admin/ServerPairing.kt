@@ -167,6 +167,7 @@ object AdminPayrollRequestSync {
             syncRunning = true
         }
         Thread {
+            var flushAcks = false
             try {
                 val decisions=JSONArray()
                 OwnerPayrollStore.decisionsPendingSync(app).forEach{r->
@@ -225,6 +226,7 @@ object AdminPayrollRequestSync {
                     if(OwnerPayrollStore.applySyncedAttendance(app,event))acceptedAttendance.put(event.optString("e"))
                 }
                 mergeAcks(p,acceptedAttendance)
+                if (acceptedAttendance.length() > 0) flushAcks = true
                 val serverAck=response.optJSONArray(SeneWireProtocol.FIELD_ATTENDANCE_ACK_CONFIRMATIONS)?:response.optJSONArray("attendance_ack_acks")?:JSONArray()
                 clearAcks(p,serverAck)
                 val inventory=response.optJSONArray("g")?:response.optJSONArray("inventory")?:JSONArray()
@@ -234,12 +236,14 @@ object AdminPayrollRequestSync {
                     if(SharedInventoryManager.applySyncedInventoryEvent(app,event))acceptedInventory.put(event.optString("e"))
                 }
                 mergeInventoryAcks(p,acceptedInventory)
+                if (acceptedInventory.length() > 0) flushAcks = true
                 val inventoryServerAck=response.optJSONArray(SeneWireProtocol.FIELD_INVENTORY_ACK_CONFIRMATIONS)?:response.optJSONArray("inventory_ack_acks")?:JSONArray()
                 clearInventoryAcks(p,inventoryServerAck)
 
                 // Persistir los sobres antes de confirmar su recepción al servidor.
                 val reports=response.optJSONArray("b")?:response.optJSONArray("reports")?:JSONArray()
-                ReportInboxStore.accept(app,reports)
+                val acceptedReports = ReportInboxStore.accept(app,reports)
+                if (acceptedReports.length() > 0) flushAcks = true
                 val reportAckConfirmations=response.optJSONArray(SeneWireProtocol.FIELD_REPORT_ACK_CONFIRMATIONS)?:response.optJSONArray("report_ack_acks")?:JSONArray()
                 ReportInboxStore.acknowledgeAcks(app,reportAckConfirmations)
                 // La pantalla se refresca desde la caché después de que termine toda la consulta.
@@ -254,9 +258,12 @@ object AdminPayrollRequestSync {
                     syncRunning = false
                     completionCallbacks.toList().also { completionCallbacks.clear() }
                 }
-                if (callbacks.isNotEmpty()) {
+                if (callbacks.isNotEmpty() || flushAcks) {
                     android.os.Handler(android.os.Looper.getMainLooper()).post {
                         callbacks.forEach { callback -> try { callback.invoke() } catch (_: Exception) { } }
+                        // Confirma al servidor lo que ya quedó guardado localmente. Así la
+                        // siguiente pulsación de ACTUALIZAR no vuelve a descargar el mismo lote.
+                        if (flushAcks) sync(app, true)
                     }
                 }
             }
