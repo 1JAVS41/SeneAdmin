@@ -172,7 +172,7 @@ object OwnerPayrollStore {
             target.put("closedAt",close).put("closed",SimpleDateFormat("HH:mm",Locale("es","MX")).format(Date(close)))
             if(reason.isNotBlank())target.put("reason",reason)
             if(source.isNotBlank())target.put("source",source)
-            if(status.isNotBlank())target.put("status",status)
+            if(status.isNotBlank()&&status!="WORKING")target.put("status",status)
         }else target.put("closedAt",0L).put("closed","").put("status","WORKING")
         val ordered=(0 until shifts.length()).mapNotNull{shifts.optJSONObject(it)}.sortedBy{it.optLong("startedAt",0L)}
         val normalized=JSONArray()
