@@ -27,8 +27,12 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         // No mostrar la pantalla principal hasta crear el PIN o autenticar al dueño.
-        SeneAdminStore.cleanupIfDue(this)
-        InventoryLocalStore.cleanupIfDue(this)
+        // La limpieza de archivos no debe retrasar el acceso inicial a SeneAdmin.
+        val cleanupContext = applicationContext
+        Thread {
+            try { SeneAdminStore.cleanupIfDue(cleanupContext) } catch (_: Exception) { }
+            try { InventoryLocalStore.cleanupIfDue(cleanupContext) } catch (_: Exception) { }
+        }.start()
         if (!AccessPinStore.hasPin(this)) {
             askCreatePin {
                 accessGranted = true
@@ -114,14 +118,12 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
-        if (accessGranted) {
-            // Procesa primero lo que ya está guardado: también funciona sin conexión.
-            processServerReportEnvelopes()
-            if (ServerPairing.isLinked(this)) {
-                AdminPayrollRequestSync.sync(this, onComplete = {
-                    if (!isFinishing && !isDestroyed) processServerReportEnvelopes()
-                })
-            }
+        // Recuperar datos con el límite interno de 15 minutos; no consultar al servidor
+        // cada vez que el dueño cambia de pantalla. El buzón se procesa tras la descarga.
+        if (ServerPairing.isLinked(this)) {
+            AdminPayrollRequestSync.sync(this, false, onComplete = {
+                if (!isFinishing && !isDestroyed) processServerReportEnvelopes()
+            })
         }
     }
 
@@ -473,11 +475,9 @@ class MainActivity : AppCompatActivity() {
         setContentView(ScrollView(this).apply {
             isFillViewport = true; clipToPadding = false; addView(root)
         })
-        // Todo el procesamiento técnico permanece interno; la pantalla muestra solo accesos esenciales.
+        // Procesar una sola vez lo ya guardado localmente al mostrar Inicio.
+        // La consulta al servidor queda en onResume con límite de 15 minutos.
         processServerReportEnvelopes()
-        if (linked) AdminPayrollRequestSync.sync(this, onComplete = {
-            if (!isFinishing && !isDestroyed) processServerReportEnvelopes()
-        })
     }
 
     private fun updateFromServer() {
@@ -492,7 +492,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showServerReportInbox() {
-        if (ServerPairing.isLinked(this)) AdminPayrollRequestSync.sync(this, onComplete = { if (!isFinishing && !isDestroyed) processServerReportEnvelopes() })
+        // El buzón muestra exclusivamente lo que ya está guardado en el teléfono.
         val events = ReportInboxStore.events(this)
         if (events.length() == 0) {
             AlertDialog.Builder(this).setTitle("REPORTES DEL SERVIDOR")
