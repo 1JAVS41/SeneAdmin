@@ -17,8 +17,19 @@ class PayrollActivity : Activity() {
     private lateinit var root: LinearLayout
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        AdminPayrollRequestSync.sync(this,true)
         val profileId = intent.getStringExtra("profile_id")
+        // La sincronización trabaja en segundo plano. No basta con abrir la pantalla
+        // inmediatamente: al terminar hay que volver a leer asistencia y nómina local.
+        AdminPayrollRequestSync.sync(this, true) {
+            if (!isFinishing && !isDestroyed) {
+                if (!profileId.isNullOrBlank() && OwnerPayrollStore.profile(this, profileId) != null) {
+                    showProfile(profileId)
+                } else {
+                    render()
+                    if (intent.getBooleanExtra("show_requests", false)) showRequests()
+                }
+            }
+        }
         if (profileId.isNullOrBlank()) {
             render()
             if(intent.getBooleanExtra("show_requests",false)) window.decorView.post { showRequests() }
