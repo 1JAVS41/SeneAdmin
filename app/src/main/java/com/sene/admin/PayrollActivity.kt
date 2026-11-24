@@ -638,7 +638,18 @@ class PayrollActivity : Activity() {
             inventoryLabel("INVENTARIO DE HOY", today, true)
             inventoryLabel("INVENTARIO DE AYER", yesterday, false)
 
-            reports.forEach { report -> ReportPresentation.addCard(this, content, report) }
+            // Un solo resumen por fecha. Los paquetes de transporte no son reportes para el patrón.
+            val businessReports = reports.filterNot { report ->
+                val type = report.type.uppercase(Locale.ROOT)
+                type.contains("SYNC") || type == "[AT_SYNC]" || type == "[IN_SYNC]" || type == "[SYNC]"
+            }
+            val dailyReports = businessReports.groupBy { dayKey(it.date) }
+                .filterKeys { it.isNotBlank() }
+                .toSortedMap(compareByDescending<String> { it })
+            dailyReports.values.forEach { dayReports ->
+                val ordered = dayReports.sortedBy { reportTimestampForInventory(it) }
+                ReportPresentation.addCard(this, content, ordered)
+            }
         }
         AlertDialog.Builder(this).setTitle("REPORTES DEL TRABAJADOR")
             .setView(ScrollView(this).apply { addView(content) })
