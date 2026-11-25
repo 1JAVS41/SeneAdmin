@@ -786,11 +786,11 @@ class MainActivity : AppCompatActivity() {
             .setPositiveButton("CERRAR", null).show()
     }
 
-    private fun addLabel(parent:LinearLayout,label:String,value:String,accent:Int=0xFFE8F1FB.toInt()) {
+    private fun addLabel(parent:LinearLayout,label:String,value:String,accent:Int=0xFFE8F1FB.toInt(),foreground:Int=0xFF173C65.toInt()) {
         val card=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL;setPadding(14,10,14,10)
             background=android.graphics.drawable.GradientDrawable().apply{setColor(accent);cornerRadius=18f} }
-        card.addView(TextView(this).apply{text=label.uppercase(Locale.ROOT);textSize=10f;typeface=Typeface.DEFAULT_BOLD;setTextColor(0xFF54708D.toInt())})
-        card.addView(TextView(this).apply{text=value;textSize=14f;typeface=Typeface.DEFAULT_BOLD;setTextColor(0xFF173C65.toInt());setPadding(0,3,0,0)})
+        card.addView(TextView(this).apply{text=label.uppercase(Locale.ROOT);textSize=10f;typeface=Typeface.DEFAULT_BOLD;setTextColor(foreground)})
+        card.addView(TextView(this).apply{text=value;textSize=14f;typeface=Typeface.DEFAULT_BOLD;setTextColor(foreground);setPadding(0,3,0,0)})
         val lp=LinearLayout.LayoutParams(-1,-2);lp.bottomMargin=8;parent.addView(card,lp)
     }
 
@@ -1023,8 +1023,8 @@ class MainActivity : AppCompatActivity() {
         }
         addLabel(content, "Última actualización", latest.updated, 0xFFDCEBFA.toInt())
         if (latest.category != category) addLabel(content, "Origen de la copia", "Inventario maestro", 0xFFDCEBFA.toInt())
-        addLabel(content, "Productos registrados", latest.items.size.toString(), 0xFFDDF4E5.toInt())
-        addLabel(content, "Existencias totales", latest.items.sumOf { it.stock.coerceAtLeast(0).toLong() }.toString(), 0xFFDDF4E5.toInt())
+        addLabel(content, "Productos registrados", latest.items.size.toString(), 0xFFDCEBFA.toInt(), 0xFF0878E8.toInt())
+        addLabel(content, "Existencias totales", latest.items.sumOf { it.stock.coerceAtLeast(0).toLong() }.toString(), 0xFFDDF4E5.toInt(), 0xFF168044.toInt())
         latest.items.sortedBy { it.name.lowercase(Locale.ROOT) }.forEach { item ->
             val card = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
@@ -1034,6 +1034,13 @@ class MainActivity : AppCompatActivity() {
                     cornerRadius = 18f
                 }
             }
+            card.addView(TextView(this).apply {
+                text = "PRODUCTO"
+                textSize = 10f
+                typeface = Typeface.DEFAULT_BOLD
+                setTextColor(0xFFFFB300.toInt())
+                setPadding(0, 0, 0, 3)
+            })
             card.addView(TextView(this).apply {
                 text = item.name
                 textSize = 16f
