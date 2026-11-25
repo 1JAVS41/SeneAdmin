@@ -789,7 +789,7 @@ class MainActivity : AppCompatActivity() {
     private fun addLabel(parent:LinearLayout,label:String,value:String,accent:Int=0xFFE8F1FB.toInt(),foreground:Int=0xFF173C65.toInt()) {
         val card=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL;setPadding(14,10,14,10)
             background=android.graphics.drawable.GradientDrawable().apply{setColor(accent);cornerRadius=18f} }
-        card.addView(TextView(this).apply{text=label.uppercase(Locale.ROOT);textSize=10f;typeface=Typeface.DEFAULT_BOLD;setTextColor(foreground)})
+        card.addView(TextView(this).apply{text=label.uppercase(Locale.ROOT);textSize=10f;typeface=Typeface.DEFAULT_BOLD;setTextColor(0xFF173C65.toInt())})
         card.addView(TextView(this).apply{text=value;textSize=14f;typeface=Typeface.DEFAULT_BOLD;setTextColor(foreground);setPadding(0,3,0,0)})
         val lp=LinearLayout.LayoutParams(-1,-2);lp.bottomMargin=8;parent.addView(card,lp)
     }
@@ -1023,8 +1023,8 @@ class MainActivity : AppCompatActivity() {
         }
         addLabel(content, "Última actualización", latest.updated, 0xFFDCEBFA.toInt())
         if (latest.category != category) addLabel(content, "Origen de la copia", "Inventario maestro", 0xFFDCEBFA.toInt())
-        addLabel(content, "Productos registrados", latest.items.size.toString(), 0xFFB9D8FF.toInt(), 0xFF0878E8.toInt())
-        addLabel(content, "Existencias totales", latest.items.sumOf { it.stock.coerceAtLeast(0).toLong() }.toString(), 0xFFBDECCB.toInt(), 0xFF168044.toInt())
+        addLabel(content, "Productos registrados", latest.items.size.toString(), 0xFF90CAF9.toInt())
+        addLabel(content, "Existencias totales", latest.items.sumOf { it.stock.coerceAtLeast(0).toLong() }.toString(), 0xFFA5D6A7.toInt())
         latest.items.sortedBy { it.name.lowercase(Locale.ROOT) }.forEach { item ->
             val card = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
@@ -1038,10 +1038,10 @@ class MainActivity : AppCompatActivity() {
                 text = "PRODUCTO"
                 textSize = 10f
                 typeface = Typeface.DEFAULT_BOLD
-                setTextColor(0xFFFFB300.toInt())
+                setTextColor(0xFF123B68.toInt())
                 setPadding(8, 4, 8, 4)
                 background = android.graphics.drawable.GradientDrawable().apply {
-                    setColor(0xFFFFF0B3.toInt())
+                    setColor(0xFFFFE082.toInt())
                     cornerRadius = 10f
                 }
             })
