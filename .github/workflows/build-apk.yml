@@ -1,5 +1,6 @@
 name: Compilar APK SENE ADMIN (pruebas)
 # Recompilación solicitada tras configurar los secretos de firma permanente.
+# Recompilación con fondos de etiquetas de inventario corregidos.
 # Recompilar tras auditoría de cursor incremental y decisiones ACK.
 # Recompilar tras la confirmación durable de decisiones del patrón.
 # Auditoría final: recepción incremental, asistencia, inventario y ACK durable de decisiones.
