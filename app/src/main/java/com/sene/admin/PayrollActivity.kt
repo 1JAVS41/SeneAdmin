@@ -427,7 +427,58 @@ class PayrollActivity : Activity() {
         tag("TELÉFONO",p.phone.ifBlank{"No indicado"})
         tag("DÍA DE PAGO",p.payDay.ifBlank{"Sin configurar"})
         tag("SUELDO SEMANAL",OwnerPayrollStore.money(p.weeklySalaryCents))
-        tag("DÍAS LABORALES",p.workDays.ifBlank{"Sin configurar"})
+        run {
+            val attendanceByDay = OwnerPayrollStore.weekAttendance(this, p).associateBy { day ->
+                day.day.lowercase(Locale("es", "MX"))
+                    .replace("á", "a").replace("é", "e").replace("í", "i")
+                    .replace("ó", "o").replace("ú", "u")
+            }
+            fun dayColor(status: String): Int = when (status) {
+                "WORKED", "ADMIN_CLOSED" -> 0xFF168044.toInt()
+                "NOT_WORKED" -> 0xFFD32F2F.toInt()
+                "WORKING", "EARLY_EXIT" -> 0xFFEF8C00.toInt()
+                else -> 0xFF000000.toInt()
+            }
+            val chip = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(14, 10, 14, 10)
+                background = android.graphics.drawable.GradientDrawable().apply {
+                    setColor(0xFFE8F1FB.toInt())
+                    cornerRadius = 18f
+                }
+            }
+            chip.addView(TextView(this).apply {
+                text = "DÍAS LABORALES"
+                textSize = 10f
+                setTextColor(0xFF54708D.toInt())
+                typeface = android.graphics.Typeface.DEFAULT_BOLD
+            })
+            val rawDays = p.workDays.ifBlank { "Sin configurar" }
+            val styledDays = android.text.SpannableString(rawDays)
+            val dayPattern = Regex("domingo|lunes|martes|miércoles|miercoles|jueves|viernes|sábado|sabado", RegexOption.IGNORE_CASE)
+            dayPattern.findAll(rawDays).forEach { match ->
+                val key = match.value.lowercase(Locale("es", "MX"))
+                    .replace("á", "a").replace("é", "e").replace("í", "i")
+                    .replace("ó", "o").replace("ú", "u")
+                val color = dayColor(attendanceByDay[key]?.status.orEmpty())
+                styledDays.setSpan(
+                    android.text.style.ForegroundColorSpan(color),
+                    match.range.first,
+                    match.range.last + 1,
+                    android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
+                )
+            }
+            chip.addView(TextView(this).apply {
+                text = styledDays
+                textSize = 15f
+                setTextColor(0xFF000000.toInt())
+                typeface = android.graphics.Typeface.DEFAULT_BOLD
+                setPadding(0, 3, 0, 0)
+            })
+            val chipParams = LinearLayout.LayoutParams(-1, -2)
+            chipParams.bottomMargin = 8
+            box.addView(chip, chipParams)
+        }
         tag("HORAS DE JORNADA",if(p.hours in 1..24)p.hours.toString()+" horas" else "Por definir")
         OwnerPayrollStore.attendanceSummary(this,id)?.let { summary ->
             tag("ÚLTIMO PERÍODO",summary.period)
