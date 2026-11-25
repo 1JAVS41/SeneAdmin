@@ -881,8 +881,8 @@ class MainActivity : AppCompatActivity() {
         }
         addLabel(content, "TRABAJADOR", workerName, 0xFFDCEBFA.toInt())
         addLabel(content, "ÚLTIMA ACTUALIZACIÓN", snapshot.updated, 0xFFDCEBFA.toInt())
-        addLabel(content, "PRODUCTOS REGISTRADOS", snapshot.items.size.toString(), 0xFFDDF4E5.toInt())
-        addLabel(content, "EXISTENCIAS TOTALES", snapshot.items.sumOf { it.stock.coerceAtLeast(0).toLong() }.toString(), 0xFFDDF4E5.toInt())
+        addLabel(content, "PRODUCTOS REGISTRADOS", snapshot.items.size.toString(), 0xFF90CAF9.toInt())
+        addLabel(content, "EXISTENCIAS TOTALES", snapshot.items.sumOf { it.stock.coerceAtLeast(0).toLong() }.toString(), 0xFFA5D6A7.toInt())
         snapshot.items.sortedBy { it.name.lowercase(Locale.ROOT) }.forEach { item ->
             val card = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
@@ -892,7 +892,7 @@ class MainActivity : AppCompatActivity() {
                     cornerRadius = 18f
                 }
             }
-            addLabel(card, "PRODUCTO", item.name)
+            addLabel(card, "PRODUCTO", item.name, 0xFFFFE082.toInt())
             addLabel(card, "CÓDIGO", item.code)
             addLabel(card, "PRECIO", OwnerPayrollStore.money((item.price * 100.0).toLong()))
             addLabel(card, "EXISTENCIA", item.stock.toString(),
