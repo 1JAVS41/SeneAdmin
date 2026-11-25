@@ -5,7 +5,7 @@ name: Compilar APK SENE ADMIN (pruebas)
 # Auditoría final: recepción incremental, asistencia, inventario y ACK durable de decisiones.
 on:
   push:
-    branches: [main, work/sene-admin-foundation, work/payroll-dashboard-v2, fix/no-nested-inventario-sene-payroll, fix/payroll-zero-net-modern-ui, fix/payroll-attendance-sync-2026-11, feature/loan-consumption-approval-client, review/seneadmin-traffic-ack-20261123]
+    branches: [main, work/sene-admin-foundation, work/payroll-dashboard-v2, fix/no-nested-inventario-sene-payroll, fix/payroll-zero-net-modern-ui, fix/payroll-attendance-sync-2026-11, feature/loan-consumption-approval-client, review/seneadmin-traffic-ack-20261123, feature/seneadmin-inventory-attendance-colors-20261125]
   pull_request:
     branches: [main]
   workflow_dispatch:
