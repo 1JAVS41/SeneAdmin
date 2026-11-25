@@ -501,8 +501,20 @@ class PayrollActivity : Activity() {
                 background=android.graphics.drawable.GradientDrawable().apply { setColor(bg); cornerRadius=16f }
             }
             val header=LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL; gravity=android.view.Gravity.CENTER_VERTICAL }
+            val dayNameColor = when (day.status) {
+                "WORKED", "ADMIN_CLOSED" -> 0xFF168044.toInt()
+                "NOT_WORKED" -> 0xFFD32F2F.toInt()
+                "WORKING", "EARLY_EXIT" -> 0xFFEF8C00.toInt()
+                "NO_RECORD" -> 0xFF000000.toInt()
+                else -> 0xFF000000.toInt()
+            }
             header.addView(TextView(this).apply {
-                text=day.day+" · "+day.date
+                text=day.day
+                textSize=13f; typeface=android.graphics.Typeface.DEFAULT_BOLD
+                setTextColor(dayNameColor)
+            })
+            header.addView(TextView(this).apply {
+                text=" · "+day.date
                 textSize=13f; typeface=android.graphics.Typeface.DEFAULT_BOLD
                 setTextColor(0xFF26364F.toInt())
             },LinearLayout.LayoutParams(0,-2,1f))
