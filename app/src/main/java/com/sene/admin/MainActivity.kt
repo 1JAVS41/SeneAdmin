@@ -1023,8 +1023,8 @@ class MainActivity : AppCompatActivity() {
         }
         addLabel(content, "Última actualización", latest.updated, 0xFFDCEBFA.toInt())
         if (latest.category != category) addLabel(content, "Origen de la copia", "Inventario maestro", 0xFFDCEBFA.toInt())
-        addLabel(content, "Productos registrados", latest.items.size.toString(), 0xFFDCEBFA.toInt(), 0xFF0878E8.toInt())
-        addLabel(content, "Existencias totales", latest.items.sumOf { it.stock.coerceAtLeast(0).toLong() }.toString(), 0xFFDDF4E5.toInt(), 0xFF168044.toInt())
+        addLabel(content, "Productos registrados", latest.items.size.toString(), 0xFFB9D8FF.toInt(), 0xFF0878E8.toInt())
+        addLabel(content, "Existencias totales", latest.items.sumOf { it.stock.coerceAtLeast(0).toLong() }.toString(), 0xFFBDECCB.toInt(), 0xFF168044.toInt())
         latest.items.sortedBy { it.name.lowercase(Locale.ROOT) }.forEach { item ->
             val card = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
@@ -1039,7 +1039,11 @@ class MainActivity : AppCompatActivity() {
                 textSize = 10f
                 typeface = Typeface.DEFAULT_BOLD
                 setTextColor(0xFFFFB300.toInt())
-                setPadding(0, 0, 0, 3)
+                setPadding(8, 4, 8, 4)
+                background = android.graphics.drawable.GradientDrawable().apply {
+                    setColor(0xFFFFF0B3.toInt())
+                    cornerRadius = 10f
+                }
             })
             card.addView(TextView(this).apply {
                 text = item.name
