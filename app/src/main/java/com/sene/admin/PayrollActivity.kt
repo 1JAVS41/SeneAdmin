@@ -409,6 +409,7 @@ class PayrollActivity : Activity() {
         val pay = try { OwnerPayrollStore.createOrGetPayroll(this, id) } catch (_: Exception) { null }
         val entries = OwnerPayrollStore.entries(this, id)
         val allPayrolls = OwnerPayrollStore.payrolls(this, id).sortedByDescending { it.createdAt }
+        val attendanceWeek = OwnerPayrollStore.weekAttendance(this, p)
         val box = LinearLayout(this).apply { orientation = 1; setPadding(16, 12, 16, 12); setBackgroundColor(0xFFF4F7FB.toInt()) }
         fun tag(label:String,value:String,accent:Int?=null) {
             val normalized=label.uppercase(Locale.ROOT)
@@ -421,13 +422,58 @@ class PayrollActivity : Activity() {
             chip.addView(TextView(this).apply { text=value; textSize=15f; setTextColor(foreground); typeface=android.graphics.Typeface.DEFAULT_BOLD; setPadding(0,3,0,0) })
             val lp=LinearLayout.LayoutParams(-1,-2); lp.bottomMargin=8; box.addView(chip,lp)
         }
+        fun tagWeekdays(label:String,value:String,attendance:List<OwnerPayrollStore.DayAttendance>) {
+            val chip=LinearLayout(this).apply {
+                orientation=1
+                setPadding(14,10,14,10)
+                background=android.graphics.drawable.GradientDrawable().apply {
+                    setColor(0xFFE8F1FB.toInt())
+                    cornerRadius=18f
+                }
+            }
+            chip.addView(TextView(this).apply {
+                text=label.uppercase(Locale.ROOT)
+                textSize=10f
+                setTextColor(0xFF54708D.toInt())
+                typeface=android.graphics.Typeface.DEFAULT_BOLD
+            })
+            val styled=android.text.SpannableString(value)
+            fun normalizeDay(raw:String)=java.text.Normalizer.normalize(raw,java.text.Normalizer.Form.NFD)
+                .replace("\\p{Mn}+".toRegex(),"").trim().lowercase(Locale.ROOT)
+            val dayPattern=Regex("(?i)\\b(lunes|martes|miércoles|miercoles|jueves|viernes|sábado|sabado|domingo)\\b")
+            dayPattern.findAll(value).forEach { match ->
+                val status=attendance.firstOrNull { normalizeDay(it.day)==normalizeDay(match.value) }?.status
+                val color=when(status) {
+                    "WORKED","EARLY_EXIT","ADMIN_CLOSED" -> 0xFF176344.toInt()
+                    "NOT_WORKED" -> 0xFFB3261E.toInt()
+                    "WORKING" -> 0xFFE07800.toInt()
+                    else -> 0xFF000000.toInt()
+                }
+                styled.setSpan(
+                    android.text.style.ForegroundColorSpan(color),
+                    match.range.first,
+                    match.range.last+1,
+                    android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
+                )
+            }
+            chip.addView(TextView(this).apply {
+                text=styled
+                textSize=15f
+                setTextColor(0xFF173C65.toInt())
+                typeface=android.graphics.Typeface.DEFAULT_BOLD
+                setPadding(0,3,0,0)
+            })
+            val lp=LinearLayout.LayoutParams(-1,-2)
+            lp.bottomMargin=8
+            box.addView(chip,lp)
+        }
         tag("TRABAJADOR",p.name,0xFFDCEBFA.toInt())
         if(p.createdAt.isNotBlank())tag("FECHA Y HORA DE CREACIÓN DEL PERFIL",p.createdAt)
         if(p.firstShiftAt.isNotBlank())tag("FECHA Y HORA DEL PRIMER INICIO DE TURNO",p.firstShiftAt)
         tag("TELÉFONO",p.phone.ifBlank{"No indicado"})
         tag("DÍA DE PAGO",p.payDay.ifBlank{"Sin configurar"})
         tag("SUELDO SEMANAL",OwnerPayrollStore.money(p.weeklySalaryCents))
-        tag("DÍAS LABORALES",p.workDays.ifBlank{"Sin configurar"})
+        tagWeekdays("DÍAS LABORALES",p.workDays.ifBlank{"Sin configurar"},attendanceWeek)
         tag("HORAS DE JORNADA",if(p.hours in 1..24)p.hours.toString()+" horas" else "Por definir")
         OwnerPayrollStore.attendanceSummary(this,id)?.let { summary ->
             tag("ÚLTIMO PERÍODO",summary.period)
@@ -485,7 +531,7 @@ class PayrollActivity : Activity() {
         } else tag("NÓMINA","Falta configurar el sueldo semanal")
         val attendanceTitle=TextView(this).apply { text="ASISTENCIA DE LA SEMANA"; textSize=14f; typeface=android.graphics.Typeface.DEFAULT_BOLD; setTextColor(0xFF123B68.toInt()); setPadding(2,12,2,8) }
         box.addView(attendanceTitle)
-        OwnerPayrollStore.weekAttendance(this,p).forEach { day ->
+        attendanceWeek.forEach { day ->
             val (bg,accent,statusText)=when(day.status) {
                 "WORKED" -> Triple(0xFFDDF4E5.toInt(),0xFF176344.toInt(),"Jornada completada")
                 "EARLY_EXIT" -> Triple(0xFFFFE8D6.toInt(),0xFF9C4A16.toInt(),"Cierre anticipado")
