@@ -11,6 +11,7 @@ import android.os.Bundle
 import android.text.InputType
 import android.view.ViewGroup
 import android.widget.EditText
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.ScrollView
@@ -410,16 +411,33 @@ class MainActivity : AppCompatActivity() {
             elevation = dp(5).toFloat()
         }
         val linked = ServerPairing.isLinked(this)
-        hero.addView(TextView(this).apply {
+        val headerRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+        }
+        val logo = ImageView(this).apply {
+            setImageResource(R.drawable.sene_admin_icon)
+            scaleType = android.widget.ImageView.ScaleType.FIT_CENTER
+            contentDescription = "Logo de SENE"
+        }
+        headerRow.addView(logo, LinearLayout.LayoutParams(dp(68), dp(68)).apply {
+            rightMargin = dp(16)
+        })
+        val headerText = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+        }
+        headerText.addView(TextView(this).apply {
             text = if(linked) ServerPairing.businessName(this@MainActivity) else "SENE ADMIN"
             textSize = 24f; typeface = Typeface.DEFAULT_BOLD; setTextColor(-1)
         })
-        hero.addView(TextView(this).apply {
+        headerText.addView(TextView(this).apply {
             text = if(linked) "Conectado a SENE SERVER" else "Sin conexión con SENE SERVER"
             textSize = 13f; typeface = Typeface.DEFAULT_BOLD
             setTextColor(if(linked) 0xFFDDF4E5.toInt() else 0xFFFFE5D8.toInt())
             setPadding(0, dp(7), 0, 0)
         })
+        headerRow.addView(headerText, LinearLayout.LayoutParams(0, -2, 1f))
+        hero.addView(headerRow)
         root.addView(hero, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(20) })
 
         fun mainOption(icon: String, label: String, detail: String? = null, action: () -> Unit) {
@@ -768,11 +786,11 @@ class MainActivity : AppCompatActivity() {
             .setPositiveButton("CERRAR", null).show()
     }
 
-    private fun addLabel(parent:LinearLayout,label:String,value:String,accent:Int=0xFFE8F1FB.toInt()) {
+    private fun addLabel(parent:LinearLayout,label:String,value:String,accent:Int=0xFFE8F1FB.toInt(),foreground:Int=0xFF173C65.toInt()) {
         val card=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL;setPadding(14,10,14,10)
             background=android.graphics.drawable.GradientDrawable().apply{setColor(accent);cornerRadius=18f} }
-        card.addView(TextView(this).apply{text=label.uppercase(Locale.ROOT);textSize=10f;typeface=Typeface.DEFAULT_BOLD;setTextColor(0xFF54708D.toInt())})
-        card.addView(TextView(this).apply{text=value;textSize=14f;typeface=Typeface.DEFAULT_BOLD;setTextColor(0xFF173C65.toInt());setPadding(0,3,0,0)})
+        card.addView(TextView(this).apply{text=label.uppercase(Locale.ROOT);textSize=10f;typeface=Typeface.DEFAULT_BOLD;setTextColor(0xFF173C65.toInt())})
+        card.addView(TextView(this).apply{text=value;textSize=14f;typeface=Typeface.DEFAULT_BOLD;setTextColor(foreground);setPadding(0,3,0,0)})
         val lp=LinearLayout.LayoutParams(-1,-2);lp.bottomMargin=8;parent.addView(card,lp)
     }
 
@@ -863,8 +881,8 @@ class MainActivity : AppCompatActivity() {
         }
         addLabel(content, "TRABAJADOR", workerName, 0xFFDCEBFA.toInt())
         addLabel(content, "ÚLTIMA ACTUALIZACIÓN", snapshot.updated, 0xFFDCEBFA.toInt())
-        addLabel(content, "PRODUCTOS REGISTRADOS", snapshot.items.size.toString(), 0xFFDDF4E5.toInt())
-        addLabel(content, "EXISTENCIAS TOTALES", snapshot.items.sumOf { it.stock.coerceAtLeast(0).toLong() }.toString(), 0xFFDDF4E5.toInt())
+        addLabel(content, "PRODUCTOS REGISTRADOS", snapshot.items.size.toString(), 0xFF90CAF9.toInt())
+        addLabel(content, "EXISTENCIAS TOTALES", snapshot.items.sumOf { it.stock.coerceAtLeast(0).toLong() }.toString(), 0xFFA5D6A7.toInt())
         snapshot.items.sortedBy { it.name.lowercase(Locale.ROOT) }.forEach { item ->
             val card = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
@@ -874,7 +892,7 @@ class MainActivity : AppCompatActivity() {
                     cornerRadius = 18f
                 }
             }
-            addLabel(card, "PRODUCTO", item.name)
+            addLabel(card, "PRODUCTO", item.name, 0xFFFFE082.toInt())
             addLabel(card, "CÓDIGO", item.code)
             addLabel(card, "PRECIO", OwnerPayrollStore.money((item.price * 100.0).toLong()))
             addLabel(card, "EXISTENCIA", item.stock.toString(),
@@ -1005,8 +1023,8 @@ class MainActivity : AppCompatActivity() {
         }
         addLabel(content, "Última actualización", latest.updated, 0xFFDCEBFA.toInt())
         if (latest.category != category) addLabel(content, "Origen de la copia", "Inventario maestro", 0xFFDCEBFA.toInt())
-        addLabel(content, "Productos registrados", latest.items.size.toString(), 0xFFDDF4E5.toInt())
-        addLabel(content, "Existencias totales", latest.items.sumOf { it.stock.coerceAtLeast(0).toLong() }.toString(), 0xFFDDF4E5.toInt())
+        addLabel(content, "Productos registrados", latest.items.size.toString(), 0xFF90CAF9.toInt())
+        addLabel(content, "Existencias totales", latest.items.sumOf { it.stock.coerceAtLeast(0).toLong() }.toString(), 0xFFA5D6A7.toInt())
         latest.items.sortedBy { it.name.lowercase(Locale.ROOT) }.forEach { item ->
             val card = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
@@ -1016,6 +1034,17 @@ class MainActivity : AppCompatActivity() {
                     cornerRadius = 18f
                 }
             }
+            card.addView(TextView(this).apply {
+                text = "PRODUCTO"
+                textSize = 10f
+                typeface = Typeface.DEFAULT_BOLD
+                setTextColor(0xFF123B68.toInt())
+                setPadding(8, 4, 8, 4)
+                background = android.graphics.drawable.GradientDrawable().apply {
+                    setColor(0xFFFFE082.toInt())
+                    cornerRadius = 10f
+                }
+            })
             card.addView(TextView(this).apply {
                 text = item.name
                 textSize = 16f
