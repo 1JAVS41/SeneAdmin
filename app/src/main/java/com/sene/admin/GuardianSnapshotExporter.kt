@@ -72,6 +72,8 @@ object GuardianSnapshotExporter {
             .put("damagedProducts", JSONObject()
                 .put("itemCount", damagedProductCount)
                 .put("updatedAt", capturedAt))
+            .put("approvedMovements", approvedMovementSummary(context.applicationContext))
+            .put("payroll", payrollSummary(context.applicationContext))
 
         val connection = (URL(SNAPSHOT_URL).openConnection() as HttpURLConnection)
         return try {
@@ -95,6 +97,57 @@ object GuardianSnapshotExporter {
         } finally {
             connection.disconnect()
         }
+    }
+
+    /**
+     * Solo exporta conteos y unidades por mes; nunca exporta perfiles, descripciones,
+     * códigos de producto, importes ni identificadores de movimientos.
+     */
+    private fun approvedMovementSummary(context: Context): JSONObject {
+        val grouped = OwnerPayrollStore.approvedMovements(context).mapNotNull { movement ->
+            val month = Regex("^(\d{4}-\d{2})-\d{2}").find(movement.date.trim())?.groupValues?.get(1)
+                ?: return@mapNotNull null
+            val type = movement.type.uppercase(Locale.ROOT)
+            if (type != "CASH_DISBURSEMENT" && type != "INVENTORY_CONSUMPTION") return@mapNotNull null
+            Triple(month, type, movement.quantity.coerceAtLeast(0))
+        }.groupBy { it.first }.toSortedMap().toList().takeLast(36)
+        val periods = JSONArray()
+        grouped.forEach { (month, rows) ->
+            periods.put(JSONObject()
+                .put("period", month)
+                .put("cashDisbursementCount", rows.count { it.second == "CASH_DISBURSEMENT" })
+                .put("inventoryConsumptionCount", rows.count { it.second == "INVENTORY_CONSUMPTION" })
+                .put("inventoryConsumptionUnits", rows.filter { it.second == "INVENTORY_CONSUMPTION" }.sumOf { it.third.toLong() }))
+        }
+        return JSONObject().put("periods", periods)
+    }
+
+    /**
+     * Totales de nómina por periodo. Se omiten importes con menos de tres
+     * trabajadores distintos para evitar revelar un sueldo individual.
+     */
+    private fun payrollSummary(context: Context): JSONObject {
+        val rows = OwnerPayrollStore.profiles(context).flatMap { profile ->
+            OwnerPayrollStore.payrolls(context, profile.id).map { profile.id to it }
+        }.filter { it.second.period.matches(Regex("^\d{4}-\d{2}-\d{2}$")) }
+            .groupBy { it.second.period }.toSortedMap().toList().takeLast(36)
+        val periods = JSONArray()
+        rows.forEach { (period, records) ->
+            val employeeCount = records.map { it.first }.distinct().size
+            if (employeeCount < 3) return@forEach
+            periods.put(JSONObject()
+                .put("period", period)
+                .put("employeeCount", employeeCount)
+                .put("payrollCount", records.size)
+                .put("grossCents", records.sumOf { it.second.grossCents.coerceAtLeast(0L) })
+                .put("absenceCents", records.sumOf { it.second.absenceCents.coerceAtLeast(0L) })
+                .put("earlyExitCents", records.sumOf { it.second.earlyExitCents.coerceAtLeast(0L) })
+                .put("loanCents", records.sumOf { it.second.loanCents.coerceAtLeast(0L) })
+                .put("consumptionCents", records.sumOf { it.second.consumptionCents.coerceAtLeast(0L) })
+                .put("netCents", records.sumOf { it.second.netCents.coerceAtLeast(0L) })
+                .put("deliveredCents", records.sumOf { it.second.deliveredCents.coerceAtLeast(0L) }))
+        }
+        return JSONObject().put("periods", periods)
     }
 
     /** Cuenta registros únicos de productos dañados sin exportar códigos, nombres ni motivos. */
