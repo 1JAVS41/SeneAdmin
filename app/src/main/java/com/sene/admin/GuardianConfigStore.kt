@@ -67,6 +67,11 @@ object GuardianConfigStore {
         save(context, current.installationId, current.ingestToken, consent)
     }
 
+    @Synchronized fun updateConsent(context: Context, consent: Boolean) {
+        val current = read(context) ?: throw IllegalStateException("Primero configura la instalación de GUARDIÁN.")
+        save(context, current.installationId, current.ingestToken, consent)
+    }
+
     @Synchronized fun clear(context: Context) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().remove(VALUE).commit()
     }
