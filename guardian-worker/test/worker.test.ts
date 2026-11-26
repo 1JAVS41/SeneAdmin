@@ -84,3 +84,17 @@ test("invalid payload and unauthenticated admin are rejected", async () => {
   const invalid = await call("POST", "/v1/snapshot", { schema: 1, installationId: "bad" }, "x".repeat(48));
   assert.equal(invalid.status, 400);
 });
+
+
+test("snapshot accepts unknown low-stock metric without inventing a threshold", async () => {
+  const id = "44444444-4444-4444-8444-444444444444";
+  const credentials = await provision(id);
+  const body = snapshot(id);
+  body.inventory.categories[0].lowStockCount = null as any;
+  const response = await call("POST", "/v1/snapshot", body, credentials.ingestToken);
+  assert.equal(response.status, 200);
+  const read = await call("GET", "/v1/guardian/business-overview?installationId=" + id, undefined, credentials.museReadToken);
+  assert.equal(read.status, 200);
+  const result = await read.json() as any;
+  assert.equal(result.inventory.categories[0].lowStockCount, null);
+});
