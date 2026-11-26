@@ -61,16 +61,75 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: npx --yes wrangler@4 deploy --config guardian-worker/wrangler.test.toml
-      - name: Smoke-test health and protected MCP endpoint
+      - name: End-to-end test with ephemeral fictional installation
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        working-directory: guardian-worker
         run: |
           set -euo pipefail
+          set +x
           BASE_URL="https://sene-guardian-test.nagavs28.workers.dev"
           HEALTH="$(curl --fail --silent --show-error "$BASE_URL/v1/health")"
-          echo "$HEALTH" | jq -e '.service == "SENE GUARDIAN" and .status == "online" and .api == 1' >/dev/null
-          MCP_STATUS="$(curl --silent --show-error -o /tmp/mcp-auth.json -w "%{http_code}" \
-            -X POST "$BASE_URL/v1/muse/abcdef12-3456-7890-abcd-ef1234567890/mcp" \
-            -H "Content-Type: application/json" \
-            -H "Authorization: Bearer intentionally-invalid-test-token" \
-            --data '{"jsonrpc":"2.0","id":1,"method":"tools/list"}')"
-          test "$MCP_STATUS" = "401"
-          echo "Health endpoint is online; protected MCP endpoint correctly rejects an invalid token."
+          printf '%s' "$HEALTH" | jq -e '.service == "SENE GUARDIAN" and .status == "online" and .api == 1' >/dev/null
+
+          # Create a throwaway admin credential in this runner only.
+          ADMIN_TOKEN="$(openssl rand -hex 32)"
+          printf '%s' "$ADMIN_TOKEN" | npx --yes wrangler@4 secret put GUARDIAN_ADMIN_TOKEN --config wrangler.test.toml >/dev/null
+
+          INSTALLATION_ID="$(cat /proc/sys/kernel/random/uuid)"
+          printf '%s' "$INSTALLATION_ID" > /tmp/sene-test-installation-id
+          curl --fail --silent --show-error -X POST "$BASE_URL/v1/admin/installations" \
+            -H "Authorization: Bearer $ADMIN_TOKEN" -H "Content-Type: application/json" \
+            --data "$(jq -nc --arg id "$INSTALLATION_ID" '{installationId:$id}')" \
+            > /tmp/sene-installation.json
+          INGEST_TOKEN="$(jq -er '.ingestToken' /tmp/sene-installation.json)"
+          MUSE_TOKEN="$(jq -er '.museReadToken' /tmp/sene-installation.json)"
+
+          CAPTURED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          jq -nc --arg id "$INSTALLATION_ID" --arg captured "$CAPTURED_AT" \
+            '{schema:1,installationId:$id,capturedAt:$captured,business:{status:"active"},inventory:{categories:[{category:"INVENTARIO_MAESTRO",itemCount:7,unitsInStock:24,lowStockCount:2,outOfStockCount:1,updatedAt:$captured}]}}' \
+            > /tmp/sene-fictional-snapshot.json
+          curl --fail --silent --show-error -X POST "$BASE_URL/v1/snapshot" \
+            -H "Authorization: Bearer $INGEST_TOKEN" -H "Content-Type: application/json" \
+            --data-binary @/tmp/sene-fictional-snapshot.json > /tmp/sene-snapshot-result.json
+          jq -e '.accepted == true' /tmp/sene-snapshot-result.json >/dev/null
+
+          MCP_URL="$BASE_URL/v1/muse/$INSTALLATION_ID/mcp"
+          curl --fail --silent --show-error -D /tmp/sene-mcp-headers -o /tmp/sene-mcp-init.json \
+            -X POST "$MCP_URL" -H "Authorization: Bearer $MUSE_TOKEN" \
+            -H "Content-Type: application/json" -H "Accept: application/json, text/event-stream" \
+            --data '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"SENE test runner","version":"1.0"}}}'
+          jq -e '.result.protocolVersion == "2025-03-26"' /tmp/sene-mcp-init.json >/dev/null
+          grep -qi '^mcp-protocol-version: 2025-03-26' /tmp/sene-mcp-headers
+
+          curl --fail --silent --show-error -o /tmp/sene-mcp-notify.txt -w '%{http_code}' \
+            -X POST "$MCP_URL" -H "Authorization: Bearer $MUSE_TOKEN" \
+            -H "Content-Type: application/json" -H "Accept: application/json, text/event-stream" \
+            --data '{"jsonrpc":"2.0","method":"notifications/initialized"}' > /tmp/sene-notify-status
+          test "$(cat /tmp/sene-notify-status)" = "202"
+
+          curl --fail --silent --show-error -o /tmp/sene-mcp-tools.json \
+            -X POST "$MCP_URL" -H "Authorization: Bearer $MUSE_TOKEN" \
+            -H "Content-Type: application/json" -H "Accept: application/json, text/event-stream" \
+            --data '{"jsonrpc":"2.0","id":2,"method":"tools/list"}'
+          jq -e '.result.tools | length == 1 and .[0].name == "get_business_overview" and .[0].annotations.readOnlyHint == true' /tmp/sene-mcp-tools.json >/dev/null
+
+          curl --fail --silent --show-error -o /tmp/sene-mcp-call.json \
+            -X POST "$MCP_URL" -H "Authorization: Bearer $MUSE_TOKEN" \
+            -H "Content-Type: application/json" -H "Accept: application/json, text/event-stream" \
+            --data '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"get_business_overview","arguments":{}}}'
+          jq -e '.result.structuredContent.business.status == "active" and .result.structuredContent.inventory.categories[0].itemCount == 7 and (.result.structuredContent | has("installationId") | not)' /tmp/sene-mcp-call.json >/dev/null
+
+          # Revoke the disposable installation and rotate the admin credential.
+          curl --fail --silent --show-error -X POST "$BASE_URL/v1/admin/installations/revoke" \
+            -H "Authorization: Bearer $ADMIN_TOKEN" -H "Content-Type: application/json" \
+            --data "$(jq -nc --arg id "$INSTALLATION_ID" '{installationId:$id}')" \
+            > /tmp/sene-revoke.json
+          jq -e '.revoked == true' /tmp/sene-revoke.json >/dev/null
+          ROTATED_ADMIN_TOKEN="$(openssl rand -hex 32)"
+          printf '%s' "$ROTATED_ADMIN_TOKEN" | npx --yes wrangler@4 secret put GUARDIAN_ADMIN_TOKEN --config wrangler.test.toml >/dev/null
+
+          rm -f /tmp/sene-installation.json /tmp/sene-fictional-snapshot.json /tmp/sene-mcp-*.json /tmp/sene-mcp-headers /tmp/sene-mcp-notify.txt /tmp/sene-notify-status /tmp/sene-snapshot-result.json /tmp/sene-revoke.json /tmp/sene-test-installation-id
+          unset ADMIN_TOKEN INGEST_TOKEN MUSE_TOKEN ROTATED_ADMIN_TOKEN
+          echo "PASS: fictional installation provisioned, fake snapshot ingested, MCP initialized, read-only tool listed and called, and installation revoked."
