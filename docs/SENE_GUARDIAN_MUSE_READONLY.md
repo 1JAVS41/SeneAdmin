@@ -201,3 +201,7 @@ Esto reduce el riesgo de acceso cruzado entre instalaciones, pero NO certifica l
 Se añadieron `guardian-worker/package.json`, `tsconfig.json`, pruebas de seguridad en `guardian-worker/test/worker.test.ts` y el workflow `.github/workflows/guardian-worker-checks.yml`. El workflow ejecuta typecheck y pruebas en cambios del Worker de esta rama. Los casos cubren salud, provisión de dos instalaciones, aislamiento de credenciales, lectura autorizada, rechazo de snapshots antiguos, revocación y rechazo de payload inválido.
 
 **Estado de verificación:** pruebas y workflow ya escritos, pero aún no se confirma que CI haya terminado correctamente. No se ha ejecutado despliegue. Tampoco se ha creado el namespace KV ni secretos Cloudflare.
+
+
+### Resultado inicial de CI (26-11-2026)
+La ejecución más reciente del workflow, asociada al commit `9801280ae007cc8ba13dd5551c703e5067d11f7a`, completó correctamente los pasos **Install dependencies**, **TypeScript check** y **Security tests**. GitHub aún reportaba la ejecución en curso durante la última consulta, por lo que no se registra todavía como workflow completo en estado verde.
