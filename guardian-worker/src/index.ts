@@ -33,6 +33,7 @@ type Snapshot = {
     period: string; employeeCount: number; payrollCount: number; grossCents: number; absenceCents: number;
     earlyExitCents: number; loanCents: number; consumptionCents: number; netCents: number; deliveredCents: number;
   }> };
+  sales?: { periods: Array<{ period: string; workerCount: number; reportCount: number; salesNetCents: number; providerPaymentsCents: number; loansDisbursedCents: number }> };
 };
 type Installation = {
   schema: 1;
@@ -103,7 +104,14 @@ function validSnapshot(value: unknown): value is Snapshot {
         Number.isInteger(p.employeeCount) && p.employeeCount >= 3 && p.employeeCount <= 10000 &&
         Number.isInteger(p.payrollCount) && p.payrollCount >= p.employeeCount && p.payrollCount <= 10000 &&
         [p.grossCents,p.absenceCents,p.earlyExitCents,p.loanCents,p.consumptionCents,p.netCents,p.deliveredCents]
-          .every(n => Number.isSafeInteger(n) && n >= 0))));
+          .every(n => Number.isSafeInteger(n) && n >= 0)))) &&
+    (v.sales === undefined || (
+      Array.isArray(v.sales.periods) && v.sales.periods.length <= 36 &&
+      v.sales.periods.every(p => /^\\d{4}-\\d{2}$/.test(p.period) &&
+        Number.isInteger(p.workerCount) && p.workerCount >= 1 && p.workerCount <= 10000 &&
+        Number.isInteger(p.reportCount) && p.reportCount >= p.workerCount && p.reportCount <= 10000 &&
+        Number.isSafeInteger(p.salesNetCents) &&
+        [p.providerPaymentsCents,p.loansDisbursedCents].every(n => Number.isSafeInteger(n) && n >= 0))));
 }
 async function installation(env: Env, id: string): Promise<Installation | null> {
   return env.GUARDIAN_DATA.get<Installation>(`installation:v1:${id}`, "json");
@@ -239,6 +247,7 @@ export default {
           ...(snapshot.damagedProducts ? { damagedProducts: snapshot.damagedProducts } : {}),
           ...(snapshot.approvedMovements ? { approvedMovements: snapshot.approvedMovements } : {}),
           ...(snapshot.payroll ? { payroll: snapshot.payroll } : {}),
+          ...(snapshot.sales ? { sales: snapshot.sales } : {}),
           dataAgeSeconds: Math.max(0, Math.floor((Date.now() - Date.parse(snapshot.capturedAt)) / 1000)),
         };
       });
