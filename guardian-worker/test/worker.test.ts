@@ -34,6 +34,7 @@ const snapshot = (installationId: string, capturedAt = "2026-11-26T12:00:00.000Z
   installationId,
   capturedAt,
   business: { status: "active" },
+  damagedProducts: { itemCount: 3, updatedAt: capturedAt },
   inventory: { categories: [{
     category: "INVENTARIO_SENE",
     itemCount: 8,
@@ -63,6 +64,7 @@ test("installation credentials are isolated, revocable and snapshots are read-on
   assert.equal(read.status, 200);
   const result = await read.json() as any;
   assert.equal(result.inventory.categories[0].itemCount, 8);
+  assert.equal(result.damagedProducts.itemCount, 3);
 
   const crossRead = await call("GET", "/v1/guardian/business-overview?installationId=" + idA, undefined, b.museReadToken);
   assert.equal(crossRead.status, 401);
