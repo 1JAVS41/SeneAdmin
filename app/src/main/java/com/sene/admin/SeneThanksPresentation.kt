@@ -305,7 +305,8 @@ fun Activity.showSeneThanksPresentation() {
         heading.text = item.title
         body.text = item.body
         next.text = if (index == messages.lastIndex) "FINALIZAR AGRADECIMIENTO" else "SIGUIENTE  →"
-        robot.mood = index\n        robot.contentDescription = "SENE IA animada: ${item.title}"
+        robot.mood = index
+        robot.contentDescription = "SENE IA animada: ${item.title}"
     }
     next.setOnClickListener {
         if (index < messages.lastIndex) {
