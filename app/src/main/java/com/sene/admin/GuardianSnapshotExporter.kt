@@ -101,7 +101,7 @@ object GuardianSnapshotExporter {
     private fun damagedProductCount(context: Context): Int {
         val identities = linkedSetOf<String>()
         SeneAdminStore.reports(context).forEach { report ->
-            val lines = report.body.replace("\\r", "").lines()
+            val lines = report.body.replace("\r", "").lines()
             val marker = lines.indexOfLast { it.trim().equals("PRODUCTOS_DANADOS_SENE_V1", true) }
             if (marker < 0) return@forEach
             for (raw in lines.drop(marker + 1)) {
