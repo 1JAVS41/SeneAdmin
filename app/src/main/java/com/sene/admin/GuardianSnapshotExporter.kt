@@ -74,6 +74,7 @@ object GuardianSnapshotExporter {
                 .put("updatedAt", capturedAt))
             .put("approvedMovements", approvedMovementSummary(context.applicationContext))
             .put("payroll", payrollSummary(context.applicationContext))
+            .put("sales", salesSummary(context.applicationContext))
 
         val connection = (URL(SNAPSHOT_URL).openConnection() as HttpURLConnection)
         return try {
@@ -148,6 +149,63 @@ object GuardianSnapshotExporter {
                 .put("deliveredCents", records.sumOf { it.second.deliveredCents.coerceAtLeast(0L) }))
         }
         return JSONObject().put("periods", periods)
+    }
+
+
+    /**
+     * Totales mensuales de ventas y salidas de caja desde reportes SENE VENTAS.
+     * Usa el último reporte recibido por trabajador y fecha para no sumar varias
+     * capturas acumulativas del mismo turno. Nunca exporta trabajador, producto ni detalle.
+     */
+    private fun salesSummary(context: Context): JSONObject {
+        val latestByShift = linkedMapOf<String, SeneReport>()
+        SeneAdminStore.reports(context).forEach { report ->
+            if (report.type != SeneWireProtocol.SYNC ||
+                !report.body.startsWith("SENE VENTAS  •  REPORTE DE MOVIMIENTOS") ||
+                report.workerId.isBlank() ||
+                !report.date.matches(Regex("^\\d{4}-\\d{2}-\\d{2}$"))) return@forEach
+            val key = report.workerId + "|" + report.date
+            val prior = latestByShift[key]
+            if (prior == null || report.number > prior.number ||
+                (report.number == prior.number && report.time > prior.time)) latestByShift[key] = report
+        }
+        val periods = latestByShift.values.mapNotNull { report ->
+            val month = report.date.take(7)
+            val values = linkedMapOf<String, Long>()
+            var inCashSummary = false
+            report.body.replace("\\r", "").lines().forEach { raw ->
+                val line = raw.trim()
+                if (line.startsWith("ETIQUETA:", true)) {
+                    inCashSummary = line.substringAfter(":").trim().equals("RESUMEN DE CAJA", true)
+                } else if (inCashSummary) {
+                    val separator = line.indexOf(':')
+                    if (separator > 0) {
+                        val label = line.substring(0, separator).trim().uppercase(Locale.ROOT)
+                        val rawValue = line.substring(separator + 1).trim()
+                        val cents = rawValue.replace(",", "").replace("$", "").replace(" ", "").toDoubleOrNull()
+                            ?.let { (it * 100.0).toLong() }
+                        if (cents != null) when {
+                            label.startsWith("VENTAS NETAS") -> values["salesNetCents"] = cents
+                            label == "PAGOS A PROVEEDORES" -> values["providerPaymentsCents"] = cents
+                            label == "PRÉSTAMOS ENTREGADOS" || label == "PRESTAMOS ENTREGADOS" ->
+                                values["loansDisbursedCents"] = cents
+                        }
+                    }
+                }
+            }
+            if (!values.containsKey("salesNetCents")) null else Triple(month, report.workerId, values)
+        }.groupBy { it.first }.toSortedMap().toList().takeLast(36)
+        val out = JSONArray()
+        periods.forEach { (month, rows) ->
+            out.put(JSONObject()
+                .put("period", month)
+                .put("workerCount", rows.map { it.second }.distinct().size)
+                .put("reportCount", rows.size)
+                .put("salesNetCents", rows.sumOf { it.third["salesNetCents"] ?: 0L })
+                .put("providerPaymentsCents", rows.sumOf { (it.third["providerPaymentsCents"] ?: 0L).coerceAtLeast(0L) })
+                .put("loansDisbursedCents", rows.sumOf { (it.third["loansDisbursedCents"] ?: 0L).coerceAtLeast(0L) }))
+        }
+        return JSONObject().put("periods", out)
     }
 
     /** Cuenta registros únicos de productos dañados sin exportar códigos, nombres ni motivos. */
