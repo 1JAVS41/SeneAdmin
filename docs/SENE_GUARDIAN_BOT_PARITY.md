@@ -74,3 +74,27 @@ GUARDIÁN debe reproducir ese flujo, no crear un flujo paralelo ni saltarse vali
 - No se ha modificado la APK, SERVER-SENE, Worker comercial ni D1 comercial.
 - No se ha ejecutado ningún claim, creación de licencia, cobro, aprobación ni renovación.
 - Por tanto, esta especificación registra el alcance aprobado; no afirma que las funciones estén ya implementadas u operativas.
+
+## Regla obligatoria: entrega exclusiva al propietario y decisión manual
+
+La información comercial que Muse reciba de SERVER-SENE se entrega primero y únicamente al propietario autenticado de SeneAdmin. Esta regla se aplica tanto a licencias nuevas como a renovaciones mensuales.
+
+- GUARDIÁN debe avisar al propietario cuando llegue una solicitud y presentar los datos operativos y el código temporal que el servidor haya emitido para esa solicitud.
+- El código se muestra en una vista privada del propietario; no se incorpora a respuestas públicas, mensajes dirigidos al cliente, notificaciones del cliente ni conversaciones compartidas.
+- Muse y GUARDIÁN no envían, reenvían, copian ni revelan el código al cliente por iniciativa propia.
+- El propietario decide fuera de cualquier automatismo cuándo y por qué medio comparte el código con el cliente. La decisión de compartir no equivale a verificar un pago ni cambia el estado comercial.
+- Antes de mostrar un código, GUARDIÁN debe indicar el tipo de solicitud, el folio, el importe/estado de pago disponible y la advertencia de que solo debe compartirse después de verificar el pago, conforme a las reglas actuales de SERVER-SENE.
+- La solicitud y el código deben estar vinculados al mismo folio. No se debe mostrar un código si la correlación no puede verificarse.
+- Los códigos son secretos de corta duración: no se guardan en snapshots generales, historial de analítica, logs, trazas, informes ni almacenamiento persistente en claro. La entrega privada debe usar un canal cifrado y de vida limitada.
+- Las acciones de aprobación, verificación de pago, activación, renovación, canje o cambio de estado siguen fuera de este alcance salvo que el propietario las autorice expresamente y exista un endpoint oficial, específico y auditado. El código que se presenta al propietario no se reclama ni se canjea automáticamente.
+
+### Comportamiento esperado de la interfaz de Muse
+
+1. Aviso privado: «Hay una solicitud de licencia nueva/renovación pendiente».
+2. Vista privada: folio, tipo, fecha, negocio, titular, datos de contacto estrictamente necesarios, importe, estado del pago y código si está disponible.
+3. Advertencia visible: «Comparte este código con el cliente solo cuando hayas verificado el pago».
+4. Ningún botón ni acción de envío automático al cliente. Si en el futuro se implementa una acción de compartir, debe requerir una orden explícita del propietario, mostrar destinatario y contenido antes de enviar y pedir confirmación final.
+
+## Estado de implementación de esta regla
+
+Esta sección define el comportamiento aprobado, no afirma que la entrega privada ya funcione. La auditoría del protocolo encontró que SERVER-SENE actualmente envía el código en claro a Telegram al crear la solicitud y almacena únicamente su hash en D1; no se identificó una API administrativa existente para que Muse recupere el código. Por ello, la integración real requiere un canal de eventos/entrega seguro en el punto de creación de la solicitud y una interfaz de propietario autenticada. No se debe leer D1 directamente, reutilizar el secreto del bot de Telegram ni inventar una ruta de consulta.
