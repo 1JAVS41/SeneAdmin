@@ -15,13 +15,13 @@ import android.widget.Button
 import kotlin.math.sin
 
 private object AdminSeneRobotPainter {
-    fun draw(canvas: Canvas, width: Float, height: Float, phase: Float = 0f) {
+    fun draw(canvas: Canvas, width: Float, height: Float, phase: Float = 0f, mood: Int = 0) {
         val save = canvas.save()
         canvas.scale(width / 200f, height / 240f)
         val bob = sin(phase * Math.PI * 2.0).toFloat()
         val breathing = sin(phase * Math.PI * 4.0).toFloat()
         canvas.translate(0f, bob * 2.8f)
-        canvas.rotate(sin(phase * Math.PI * 2.0).toFloat() * 1.65f + sin(phase * Math.PI * 4.0).toFloat() * .35f, 100f, 120f)
+        val moodTilt = when (mood) { 0 -> -2.2f; 1 -> 3.5f; 2 -> -1.0f; 3 -> 2.8f; 4 -> -3.8f; 5 -> 2.0f; else -> 0f }\n        canvas.rotate(sin(phase * Math.PI * 2.0).toFloat() * 1.65f + sin(phase * Math.PI * 4.0).toFloat() * .35f + moodTilt, 100f, 120f)
         val p = Paint(Paint.ANTI_ALIAS_FLAG)
         fun solid(c: Int) { p.shader = null; p.clearShadowLayer(); p.style = Paint.Style.FILL; p.color = c }
         fun grad(r: RectF, colors: IntArray, horizontal: Boolean = false) {
@@ -91,7 +91,7 @@ private object AdminSeneRobotPainter {
         val eyeScale = if (blinking) .12f else 1f
         val eyeTop = 105f - 14f * eyeScale
         val eyeBottom = 105f + 14f * eyeScale
-        val gaze = sin(phase * Math.PI * 2.0 * 1.5).toFloat() * 3.2f
+        val gaze = when (mood) { 1 -> -3.5f; 2 -> 0f; 3 -> 4.5f; 4 -> sin(phase * Math.PI * 2.0).toFloat() * 5f; else -> sin(phase * Math.PI * 2.0 * 1.5).toFloat() * 3.2f }
         for (x in listOf(70f, 130f)) {
             p.setShadowLayer(14f + (breathing + 1f) * 2f, 0f, 0f, 0xFF36D8FF.toInt())
             grad(RectF(x - 13f, eyeTop, x + 13f, eyeBottom), intArrayOf(0xFFE7FFFF.toInt(), 0xFF48DFFF.toInt(), 0xFF0874C8.toInt()))
@@ -102,7 +102,12 @@ private object AdminSeneRobotPainter {
             }
         }
         p.strokeCap = Paint.Cap.ROUND; p.strokeWidth = 3f; p.color = 0xFF75E8FF.toInt()
-        canvas.drawArc(84f, 111f, 116f, 128f, 12f, 156f, false, p)
+        when (mood) {
+            1, 5 -> canvas.drawArc(84f, 114f, 116f, 130f, 205f, 130f, false, p)
+            3 -> canvas.drawArc(86f, 113f, 114f, 126f, 15f, 145f, false, p)
+            4, 6 -> canvas.drawArc(82f, 108f, 118f, 132f, 5f, 170f, false, p)
+            else -> canvas.drawArc(84f, 111f, 116f, 128f, 12f, 156f, false, p)
+        }
 
         // Microplacas laterales, biseles y tornillos mecanizados de la carcasa.
         p.style = Paint.Style.STROKE; p.strokeWidth = 1.8f
@@ -216,7 +221,7 @@ private class AdminSeneRobotPortrait(context: Context) : View(context) {
     }
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
-        AdminSeneRobotPainter.draw(canvas, width.toFloat(), height.toFloat(), phase)
+        AdminSeneRobotPainter.draw(canvas, width.toFloat(), height.toFloat(), phase, mood)
     }
 }
 
@@ -297,7 +302,7 @@ fun Activity.showSeneThanksPresentation() {
         heading.text = item.title
         body.text = item.body
         next.text = if (index == messages.lastIndex) "FINALIZAR AGRADECIMIENTO" else "SIGUIENTE  →"
-        robot.contentDescription = "SENE IA animada: ${item.title}"
+        robot.mood = index\n        robot.contentDescription = "SENE IA animada: ${item.title}"
     }
     next.setOnClickListener {
         if (index < messages.lastIndex) {
