@@ -139,3 +139,8 @@ Esta regla sustituye cualquier párrafo anterior que asigne la lectura de evento
 El código de desarrollo deposita los eventos en un buzón central HTTPS autenticado. **Todavía no está conectado a WhatsApp Cloud API ni envía mensajes a 3325142147.** No se afirmará entrega por WhatsApp hasta que se configure y autorice la integración oficial de Meta, con credenciales y número empresarial verificados. El buzón central no debe confundirse con el canal administrativo individual.
 
 La credencial central debe crearse y custodiarse fuera de APK, Muse, logs y repositorio. Su hash se configura como secreto del Worker; la credencial original se conserva únicamente en el cliente/proceso central autorizado. No se han creado secretos ni desplegado recursos.
+
+
+### Sustitución del canal comercial legado
+
+La referencia histórica a «paridad con Telegram» no autoriza usar Telegram como canal de licencias. Para activaciones y renovaciones, la ruta comercial en desarrollo se cambió para enviar exclusivamente al buzón central autenticado; SERVER-SENE ya no debe mandar esos datos/códigos a Telegram. La entrega final aprobada es WhatsApp 3325142147, pendiente de integración oficial de Meta. Las notificaciones administrativas de negocio permanecen en el MUSE individual de cada instalación.
