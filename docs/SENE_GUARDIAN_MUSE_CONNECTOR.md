@@ -10,6 +10,8 @@ Endpoint MCP remoto, HTTP Streamable (modo stateless, respuestas JSON), con aute
 
 El token es el `museReadToken` emitido una sola vez por el aprovisionamiento administrativo. Solo debe guardarse en el almacén seguro de credenciales del conector de Muse; nunca en el repositorio, URL, APK, logs o prompts.
 
+La ruta acepta solicitudes servidor-a-servidor sin encabezado `Origin`. Si una solicitud incluye `Origin` (por ejemplo, desde un navegador), se rechaza salvo que el origen exacto esté en la variable opcional `MUSE_ALLOWED_ORIGINS`, separada por comas. No se debe abrir con comodines; agrega únicamente orígenes oficiales confirmados del cliente que se vaya a probar.
+
 ## Herramientas expuestas
 - `get_business_overview`: solo lectura; devuelve estado del negocio, agregados de inventario y fecha de captura.
 - No existen herramientas de escritura, pagos, nómina detallada, licencias, códigos de activación/renovación ni eventos del propietario central en este conector.
