@@ -1,40 +1,55 @@
-# SENE GUARDIAN Worker (staging scaffold)
+# SENE GUARDIÁN Worker
 
-Código fuente de preparación. No está desplegado y no contiene credenciales ni datos reales.
+Código de desarrollo de SENE GUARDIÁN. Esta rama no se ha desplegado en producción ni ha modificado la APK publicada.
 
-## Rutas
-- `GET /v1/health`: estado del servicio, sin información del negocio.
-- `POST /v1/admin/installations`: provisiona una instalación. Requiere `GUARDIAN_ADMIN_TOKEN`. Devuelve una sola vez los tokens independientes de ingestión y lectura Muse.
-- `POST /v1/admin/installations/revoke`: revoca una instalación y elimina su último snapshot. Requiere `GUARDIAN_ADMIN_TOKEN`.
-- `POST /v1/snapshot`: ingestión autenticada con token exclusivo de esa instalación.
-- `GET /v1/guardian/business-overview?installationId=...`: consulta con token Muse exclusivo de esa instalación.
+## Rutas HTTP
 
-## Secretos y aprovisionamiento (pendiente; no realizado)
-Configurar en Cloudflare Worker Secrets:
-- `GUARDIAN_ADMIN_TOKEN`: secreto administrativo aleatorio de al menos 32 bytes. No reutilizar credenciales de SeneAdmin, SENE-VENTAS, GitHub o Railway.
-- No se configuran tokens globales de ingestión ni lectura. La ruta administrativa genera tokens independientes por instalación y guarda sus hashes SHA-256 en KV. Los valores en claro se devuelven una sola vez; quien los pierda debe revocar y volver a provisionar con un flujo de rotación futuro.
+- `GET /v1/health`: estado del servicio; no devuelve datos del negocio.
+- `POST /v1/admin/installations`: aprovisiona una instalación con `GUARDIAN_ADMIN_TOKEN`. Genera credenciales separadas de ingestión y lectura MUSE; los valores en claro se devuelven una sola vez.
+- `POST /v1/admin/installations/revoke`: revoca la instalación y elimina su último snapshot.
+- `POST /v1/snapshot`: recibe el resumen de una instalación con su token exclusivo de ingestión.
+- `GET /v1/guardian/business-overview?installationId=...`: consulta autenticada con el token MUSE exclusivo de esa instalación.
+- `POST /v1/guardian/owner-events`: recibe eventos de licencia cifrados con AES-GCM y autenticados con HMAC.
+- `GET /v1/guardian/owner-events`: recupera eventos únicamente con la credencial central del propietario.
 
-Crear el namespace KV, sustituir el ID placeholder de wrangler.toml y revisar cuotas/retención del plan Free antes de desplegar.
+## Conectores MUSE
 
-## Límite de datos
-El esquema solo acepta identificador aleatorio e independiente, fecha, estado general y conteos agregados de inventario. No acepta nombres de empleados, teléfonos, nómina, asistencia individual, reportes, códigos de producto, precios, claves, licencias ni códigos de vinculación SENE-VENTAS.
+- Cliente: `POST /v1/muse/{installationId}/mcp`. Expone únicamente `get_business_overview`, de solo lectura y limitado a una instalación.
+- Propietario: `POST /v1/muse/owner/mcp`. Expone únicamente `list_owner_license_requests`, autenticado con la credencial central del propietario. No acepta tokens de instalación.
+- Las solicitudes de licencia nueva y renovación pertenecen exclusivamente al MUSE del propietario. No se exponen en el MCP de clientes ni se ejecutan acciones de aprobación, activación o envío.
 
-El identificador de instalación no se deriva de códigos comerciales ni de licencia. KV conserva el snapshot por 35 días y solo la última fotografía. Revocar elimina el snapshot e impide el acceso posterior.
+## Datos agregados
 
-## Verificación automatizada preparada
-- `npm run typecheck`: comprobación TypeScript.
-- `npm test`: pruebas de salud, credenciales por instalación, aislamiento cruzado, rechazo de snapshots antiguos, revocación y validación básica.
-- GitHub Actions ejecuta ambas comprobaciones al cambiar archivos del Worker en esta rama.
+El exportador Android construye una lista permitida de datos y no envía filas personales:
 
-Estas pruebas están escritas, pero todavía no se ha confirmado un resultado exitoso de CI.
+- Inventario: conteos de artículos, unidades y agotados por categoría.
+- Productos dañados: conteo, sin códigos, nombres ni motivos.
+- Movimientos aprobados: conteos y unidades por mes, sin importes ni identificadores.
+- Nómina: totales por periodo; omite los importes si hay menos de tres trabajadores distintos.
+- Ventas: ventas netas, pagos a proveedores y préstamos entregados por mes. Se toma el último reporte de cada trabajador y fecha para no sumar reportes acumulativos repetidos; solo se utilizan reportes SYNC que sigan disponibles en el historial local.
 
-## Bloqueos antes de producción
-1. Añadir y probar rate limiting por instalación, cuotas y auditoría de accesos.
-2. Añadir protección de tamaño de cuerpo en streaming y pruebas automatizadas de payloads grandes.
-3. Probar concurrencia y evitar carreras en el aprovisionamiento.
-4. Ejecutar pruebas locales con Wrangler/Workers runtime: auth separada, revocación, aislamiento cruzado, snapshots antiguos, validación de esquema, TTL y payloads inválidos.
-5. Implementar el exportador Android con consentimiento, revocación y DTO allowlist. No se ha modificado la APK.
-6. Confirmar protocolo real soportado por Muse; esta API REST no es un servidor MCP.
-7. Verificar política de privacidad, consentimiento y coste/cupo gratuito.
+No se exportan nombres, teléfonos, identificadores de trabajadores, productos, códigos comerciales, credenciales ni importes salariales individuales.
 
-No desplegar ni enviar datos reales hasta cerrar todos los bloqueos.
+## Configuración y estado
+
+- `wrangler.toml` conserva un ID de KV placeholder. No sustituirlo ni desplegar hasta revisar la configuración y el plan gratuito.
+- El Worker requiere secretos para administración, cifrado, HMAC y autenticación central del propietario. Los secretos no se guardan en Git ni se solicitan por chat.
+- El productor de SENE VENTAS todavía no envía los eventos cifrados al canal del propietario. Por tanto, el MCP propietario está preparado en código, pero aún no recibe solicitudes reales.
+- El exportador Android está implementado como llamada explícita desde hilo de fondo; no se ha integrado un envío automático ni se ha generado una APK nueva.
+- La URL del exportador sigue apuntando al Worker de pruebas. No es configuración de producción.
+
+## Verificación automatizada
+
+- Worker CI: TypeScript y pruebas automatizadas de aislamiento entre instalaciones, revocación, validación de snapshots, datos agregados y separación del canal del propietario.
+- Android: workflow de compilación Kotlin; no ensambla APK.
+- Las pruebas no sustituyen la verificación de runtime real en Cloudflare ni la validación con datos de una instalación.
+
+## Pendiente antes de producción
+
+1. Completar y probar el productor de eventos de licencia hacia el MUSE del propietario, sin enviar códigos al MUSE cliente.
+2. Verificar secretos, KV, cuotas, retención y límites del plan gratuito.
+3. Integrar consentimiento, configuración y revocación del exportador en el flujo Android.
+4. Probar en entorno de pruebas real el aislamiento, la revocación, la ingestión, los MCP cliente/propietario y el cifrado de eventos.
+5. Confirmar los límites de privacidad y la retención de datos antes de activar el servicio.
+
+No desplegar ni enviar datos reales hasta cerrar estos puntos y comprobar que no generan cargos.
