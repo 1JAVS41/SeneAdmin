@@ -1,7 +1,7 @@
 # SENE GUARDIÁN — conector de solo lectura para Meta Muse
 
 ## Estado
-El Worker aislado `sene-guardian-test` ya está desplegado en Cloudflare y su endpoint `/v1/health` respondió `online` durante la comprobación manual. Esto valida el alojamiento, no una conexión real con Meta Muse. Aún no se ha creado una instalación de prueba ni emitido un `museReadToken`, porque las variables administrativas y las claves de entrega no están configuradas.
+El Worker aislado `sene-guardian-test` está desplegado en Cloudflare. La prueba end-to-end automatizada del 26-11-2026 creó una instalación ficticia, cargó un snapshot ficticio de inventario, inicializó MCP `2025-03-26`, enumeró la herramienta de solo lectura, ejecutó `get_business_overview` y revocó la instalación temporal. Resultado: PASS en GitHub Actions. Los tokens de prueba no se conservaron y el secreto administrativo se rotó al terminar. Esto valida el flujo técnico interno, no una conexión real con Meta Muse.
 
 ## Transporte
 Endpoint MCP remoto, HTTP Streamable (modo stateless, respuestas JSON), con autenticación Bearer por instalación:
