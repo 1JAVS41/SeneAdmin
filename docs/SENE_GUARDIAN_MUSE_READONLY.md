@@ -153,3 +153,33 @@ Este scaffold aún NO es apto para producción:
 7. Falta crear namespace KV y configurar secretos en Cloudflare. No se han creado, no se han compartido secretos y no se ha desplegado nada.
 
 No desplegar hasta cerrar estos bloqueos y verificar que el uso se mantiene dentro del plan gratuito de Cloudflare.
+
+
+## Tercera revisión estática: almacenes y límites de lectura (26-11-2026)
+
+### Inventario compartido
+- `InventoryLocalStore.snapshot(context, category)` lee el archivo cifrado AES-GCM local y construye un snapshot. Es el punto de lectura más acotado, pero devuelve filas completas (código, nombre, precio, existencia, pasillo y estante); GUARDIÁN debe transformarlo inmediatamente a conteos agregados y descartar las filas.
+- `SharedInventoryManager.list(...)` NO es un getter puro: puede migrar el respaldo más reciente a `InventoryLocalStore.save`. También lee archivos SAF, descifra inventarios y requiere la clave del propietario. No debe ser invocado por el exportador automático.
+- `listAvailable(...)` puede delegar a `list` y hereda ese efecto secundario.
+- `save`, `cleanupIfDue`, `cleanupAllIfDue`, `applySyncedInventoryEvent`, `applyApprovedConsumption` y funciones de reportes son explícitamente fuera de los límites de GUARDIÁN.
+- La lectura inicial debe limitarse a `InventoryLocalStore.snapshot`, con un DTO nuevo que solo contenga categoría, fecha, número de artículos, unidades totales, conteo de bajo stock y agotados. La regla exacta de “bajo stock” debe definirse a partir de una regla de negocio existente; no inventar umbrales.
+
+### Nómina y asistencia
+- `OwnerPayrollStore.profiles`, `attendanceSummary`, `weekAttendance`, `entries`, `payrolls`, `requests` y `approvedMovements` exponen datos nominales, salario, importes, fechas, motivos, descripciones, identificadores de trabajador y, en algunos modelos, códigos de producto/cantidades.
+- `weekAttendance` reconstruye días y turnos con fechas y horas; `attendanceSummary` incluye motivos y horas de entrada/salida. No transmitir esos modelos directamente.
+- `createOrGetPayroll`, `markPaid`, `addEntry`, `upsertProfile`, `deleteProfile`, `applySyncedAttendance`, `applyServerDecision`, `queueRequestDecision`, `upsertServerRequest` y demás métodos de importación/aplicación son operaciones de escritura y quedan prohibidos para GUARDIÁN.
+- Las vistas futuras de nómina/asistencia requerirán DTOs agregados separados, consentimiento del patrón y definición explícita de qué métricas puede consultar Muse. No enviar nombres, teléfonos, descripciones libres, motivos ni IDs de personas en la primera fase.
+
+### Historial y reportes
+- `SeneAdminStore.reports(context)` llama a `readArray`, que puede migrar el formato legado y ejecutar limpieza de retención. No es lectura estrictamente pura.
+- `SharedInventoryManager.archivedReports` lee archivos compartidos y descifra contenido con claves; el cuerpo de los reportes puede incluir datos personales, inventario y nómina.
+- `ReportInboxStore` forma parte del canal de eventos/acuse. No reutilizarlo como API de GUARDIÁN.
+- No exponer reportes crudos, archivos cifrados, claves de descifrado ni el almacén de acuses. Una futura búsqueda de reportes debe procesar localmente una lista permitida de campos resumidos y sin identificadores personales.
+
+### Riesgo pendiente detectado en el Worker scaffold
+La primera versión del Worker usa dos secretos globales (`INGEST_TOKEN` y `MUSE_READ_TOKEN`) y acepta un `installationId` suministrado en la consulta. Aunque los secretos no están publicados, este esquema no proporciona autorización por instalación: quien tenga el token de lectura y conozca otro identificador podría consultar esa instalación. El token de ingestión global también permitiría suplantar snapshots de cualquier instalación.
+
+**Bloqueo obligatorio:** sustituir antes de cualquier despliegue los tokens globales por credenciales independientes por instalación, registro de instalaciones autorizadas, revocación inmediata y aislamiento comprobado. La provisión debe requerir un secreto administrativo separado, no reutilizar tokens de SeneAdmin ni credenciales comerciales. Los secretos de cada instalación se almacenarán solo como hashes cuando sea viable y se mostrarán una sola vez al provisionar. Añadir rate limiting y auditoría de accesos. Hasta implementar y probar este control, el Worker scaffold es solo demostrativo y no debe recibir datos reales.
+
+### Decisión de alcance
+Se mantiene la primera fase en **estado del negocio + inventario agregado**, sin nómina nominal, asistencia individual ni reportes. No se añadieron cambios a Kotlin, AndroidManifest, base de datos, APK, servidor comercial o Railway. Esta revisión es estática; no equivale a compilación ni pruebas automatizadas.
