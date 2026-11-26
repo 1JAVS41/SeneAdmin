@@ -1,24 +1,30 @@
 export interface Env {
   GUARDIAN_DATA: KVNamespace;
-  INGEST_TOKEN: string;
-  MUSE_READ_TOKEN: string;
+  GUARDIAN_ADMIN_TOKEN: string;
 }
 
+type Category = {
+  category: "INVENTARIO_MAESTRO" | "INVENTARIO_SENE";
+  itemCount: number;
+  unitsInStock: number;
+  lowStockCount: number;
+  outOfStockCount: number;
+  updatedAt: string;
+};
 type Snapshot = {
   schema: 1;
   installationId: string;
   capturedAt: string;
   business: { status: "active" | "unknown" };
-  inventory: {
-    categories: Array<{
-      category: "INVENTARIO_MAESTRO" | "INVENTARIO_SENE";
-      itemCount: number;
-      unitsInStock: number;
-      lowStockCount: number;
-      outOfStockCount: number;
-      updatedAt: string;
-    }>;
-  };
+  inventory: { categories: Category[] };
+};
+type Installation = {
+  schema: 1;
+  revoked: boolean;
+  ingestTokenHash: string;
+  museTokenHash: string;
+  createdAt: string;
+  revokedAt?: string;
 };
 
 const json = (body: unknown, status = 200) =>
@@ -27,40 +33,110 @@ const json = (body: unknown, status = 200) =>
     headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" },
   });
 
-function authorized(request: Request, token: string): boolean {
-  const supplied = request.headers.get("authorization") ?? "";
-  return supplied.startsWith("Bearer ") && supplied.slice(7) === token && token.length >= 32;
+function bearer(request: Request): string {
+  const value = request.headers.get("authorization") ?? "";
+  return value.startsWith("Bearer ") ? value.slice(7) : "";
 }
-
+function constantTimeEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
+}
+async function sha256(value: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+  return Array.from(new Uint8Array(digest), b => b.toString(16).padStart(2, "0")).join("");
+}
+function randomToken(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(32));
+  return btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+function validId(value: string): boolean {
+  return /^[a-f0-9-]{16,64}$/i.test(value);
+}
 function validSnapshot(value: unknown): value is Snapshot {
   if (!value || typeof value !== "object") return false;
   const v = value as Partial<Snapshot>;
-  if (v.schema !== 1 || typeof v.installationId !== "string" ||
-      !/^[a-f0-9-]{16,64}$/i.test(v.installationId) ||
+  if (v.schema !== 1 || typeof v.installationId !== "string" || !validId(v.installationId) ||
       typeof v.capturedAt !== "string" || !Number.isFinite(Date.parse(v.capturedAt)) ||
-      !v.business || !Array.isArray(v.inventory?.categories)) return false;
-  return v.inventory.categories.length <= 2 && v.inventory.categories.every(c =>
+      !v.business || !["active", "unknown"].includes(v.business.status) ||
+      !Array.isArray(v.inventory?.categories) || v.inventory.categories.length > 2) return false;
+  const seen = new Set<string>();
+  return v.inventory.categories.every(c =>
     (c.category === "INVENTARIO_MAESTRO" || c.category === "INVENTARIO_SENE") &&
+    !seen.has(c.category) && !!seen.add(c.category) &&
     Number.isInteger(c.itemCount) && c.itemCount >= 0 &&
     Number.isInteger(c.unitsInStock) && c.unitsInStock >= 0 &&
     Number.isInteger(c.lowStockCount) && c.lowStockCount >= 0 &&
     Number.isInteger(c.outOfStockCount) && c.outOfStockCount >= 0 &&
+    c.lowStockCount <= c.itemCount && c.outOfStockCount <= c.itemCount &&
     typeof c.updatedAt === "string" && Number.isFinite(Date.parse(c.updatedAt)));
+}
+async function installation(env: Env, id: string): Promise<Installation | null> {
+  return env.GUARDIAN_DATA.get<Installation>(`installation:v1:${id}`, "json");
+}
+async function authorizedFor(env: Env, id: string, token: string, scope: "ingest" | "muse"): Promise<boolean> {
+  if (!token || token.length < 40 || !validId(id)) return false;
+  const record = await installation(env, id);
+  if (!record || record.revoked) return false;
+  const expected = scope === "ingest" ? record.ingestTokenHash : record.museTokenHash;
+  return constantTimeEqual(await sha256(token), expected);
+}
+async function readJson(request: Request, maxBytes: number): Promise<unknown> {
+  const raw = await request.text();
+  if (new TextEncoder().encode(raw).byteLength > maxBytes) throw new Error("payload_too_large");
+  return JSON.parse(raw);
 }
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
-    if (request.method === "GET" && url.pathname === "/v1/health") {
+    if (request.method === "GET" && url.pathname === "/v1/health")
       return json({ service: "SENE GUARDIAN", status: "online", api: 1 });
+
+    if (request.method === "POST" && url.pathname === "/v1/admin/installations") {
+      if (!constantTimeEqual(bearer(request), env.GUARDIAN_ADMIN_TOKEN) || env.GUARDIAN_ADMIN_TOKEN.length < 40)
+        return json({ error: "unauthorized" }, 401);
+      let body: any;
+      try { body = await readJson(request, 2048); } catch { return json({ error: "invalid_json" }, 400); }
+      const id = typeof body?.installationId === "string" ? body.installationId : "";
+      if (!validId(id)) return json({ error: "invalid_installation" }, 400);
+      if (await installation(env, id)) return json({ error: "already_exists" }, 409);
+      const ingestToken = randomToken();
+      const museToken = randomToken();
+      const record: Installation = {
+        schema: 1, revoked: false,
+        ingestTokenHash: await sha256(ingestToken),
+        museTokenHash: await sha256(museToken),
+        createdAt: new Date().toISOString(),
+      };
+      await env.GUARDIAN_DATA.put(`installation:v1:${id}`, JSON.stringify(record));
+      return json({ installationId: id, ingestToken, museReadToken: museToken, shownOnce: true }, 201);
     }
+
+    if (request.method === "POST" && url.pathname === "/v1/admin/installations/revoke") {
+      if (!constantTimeEqual(bearer(request), env.GUARDIAN_ADMIN_TOKEN) || env.GUARDIAN_ADMIN_TOKEN.length < 40)
+        return json({ error: "unauthorized" }, 401);
+      let body: any;
+      try { body = await readJson(request, 2048); } catch { return json({ error: "invalid_json" }, 400); }
+      const id = typeof body?.installationId === "string" ? body.installationId : "";
+      if (!validId(id)) return json({ error: "invalid_installation" }, 400);
+      const record = await installation(env, id);
+      if (!record) return json({ error: "not_found" }, 404);
+      record.revoked = true;
+      record.revokedAt = new Date().toISOString();
+      await env.GUARDIAN_DATA.put(`installation:v1:${id}`, JSON.stringify(record));
+      await env.GUARDIAN_DATA.delete(`snapshot:v1:${id}`);
+      return json({ revoked: true, installationId: id });
+    }
+
     if (request.method === "POST" && url.pathname === "/v1/snapshot") {
-      if (!authorized(request, env.INGEST_TOKEN)) return json({ error: "unauthorized" }, 401);
-      const raw = await request.text();
-      if (raw.length > 32_000) return json({ error: "payload_too_large" }, 413);
       let value: unknown;
-      try { value = JSON.parse(raw); } catch { return json({ error: "invalid_json" }, 400); }
+      try { value = await readJson(request, 32_000); }
+      catch (error) { return json({ error: error instanceof Error && error.message === "payload_too_large" ? "payload_too_large" : "invalid_json" }, error instanceof Error && error.message === "payload_too_large" ? 413 : 400); }
       if (!validSnapshot(value)) return json({ error: "invalid_snapshot" }, 400);
+      if (!await authorizedFor(env, value.installationId, bearer(request), "ingest"))
+        return json({ error: "unauthorized" }, 401);
       const key = `snapshot:v1:${value.installationId}`;
       const prior = await env.GUARDIAN_DATA.get<Snapshot>(key, "json");
       if (prior && Date.parse(value.capturedAt) < Date.parse(prior.capturedAt))
@@ -68,11 +144,11 @@ export default {
       await env.GUARDIAN_DATA.put(key, JSON.stringify(value), { expirationTtl: 60 * 60 * 24 * 35 });
       return json({ accepted: true, capturedAt: value.capturedAt });
     }
+
     if (request.method === "GET" && url.pathname === "/v1/guardian/business-overview") {
-      if (!authorized(request, env.MUSE_READ_TOKEN)) return json({ error: "unauthorized" }, 401);
-      const installationId = url.searchParams.get("installationId") ?? "";
-      if (!/^[a-f0-9-]{16,64}$/i.test(installationId)) return json({ error: "invalid_installation" }, 400);
-      const snapshot = await env.GUARDIAN_DATA.get<Snapshot>(`snapshot:v1:${installationId}`, "json");
+      const id = url.searchParams.get("installationId") ?? "";
+      if (!await authorizedFor(env, id, bearer(request), "muse")) return json({ error: "unauthorized" }, 401);
+      const snapshot = await env.GUARDIAN_DATA.get<Snapshot>(`snapshot:v1:${id}`, "json");
       if (!snapshot) return json({ error: "not_found" }, 404);
       return json({
         capturedAt: snapshot.capturedAt,
