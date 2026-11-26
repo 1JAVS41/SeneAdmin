@@ -98,3 +98,21 @@ La información comercial que Muse reciba de SERVER-SENE se entrega primero y ú
 ## Estado de implementación de esta regla
 
 Esta sección define el comportamiento aprobado, no afirma que la entrega privada ya funcione. La auditoría del protocolo encontró que SERVER-SENE actualmente envía el código en claro a Telegram al crear la solicitud y almacena únicamente su hash en D1; no se identificó una API administrativa existente para que Muse recupere el código. Por ello, la integración real requiere un canal de eventos/entrega seguro en el punto de creación de la solicitud y una interfaz de propietario autenticada. No se debe leer D1 directamente, reutilizar el secreto del bot de Telegram ni inventar una ruta de consulta.
+
+## Canal privado de solicitudes SERVER-SENE (desarrollo)
+
+Se incorporó en esta rama:
+- `guardian-worker/src/owner-delivery.ts`: valida HMAC, timestamp anti-replay, AES-256-GCM, formato y correlación del folio; almacena el sobre cifrado en KV con TTL de 24 horas.
+- `guardian-worker/src/index.ts`: monta POST/GET `/v1/guardian/owner-events`. El GET exige un `ownerReadToken` independiente del token Muse de snapshots.
+- La provisión administrativa de una instalación genera `ownerReadToken` y conserva solo su hash. Se muestra una sola vez junto a los otros tokens de provisión. Revocar la instalación elimina sus eventos pendientes.
+- Se añadió una prueba inicial para la configuración ausente del canal.
+
+El código del evento no se guarda en claro en KV ni se incluye en snapshots. Muse conserva su permiso de lectura de métricas, pero no recibe por ese token el código comercial.
+
+### Requisitos para habilitarlo
+- Configurar `GUARDIAN_DELIVERY_ENC_KEY` (base64 de 32 bytes) y `GUARDIAN_DELIVERY_HMAC_KEY` (base64 de al menos 32 bytes) como secretos independientes, iguales en ambos Workers.
+- Configurar el binding KV `GUARDIAN_DATA` en un entorno de staging.
+- Custodiar `ownerReadToken` en una interfaz privada del propietario; no incluirlo en APK, snapshots, logs, telemetría ni contexto general de Muse.
+- Ejecutar pruebas integrales de provisión, firma, cifrado, aislamiento por instalación, revocación y expiración antes de cualquier despliegue.
+
+La consulta devuelve eventos de la instalación solicitada repetidamente durante su TTL. Todavía falta un acuse de lectura auditado y un outbox de reintentos. Por tanto, no debe considerarse producción-ready.
