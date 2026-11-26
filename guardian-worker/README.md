@@ -21,6 +21,13 @@ El esquema solo acepta identificador aleatorio e independiente, fecha, estado ge
 
 El identificador de instalación no se deriva de códigos comerciales ni de licencia. KV conserva el snapshot por 35 días y solo la última fotografía. Revocar elimina el snapshot e impide el acceso posterior.
 
+## Verificación automatizada preparada
+- `npm run typecheck`: comprobación TypeScript.
+- `npm test`: pruebas de salud, credenciales por instalación, aislamiento cruzado, rechazo de snapshots antiguos, revocación y validación básica.
+- GitHub Actions ejecuta ambas comprobaciones al cambiar archivos del Worker en esta rama.
+
+Estas pruebas están escritas, pero todavía no se ha confirmado un resultado exitoso de CI.
+
 ## Bloqueos antes de producción
 1. Añadir y probar rate limiting por instalación, cuotas y auditoría de accesos.
 2. Añadir protección de tamaño de cuerpo en streaming y pruebas automatizadas de payloads grandes.
