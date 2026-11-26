@@ -183,3 +183,15 @@ La primera versión del Worker usa dos secretos globales (`INGEST_TOKEN` y `MUSE
 
 ### Decisión de alcance
 Se mantiene la primera fase en **estado del negocio + inventario agregado**, sin nómina nominal, asistencia individual ni reportes. No se añadieron cambios a Kotlin, AndroidManifest, base de datos, APK, servidor comercial o Railway. Esta revisión es estática; no equivale a compilación ni pruebas automatizadas.
+
+
+## Endurecimiento del Worker tras la tercera revisión (26-11-2026)
+Se corrigió el primer diseño de credenciales globales:
+- Cada instalación ahora tiene registro propio en KV, con hashes SHA-256 de su token de ingestión y su token de lectura Muse.
+- La ruta administrativa protegida provisiona tokens aleatorios independientes y los devuelve una sola vez.
+- La revocación marca la instalación como revocada y elimina su snapshot.
+- Ingestión y consulta comprueban el token contra el registro de esa instalación; el identificador por sí solo no autoriza.
+- La lectura del cuerpo HTTP ahora impone el límite mientras consume el stream, no después de cargar todo el cuerpo.
+- El README fue actualizado con rutas, secretos y bloqueos pendientes.
+
+Esto reduce el riesgo de acceso cruzado entre instalaciones, pero NO certifica la API para producción. Siguen pendientes pruebas automatizadas/locales, rate limiting, auditoría formal, prueba de concurrencia en aprovisionamiento, exportador Android y compatibilidad Muse. El Worker sigue sin desplegarse, sin namespace KV y sin secretos configurados. No se enviaron datos reales.
