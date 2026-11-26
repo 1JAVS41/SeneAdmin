@@ -84,3 +84,37 @@ test("Muse MCP rejects browser origins unless explicitly allowlisted", async () 
   const serverToServer = await worker.fetch(post(message), env);
   assert.equal(serverToServer.status, 200);
 });
+
+test("Muse MCP negotiates initialization, answers ping, and accepts initialized notification", async () => {
+  const env = await envFor();
+  const init = await worker.fetch(post({
+    jsonrpc: "2.0", id: "init-1", method: "initialize",
+    params: { protocolVersion: "2025-03-26", capabilities: {}, clientInfo: { name: "Muse compatibility test", version: "1.0" } }
+  }), env);
+  const initBody = await init.json() as any;
+  assert.equal(initBody.result.protocolVersion, "2025-03-26");
+  assert.equal(init.headers.get("mcp-protocol-version"), "2025-03-26");
+  const ping = await worker.fetch(post({ jsonrpc: "2.0", id: "ping-1", method: "ping" }), env);
+  assert.deepEqual((await ping.json() as any).result, {});
+  const notification = await worker.fetch(post({ jsonrpc: "2.0", method: "notifications/initialized" }), env);
+  assert.equal(notification.status, 202);
+  assert.equal(await notification.text(), "");
+});
+
+test("Muse MCP returns method-not-allowed for unsupported GET transport", async () => {
+  const env = await envFor();
+  const response = await worker.fetch(new Request("https://guardian.test/v1/muse/" + id + "/mcp", {
+    method: "GET", headers: { authorization: "Bearer " + token }
+  }), env);
+  assert.equal(response.status, 405);
+});
+
+test("Muse MCP rejects arguments that could attempt to change installation scope", async () => {
+  const env = await envFor();
+  const response = await worker.fetch(post({
+    jsonrpc: "2.0", id: "scope-1", method: "tools/call",
+    params: { name: "get_business_overview", arguments: { installationId: "ffffffff-ffff-ffff-ffff-ffffffffffff" } }
+  }), env);
+  const body = await response.json() as any;
+  assert.equal(body.error.code, -32602);
+});
