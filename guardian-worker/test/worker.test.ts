@@ -35,6 +35,8 @@ const snapshot = (installationId: string, capturedAt = "2026-11-26T12:00:00.000Z
   capturedAt,
   business: { status: "active" },
   damagedProducts: { itemCount: 3, updatedAt: capturedAt },
+  approvedMovements: { periods: [{ period: "2026-11", cashDisbursementCount: 1, inventoryConsumptionCount: 2, inventoryConsumptionUnits: 4 }] },
+  payroll: { periods: [{ period: "2026-11-23", employeeCount: 3, payrollCount: 3, grossCents: 300000, absenceCents: 0, earlyExitCents: 0, loanCents: 0, consumptionCents: 0, netCents: 300000, deliveredCents: 200000 }] },
   inventory: { categories: [{
     category: "INVENTARIO_SENE",
     itemCount: 8,
@@ -65,6 +67,8 @@ test("installation credentials are isolated, revocable and snapshots are read-on
   const result = await read.json() as any;
   assert.equal(result.inventory.categories[0].itemCount, 8);
   assert.equal(result.damagedProducts.itemCount, 3);
+  assert.equal(result.approvedMovements.periods[0].inventoryConsumptionUnits, 4);
+  assert.equal(result.payroll.periods[0].employeeCount, 3);
 
   const crossRead = await call("GET", "/v1/guardian/business-overview?installationId=" + idA, undefined, b.museReadToken);
   assert.equal(crossRead.status, 401);
@@ -87,6 +91,15 @@ test("invalid payload and unauthenticated admin are rejected", async () => {
   assert.equal(invalid.status, 400);
 });
 
+
+test("snapshot rejects payroll totals that could expose an individual salary", async () => {
+  const id = "66666666-6666-4666-8666-666666666666";
+  const credentials = await provision(id);
+  const body = snapshot(id);
+  body.payroll.periods[0].employeeCount = 1;
+  const response = await call("POST", "/v1/snapshot", body, credentials.ingestToken);
+  assert.equal(response.status, 400);
+});
 
 test("snapshot rejects invalid damaged-product aggregate", async () => {
   const id = "55555555-5555-4555-8555-555555555555";
