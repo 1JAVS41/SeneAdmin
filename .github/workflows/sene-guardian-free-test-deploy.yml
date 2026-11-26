@@ -83,6 +83,7 @@ jobs:
             fi
             ROTATED_ADMIN_TOKEN="$(openssl rand -hex 32)"
             printf '%s' "$ROTATED_ADMIN_TOKEN" | npx --yes wrangler@4 secret put GUARDIAN_ADMIN_TOKEN --config wrangler.test.toml >/dev/null 2>&1 || true
+            npx --yes wrangler@4 deploy --config wrangler.test.toml >/dev/null 2>&1 || true
             unset ADMIN_TOKEN INGEST_TOKEN MUSE_TOKEN ROTATED_ADMIN_TOKEN
             rm -f /tmp/sene-installation.json /tmp/sene-fictional-snapshot.json /tmp/sene-mcp-*.json /tmp/sene-mcp-headers /tmp/sene-mcp-notify.txt /tmp/sene-notify-status /tmp/sene-snapshot-result.json /tmp/sene-revoke.json /tmp/sene-cleanup.json
           }
@@ -95,6 +96,10 @@ jobs:
           echo "Stage 2/7: installing temporary admin credential"
           ADMIN_TOKEN="$(openssl rand -hex 32)"
           printf '%s' "$ADMIN_TOKEN" | npx --yes wrangler@4 secret put GUARDIAN_ADMIN_TOKEN --config wrangler.test.toml >/dev/null 2>&1
+          npx --yes wrangler@4 secret list --config wrangler.test.toml > /tmp/sene-secret-list.txt
+          grep -q 'GUARDIAN_ADMIN_TOKEN' /tmp/sene-secret-list.txt
+          npx --yes wrangler@4 deploy --config wrangler.test.toml >/dev/null 2>&1
+          sleep 2
 
           echo "Stage 3/7: provisioning fictional installation"
           INSTALLATION_ID="$(cat /proc/sys/kernel/random/uuid)"
