@@ -103,8 +103,8 @@ Esta sección define el comportamiento aprobado, no afirma que la entrega privad
 
 Se incorporó en esta rama:
 - `guardian-worker/src/owner-delivery.ts`: valida HMAC, timestamp anti-replay, AES-256-GCM, formato y correlación del folio; almacena el sobre cifrado en KV con TTL de 24 horas.
-- `guardian-worker/src/index.ts`: monta POST/GET `/v1/guardian/owner-events`. El GET exige un `ownerReadToken` independiente del token Muse de snapshots.
-- La provisión administrativa de una instalación genera `ownerReadToken` y conserva solo su hash. Se muestra una sola vez junto a los otros tokens de provisión. Revocar la instalación elimina sus eventos pendientes.
+- `guardian-worker/src/index.ts`: monta POST/GET `/v1/guardian/owner-events`. El GET exige una credencial central independiente de los tokens de instalación y Muse.
+- La provisión administrativa solo genera tokens de ingestión y lectura Muse por instalación; no genera credenciales comerciales centrales. Revocar la instalación elimina sus eventos pendientes.
 - Se añadió una prueba inicial para la configuración ausente del canal.
 
 El código del evento no se guarda en claro en KV ni se incluye en snapshots. Muse conserva su permiso de lectura de métricas, pero no recibe por ese token el código comercial.
@@ -112,7 +112,30 @@ El código del evento no se guarda en claro en KV ni se incluye en snapshots. Mu
 ### Requisitos para habilitarlo
 - Configurar `GUARDIAN_DELIVERY_ENC_KEY` (base64 de 32 bytes) y `GUARDIAN_DELIVERY_HMAC_KEY` (base64 de al menos 32 bytes) como secretos independientes, iguales en ambos Workers.
 - Configurar el binding KV `GUARDIAN_DATA` en un entorno de staging.
-- Custodiar `ownerReadToken` en una interfaz privada del propietario; no incluirlo en APK, snapshots, logs, telemetría ni contexto general de Muse.
+- Configurar la credencial central de propietario por un mecanismo seguro de secretos; nunca incluirla en APK, snapshots, logs, telemetría ni contexto general de Muse.
 - Ejecutar pruebas integrales de provisión, firma, cifrado, aislamiento por instalación, revocación y expiración antes de cualquier despliegue.
 
 La consulta devuelve eventos de la instalación solicitada repetidamente durante su TTL. Todavía falta un acuse de lectura auditado y un outbox de reintentos. Por tanto, no debe considerarse producción-ready.
+
+
+## Corrección obligatoria: dos canales separados (26-11-2026)
+
+Esta regla sustituye cualquier párrafo anterior que asigne la lectura de eventos de licencia a una instalación o a su token `ownerReadToken`.
+
+### Canal central de licencias
+- Todas las solicitudes nuevas y renovaciones, sus datos y sus códigos pertenecen exclusivamente al propietario central.
+- El destinatario final autorizado es WhatsApp **3325142147**. Ningún número configurado por una instalación puede recibir esos datos ni códigos.
+- La recepción técnica de desarrollo usa una credencial central independiente (`GUARDIAN_OWNER_CENTRAL_TOKEN_HASH` en el Worker receptor). No depende de tokens de ingestión, Muse o instalación.
+- La consulta central no acepta `installationId` como filtro de acceso ni como destino. `installation_id` se conserva solo como metadato de correlación.
+- Revocar una instalación no elimina ni reasigna los eventos comerciales centrales.
+- El código permanece cifrado en KV, con TTL de 24 horas, y solo se descifra tras autenticar el canal central.
+
+### Canal administrativo por instalación
+- Cada instalación conserva sus propios tokens de ingestión y lectura Muse para sus datos de negocio.
+- Inventarios, ventas, reportes, trabajadores, asistencia, nómina y alertas administrativas se mantienen aislados por instalación.
+- Muse de una instalación no puede consultar eventos ni códigos comerciales.
+
+### Límite de transporte actual
+El código de desarrollo deposita los eventos en un buzón central HTTPS autenticado. **Todavía no está conectado a WhatsApp Cloud API ni envía mensajes a 3325142147.** No se afirmará entrega por WhatsApp hasta que se configure y autorice la integración oficial de Meta, con credenciales y número empresarial verificados. El buzón central no debe confundirse con el canal administrativo individual.
+
+La credencial central debe crearse y custodiarse fuera de APK, Muse, logs y repositorio. Su hash se configura como secreto del Worker; la credencial original se conserva únicamente en el cliente/proceso central autorizado. No se han creado secretos ni desplegado recursos.
