@@ -203,6 +203,8 @@ private object AdminSeneRobotPainter {
 
 private class AdminSeneRobotPortrait(context: Context) : View(context) {
     private var phase = 0f
+    var mood: Int = 0
+        set(value) { field = value.coerceIn(0, 6); invalidate() }
     private var animator: ValueAnimator? = null
     init { setLayerType(LAYER_TYPE_SOFTWARE, null) }
     override fun onAttachedToWindow() {
