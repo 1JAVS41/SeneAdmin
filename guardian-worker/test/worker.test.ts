@@ -37,6 +37,7 @@ const snapshot = (installationId: string, capturedAt = "2026-11-26T12:00:00.000Z
   damagedProducts: { itemCount: 3, updatedAt: capturedAt },
   approvedMovements: { periods: [{ period: "2026-11", cashDisbursementCount: 1, inventoryConsumptionCount: 2, inventoryConsumptionUnits: 4 }] },
   payroll: { periods: [{ period: "2026-11-23", employeeCount: 3, payrollCount: 3, grossCents: 300000, absenceCents: 0, earlyExitCents: 0, loanCents: 0, consumptionCents: 0, netCents: 300000, deliveredCents: 200000 }] },
+  sales: { periods: [{ period: "2026-11", workerCount: 3, reportCount: 3, salesNetCents: 1250000, providerPaymentsCents: 250000, loansDisbursedCents: 50000 }] },
   inventory: { categories: [{
     category: "INVENTARIO_SENE",
     itemCount: 8,
@@ -69,6 +70,7 @@ test("installation credentials are isolated, revocable and snapshots are read-on
   assert.equal(result.damagedProducts.itemCount, 3);
   assert.equal(result.approvedMovements.periods[0].inventoryConsumptionUnits, 4);
   assert.equal(result.payroll.periods[0].employeeCount, 3);
+  assert.equal(result.sales.periods[0].salesNetCents, 1250000);
 
   const crossRead = await call("GET", "/v1/guardian/business-overview?installationId=" + idA, undefined, b.museReadToken);
   assert.equal(crossRead.status, 401);
