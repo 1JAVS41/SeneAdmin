@@ -116,3 +116,40 @@ Revisada la rama de trabajo, sin modificar archivos de la APK ni desplegar servi
 
 ### Decisión técnica provisional
 La vía más segura para la primera entrega es una fase inicial de **inventario agregado y estado del negocio**, sin datos nominales de empleados ni contenido completo de reportes. Ventas, nómina y asistencia se incorporarán solo después de crear parsers de reportes verificados y DTOs minimizados. La API remota no debe aceptar comandos ni ofrecer endpoints de escritura sobre datos comerciales.
+
+
+## Primera base de API independiente creada (26-11-2026)
+Se añadió un scaffold de Cloudflare Worker en `guardian-worker/` dentro de esta rama. Es código fuente de preparación, no está desplegado ni conectado a datos reales.
+
+Archivos:
+- `guardian-worker/src/index.ts`: endpoints iniciales de salud, recepción de snapshots agregados y consulta de resumen de negocio.
+- `guardian-worker/wrangler.toml`: configuración con namespace KV pendiente de crear.
+- `guardian-worker/README.md`: configuración pendiente, límites de seguridad y pasos de validación.
+
+### Allowlist inicial
+El esquema solo acepta:
+- Identificador aleatorio e independiente de instalación.
+- Fecha de captura y estado general.
+- Conteos agregados por categoría de inventario: artículos, unidades, bajo stock y agotados.
+
+No acepta empleados, teléfonos, nómina, asistencia individual, cuerpos de reportes, códigos de producto, precios, claves, licencias ni códigos de vinculación SENE-VENTAS.
+
+### Controles implementados en el scaffold
+- Autenticación Bearer separada para ingestión y consulta de Muse.
+- Límite de cuerpo de 32 KB.
+- Validación estricta de esquema y fechas.
+- Rechazo de snapshots más antiguos.
+- Retención KV de 35 días y reemplazo de la última fotografía.
+- API de consulta GET; no existe endpoint de escritura comercial.
+
+### Bloqueos antes de pruebas/despliegue
+Este scaffold aún NO es apto para producción:
+1. Falta un registro de instalaciones autorizadas y revocación por instalación; el identificador no debe bastar por sí solo para autorizar acceso.
+2. Falta rate limiting por instalación y controles de abuso.
+3. Falta prueba automatizada de autenticación, aislamiento, datos malformados, tamaño, orden temporal y revocación.
+4. Falta probar localmente con Wrangler y revisar compatibilidad TypeScript/runtime.
+5. Falta implementar el exportador Android con consentimiento y DTO allowlist; no se ha modificado la APK.
+6. Falta confirmar si Muse admite este mecanismo/API o exige MCP/otro protocolo; el Worker actual no es un servidor MCP.
+7. Falta crear namespace KV y configurar secretos en Cloudflare. No se han creado, no se han compartido secretos y no se ha desplegado nada.
+
+No desplegar hasta cerrar estos bloqueos y verificar que el uso se mantiene dentro del plan gratuito de Cloudflare.
