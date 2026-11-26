@@ -33,8 +33,8 @@ const envFor = async () => {
   await kv.put("snapshot:v1:" + id, JSON.stringify(snapshot));
   return { GUARDIAN_DATA: kv, GUARDIAN_ADMIN_TOKEN: "unused", GUARDIAN_DELIVERY_ENC_KEY: "", GUARDIAN_DELIVERY_HMAC_KEY: "", GUARDIAN_OWNER_CENTRAL_TOKEN_HASH: "" } as any;
 };
-const post = (body: unknown, auth = token) => new Request("https://guardian.test/v1/muse/" + id + "/mcp", {
-  method: "POST", headers: { "content-type": "application/json", authorization: "Bearer " + auth }, body: JSON.stringify(body)
+const post = (body: unknown, auth = token, origin?: string) => new Request("https://guardian.test/v1/muse/" + id + "/mcp", {
+  method: "POST", headers: { "content-type": "application/json", authorization: "Bearer " + auth, ...(origin ? { origin } : {}) }, body: JSON.stringify(body)
 });
 
 test("Muse MCP initializes and exposes only one read-only administrative tool", async () => {
@@ -70,4 +70,17 @@ test("Muse MCP rejects writes and unknown methods", async () => {
   const env = await envFor();
   const write = await worker.fetch(post({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "delete_inventory", arguments: {} } }), env);
   assert.equal((await write.json() as any).error.code, -32602);
+});
+
+
+test("Muse MCP rejects browser origins unless explicitly allowlisted", async () => {
+  const env = await envFor();
+  const message = { jsonrpc: "2.0", id: 7, method: "tools/list" };
+  const blocked = await worker.fetch(post(message, token, "https://untrusted.example"), env);
+  assert.equal(blocked.status, 403);
+  env.MUSE_ALLOWED_ORIGINS = "https://muse.example, https://admin.example";
+  const allowed = await worker.fetch(post(message, token, "https://muse.example"), env);
+  assert.equal(allowed.status, 200);
+  const serverToServer = await worker.fetch(post(message), env);
+  assert.equal(serverToServer.status, 200);
 });
