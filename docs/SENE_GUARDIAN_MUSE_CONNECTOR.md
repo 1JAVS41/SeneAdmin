@@ -1,12 +1,12 @@
 # SENE GUARDIÁN — conector de solo lectura para Meta Muse
 
 ## Estado
-Implementación en rama de desarrollo. No desplegada. No hay credenciales ni recursos Cloudflare configurados por este cambio.
+El Worker aislado `sene-guardian-test` ya está desplegado en Cloudflare y su endpoint `/v1/health` respondió `online` durante la comprobación manual. Esto valida el alojamiento, no una conexión real con Meta Muse. Aún no se ha creado una instalación de prueba ni emitido un `museReadToken`, porque las variables administrativas y las claves de entrega no están configuradas.
 
 ## Transporte
 Endpoint MCP remoto, HTTP Streamable (modo stateless, respuestas JSON), con autenticación Bearer por instalación:
 
-`POST https://<worker-host>/v1/muse/<installationId>/mcp`
+`POST https://sene-guardian-test.nagavs28.workers.dev/v1/muse/<installationId>/mcp`
 
 El token es el `museReadToken` emitido una sola vez por el aprovisionamiento administrativo. Solo debe guardarse en el almacén seguro de credenciales del conector de Muse; nunca en el repositorio, URL, APK, logs o prompts.
 
@@ -28,4 +28,4 @@ En una cuenta/país donde Muse permita conectores personalizados, pedirle que cr
 La disponibilidad de Muse y el método exacto de autenticación/transportes admitidos deben confirmarse en la cuenta real antes de considerarlo operativo. Meta indica que los conectores personalizados se configuran desde Muse y que sus credenciales se guardan en Secure Credentials Store. Meta advierte que no revisa esos conectores: conceder solo el alcance mínimo.
 
 ## Límites de costo y despliegue
-El código no llama a una API de modelos ni a WhatsApp. El conector por sí solo no genera cargos de IA; el alojamiento está sujeto a límites y condiciones del plan gratuito de Cloudflare. No desplegar ni crear recursos/secrets sin autorización explícita.
+El código no llama a una API de modelos ni a WhatsApp. El conector por sí solo no genera cargos de IA; el alojamiento está sujeto a límites y condiciones del plan gratuito de Cloudflare. La URL anterior es exclusivamente de pruebas. No usar datos reales, no configurar producción y no crear recursos de pago. La creación de instalaciones y emisión de tokens requiere primero preparar secretos administrativos de prueba de forma segura.
