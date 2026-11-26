@@ -84,3 +84,35 @@ Revisada la rama de trabajo, sin modificar archivos de la APK ni desplegar servi
 - Diseñar DTO allowlist y pruebas unitarias con datos ficticios.
 - Preparar el Worker localmente en la rama de trabajo, sin secretos, sin despliegue y sin enlazar almacenamiento de pago.
 - Verificar por separado los límites de la cuenta Cloudflare y la compatibilidad documentada de conectores de Muse antes de cualquier conexión real.
+
+
+## Segunda revisión estática: almacenes y flujo Android (26-11-2026)
+
+### Inventario cifrado
+- `InventoryLocalStore.snapshot(context, category)` es el getter más directo para obtener una fotografía local; solo acepta `INVENTARIO_MAESTRO` e `INVENTARIO_SENE`.
+- La fotografía contiene código, nombre, precio, existencias, pasillo y estante. Para Muse, el DTO inicial debe omitir códigos internos y ubicación detallada salvo necesidad funcional; agregar conteos, existencias bajas y agotados.
+- `InventoryLocalStore.snapshot` descifra internamente con Android Keystore y no modifica el almacén. El exportador debe usarlo, nunca abrir el archivo cifrado ni llamar a `save` o `cleanupIfDue`.
+
+### Reportes
+- `SeneAdminStore.reports(context)` descifra el historial y devuelve `SeneReport` con `workerId`, fecha, hora, número, tipo y cuerpo. La lectura puede ejecutar limpieza de retención internamente; por ello no es un getter estrictamente libre de efectos secundarios y no debe usarse desde GUARDIÁN sin separar primero una lectura pura.
+- `SeneReportReader` requiere la clave del propietario para formato v1; `SeneReportV2Reader` usa la clave privada RSA local para formato v2. GUARDIÁN nunca recibirá ni exportará esas claves.
+- Los cuerpos de reporte son texto estructurado y pueden contener datos personales/financieros. No se enviarán cuerpos completos a la API; primero se deben definir parsers por tipo y DTOs agregados, con pruebas sobre muestras ficticias.
+- `SharedInventoryManager.archivedReports` depende de una clave del propietario y puede leer carpetas compartidas. No se usará como mecanismo automático de exportación de GUARDIÁN.
+
+### Nómina y asistencia
+- `OwnerPayrollStore` expone getters para perfiles, movimientos, solicitudes, nóminas, entradas y resúmenes de asistencia. Los modelos mezclan importes, nombres, teléfonos, IDs internos y estados operativos.
+- Antes de exponer datos se debe especificar qué campos agregados se necesitan por función, evitar nombres/teléfonos/IDs, y verificar cálculos y periodos con pruebas. La primera fase no debe transmitir nómina individual ni historial individual.
+- No llamar a `createOrGetPayroll`, `syncUnrecordedAbsences`, `markPaid`, `addEntry`, `upsertProfile`, `queueRequestDecision`, `applyServerDecision` ni otros métodos que creen, modifiquen o confirmen datos.
+
+### Ciclo de vida Android
+- `MainActivity.onCreate` programa sincronización administrativa existente y ejecuta limpieza de almacenes en segundo plano; `onResume` puede iniciar `AdminPayrollRequestSync` cuando la instalación está vinculada.
+- No se añadirá una tarea permanente, servicio foreground, polling ni un segundo scheduler. La futura sincronización GUARDIÁN deberá ser explícita, con intervalo moderado y límites, y no bloquear ni alterar el flujo actual.
+- El manifiesto ya declara permiso INTERNET; no existe actualmente una pantalla de consentimiento, control de alcance ni revocación GUARDIÁN.
+
+### Dependencias y pruebas
+- El proyecto usa Android Gradle Plugin 8.7.3, Kotlin 2.0.21, SDK 35, Java 17 y WorkManager 2.10.1. No se encontró configuración de dependencias de pruebas en el archivo de módulo revisado.
+- Antes de tocar APK se deben añadir pruebas unitarias/instrumentadas para parsers, agregaciones, autorización, revocación, límites de payload y aislamiento entre instalaciones.
+- La revisión sigue siendo estática y no incluye compilación ni ejecución de pruebas. No se ha modificado código Kotlin ni AndroidManifest.
+
+### Decisión técnica provisional
+La vía más segura para la primera entrega es una fase inicial de **inventario agregado y estado del negocio**, sin datos nominales de empleados ni contenido completo de reportes. Ventas, nómina y asistencia se incorporarán solo después de crear parsers de reportes verificados y DTOs minimizados. La API remota no debe aceptar comandos ni ofrecer endpoints de escritura sobre datos comerciales.
