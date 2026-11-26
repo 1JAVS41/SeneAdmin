@@ -88,6 +88,15 @@ test("invalid payload and unauthenticated admin are rejected", async () => {
 });
 
 
+test("snapshot rejects invalid damaged-product aggregate", async () => {
+  const id = "55555555-5555-4555-8555-555555555555";
+  const credentials = await provision(id);
+  const body = snapshot(id);
+  body.damagedProducts.itemCount = -1;
+  const response = await call("POST", "/v1/snapshot", body, credentials.ingestToken);
+  assert.equal(response.status, 400);
+});
+
 test("snapshot accepts unknown low-stock metric without inventing a threshold", async () => {
   const id = "44444444-4444-4444-8444-444444444444";
   const credentials = await provision(id);
