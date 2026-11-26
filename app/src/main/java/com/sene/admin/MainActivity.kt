@@ -419,6 +419,9 @@ class MainActivity : AppCompatActivity() {
             setImageResource(R.drawable.sene_admin_icon)
             scaleType = android.widget.ImageView.ScaleType.FIT_CENTER
             contentDescription = "Logo de SENE"
+            isClickable = true
+            isFocusable = true
+            setOnClickListener { showSeneThanksPresentation() }
         }
         headerRow.addView(logo, LinearLayout.LayoutParams(dp(68), dp(68)).apply {
             rightMargin = dp(16)
