@@ -107,7 +107,7 @@ function validSnapshot(value: unknown): value is Snapshot {
           .every(n => Number.isSafeInteger(n) && n >= 0)))) &&
     (v.sales === undefined || (
       Array.isArray(v.sales.periods) && v.sales.periods.length <= 36 &&
-      v.sales.periods.every(p => /^\\d{4}-\\d{2}$/.test(p.period) &&
+      v.sales.periods.every(p => /^\d{4}-\d{2}$/.test(p.period) &&
         Number.isInteger(p.workerCount) && p.workerCount >= 1 && p.workerCount <= 10000 &&
         Number.isInteger(p.reportCount) && p.reportCount >= p.workerCount && p.reportCount <= 10000 &&
         Number.isSafeInteger(p.salesNetCents) &&
