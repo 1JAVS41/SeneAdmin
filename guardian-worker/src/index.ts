@@ -83,9 +83,30 @@ async function authorizedFor(env: Env, id: string, token: string, scope: "ingest
   return constantTimeEqual(await sha256(token), expected);
 }
 async function readJson(request: Request, maxBytes: number): Promise<unknown> {
-  const raw = await request.text();
-  if (new TextEncoder().encode(raw).byteLength > maxBytes) throw new Error("payload_too_large");
-  return JSON.parse(raw);
+  const declared = Number(request.headers.get("content-length") ?? "0");
+  if (declared > maxBytes) throw new Error("payload_too_large");
+  if (!request.body) throw new Error("invalid_json");
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > maxBytes) {
+        await reader.cancel();
+        throw new Error("payload_too_large");
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
+  return JSON.parse(new TextDecoder().decode(bytes));
 }
 
 export default {
