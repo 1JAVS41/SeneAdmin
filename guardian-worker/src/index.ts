@@ -7,6 +7,7 @@ export interface Env {
   GUARDIAN_DELIVERY_ENC_KEY: string;
   GUARDIAN_DELIVERY_HMAC_KEY: string;
   GUARDIAN_OWNER_CENTRAL_TOKEN_HASH: string;
+  MUSE_ALLOWED_ORIGINS?: string;
 }
 
 type Category = {
@@ -174,6 +175,14 @@ export default {
     const museMatch = url.pathname.match(/^\/v1\/muse\/([a-f0-9-]{16,64})\/mcp$/i);
     if (museMatch) {
       if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
+      // MCP Streamable HTTP security: reject browser origins unless explicitly allowlisted.
+      // Server-to-server clients that omit Origin remain supported.
+      const origin = request.headers.get("origin");
+      if (origin !== null) {
+        const allowedOrigins = (env.MUSE_ALLOWED_ORIGINS ?? "")
+          .split(",").map(value => value.trim()).filter(Boolean);
+        if (!allowedOrigins.includes(origin)) return json({ error: "forbidden_origin" }, 403);
+      }
       const id = museMatch[1];
       if (!await authorizedFor(env, id, bearer(request), "muse")) return json({ error: "unauthorized" }, 401);
       return handleMuseMcp(request, id, async () => {
