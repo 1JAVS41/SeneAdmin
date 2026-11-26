@@ -29,7 +29,7 @@ test("central owner credential reads events across installations without install
   const kv = new MemoryKV();
   const centralToken = "central-owner-test-token-with-more-than-forty-characters";
   const encryptionBytes = crypto.getRandomValues(new Uint8Array(32));
-  const encryptionKey = await crypto.subtle.importKey("raw", encryptionBytes, "AES-GCM", false, ["encrypt"]);
+  const encryptionKey = await crypto.subtle.importKey("raw", encryptionBytes as unknown as BufferSource, "AES-GCM", false, ["encrypt"]);
   const eventId = "123e4567-e89b-42d3-a456-426614174000";
   const event = {
     event_id: eventId, event_type: "activation.requested",
@@ -42,8 +42,8 @@ test("central owner credential reads events across installations without install
   };
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const ciphertext = new Uint8Array(await crypto.subtle.encrypt(
-    { name: "AES-GCM", iv, additionalData: new TextEncoder().encode(eventId), tagLength: 128 },
-    encryptionKey, new TextEncoder().encode(JSON.stringify(event))));
+    { name: "AES-GCM", iv: iv as unknown as BufferSource, additionalData: new TextEncoder().encode(eventId) as unknown as BufferSource, tagLength: 128 },
+    encryptionKey, new TextEncoder().encode(JSON.stringify(event)) as unknown as BufferSource));
   await kv.put("owner-event:v1:" + eventId, JSON.stringify({
     eventId, installationId: event.installation_id, timestamp: String(Math.floor(Date.now() / 1000)),
     iv: b64url(iv), ciphertext: b64url(ciphertext)
