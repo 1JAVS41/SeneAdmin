@@ -26,6 +26,13 @@ type Snapshot = {
   business: { status: "active" | "unknown" };
   inventory: { categories: Category[] };
   damagedProducts?: { itemCount: number; updatedAt: string };
+  approvedMovements?: { periods: Array<{
+    period: string; cashDisbursementCount: number; inventoryConsumptionCount: number; inventoryConsumptionUnits: number;
+  }> };
+  payroll?: { periods: Array<{
+    period: string; employeeCount: number; payrollCount: number; grossCents: number; absenceCents: number;
+    earlyExitCents: number; loanCents: number; consumptionCents: number; netCents: number; deliveredCents: number;
+  }> };
 };
 type Installation = {
   schema: 1;
@@ -83,7 +90,20 @@ function validSnapshot(value: unknown): value is Snapshot {
     (v.damagedProducts === undefined || (
       Number.isInteger(v.damagedProducts.itemCount) && v.damagedProducts.itemCount >= 0 &&
       v.damagedProducts.itemCount <= 100000 &&
-      typeof v.damagedProducts.updatedAt === "string" && Number.isFinite(Date.parse(v.damagedProducts.updatedAt))));
+      typeof v.damagedProducts.updatedAt === "string" && Number.isFinite(Date.parse(v.damagedProducts.updatedAt)))) &&
+    (v.approvedMovements === undefined || (
+      Array.isArray(v.approvedMovements.periods) && v.approvedMovements.periods.length <= 36 &&
+      v.approvedMovements.periods.every(p => /^\d{4}-\d{2}$/.test(p.period) &&
+        Number.isSafeInteger(p.cashDisbursementCount) && p.cashDisbursementCount >= 0 &&
+        Number.isSafeInteger(p.inventoryConsumptionCount) && p.inventoryConsumptionCount >= 0 &&
+        Number.isSafeInteger(p.inventoryConsumptionUnits) && p.inventoryConsumptionUnits >= 0))) &&
+    (v.payroll === undefined || (
+      Array.isArray(v.payroll.periods) && v.payroll.periods.length <= 36 &&
+      v.payroll.periods.every(p => /^\d{4}-\d{2}-\d{2}$/.test(p.period) &&
+        Number.isInteger(p.employeeCount) && p.employeeCount >= 3 && p.employeeCount <= 10000 &&
+        Number.isInteger(p.payrollCount) && p.payrollCount >= p.employeeCount && p.payrollCount <= 10000 &&
+        [p.grossCents,p.absenceCents,p.earlyExitCents,p.loanCents,p.consumptionCents,p.netCents,p.deliveredCents]
+          .every(n => Number.isSafeInteger(n) && n >= 0))));
 }
 async function installation(env: Env, id: string): Promise<Installation | null> {
   return env.GUARDIAN_DATA.get<Installation>(`installation:v1:${id}`, "json");
@@ -217,6 +237,8 @@ export default {
           business: snapshot.business,
           inventory: snapshot.inventory,
           ...(snapshot.damagedProducts ? { damagedProducts: snapshot.damagedProducts } : {}),
+          ...(snapshot.approvedMovements ? { approvedMovements: snapshot.approvedMovements } : {}),
+          ...(snapshot.payroll ? { payroll: snapshot.payroll } : {}),
           dataAgeSeconds: Math.max(0, Math.floor((Date.now() - Date.parse(snapshot.capturedAt)) / 1000)),
         };
       });
@@ -247,6 +269,8 @@ export default {
         business: snapshot.business,
         inventory: snapshot.inventory,
         ...(snapshot.damagedProducts ? { damagedProducts: snapshot.damagedProducts } : {}),
+          ...(snapshot.approvedMovements ? { approvedMovements: snapshot.approvedMovements } : {}),
+          ...(snapshot.payroll ? { payroll: snapshot.payroll } : {}),
         dataAgeSeconds: Math.max(0, Math.floor((Date.now() - Date.parse(snapshot.capturedAt)) / 1000)),
       });
     }
