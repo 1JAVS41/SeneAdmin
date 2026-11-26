@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - feature/sene-guardian-muse-readonly
+      - feature/guardian-damaged-products-readonly
     paths:
       - "guardian-worker/**"
       - ".github/workflows/guardian-worker-ci.yml"
