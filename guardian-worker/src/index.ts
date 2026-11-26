@@ -25,6 +25,7 @@ type Snapshot = {
   capturedAt: string;
   business: { status: "active" | "unknown" };
   inventory: { categories: Category[] };
+  damagedProducts?: { itemCount: number; updatedAt: string };
 };
 type Installation = {
   schema: 1;
@@ -78,7 +79,11 @@ function validSnapshot(value: unknown): value is Snapshot {
     (c.lowStockCount === null || (Number.isInteger(c.lowStockCount) && c.lowStockCount >= 0 && c.lowStockCount <= c.itemCount)) &&
     Number.isInteger(c.outOfStockCount) && c.outOfStockCount >= 0 &&
     c.outOfStockCount <= c.itemCount &&
-    typeof c.updatedAt === "string" && Number.isFinite(Date.parse(c.updatedAt)));
+    typeof c.updatedAt === "string" && Number.isFinite(Date.parse(c.updatedAt))) &&
+    (v.damagedProducts === undefined || (
+      Number.isInteger(v.damagedProducts.itemCount) && v.damagedProducts.itemCount >= 0 &&
+      v.damagedProducts.itemCount <= 100000 &&
+      typeof v.damagedProducts.updatedAt === "string" && Number.isFinite(Date.parse(v.damagedProducts.updatedAt))));
 }
 async function installation(env: Env, id: string): Promise<Installation | null> {
   return env.GUARDIAN_DATA.get<Installation>(`installation:v1:${id}`, "json");
@@ -211,6 +216,7 @@ export default {
           capturedAt: snapshot.capturedAt,
           business: snapshot.business,
           inventory: snapshot.inventory,
+          ...(snapshot.damagedProducts ? { damagedProducts: snapshot.damagedProducts } : {}),
           dataAgeSeconds: Math.max(0, Math.floor((Date.now() - Date.parse(snapshot.capturedAt)) / 1000)),
         };
       });
@@ -240,6 +246,7 @@ export default {
         capturedAt: snapshot.capturedAt,
         business: snapshot.business,
         inventory: snapshot.inventory,
+        ...(snapshot.damagedProducts ? { damagedProducts: snapshot.damagedProducts } : {}),
         dataAgeSeconds: Math.max(0, Math.floor((Date.now() - Date.parse(snapshot.capturedAt)) / 1000)),
       });
     }
