@@ -105,7 +105,7 @@ object GuardianSnapshotExporter {
      */
     private fun approvedMovementSummary(context: Context): JSONObject {
         val grouped = OwnerPayrollStore.approvedMovements(context).mapNotNull { movement ->
-            val month = Regex("^(\d{4}-\d{2})-\d{2}").find(movement.date.trim())?.groupValues?.get(1)
+            val month = Regex("^(\\d{4}-\\d{2})-\\d{2}").find(movement.date.trim())?.groupValues?.get(1)
                 ?: return@mapNotNull null
             val type = movement.type.uppercase(Locale.ROOT)
             if (type != "CASH_DISBURSEMENT" && type != "INVENTORY_CONSUMPTION") return@mapNotNull null
@@ -129,7 +129,7 @@ object GuardianSnapshotExporter {
     private fun payrollSummary(context: Context): JSONObject {
         val rows = OwnerPayrollStore.profiles(context).flatMap { profile ->
             OwnerPayrollStore.payrolls(context, profile.id).map { profile.id to it }
-        }.filter { it.second.period.matches(Regex("^\d{4}-\d{2}-\d{2}$")) }
+        }.filter { it.second.period.matches(Regex("^\\d{4}-\\d{2}-\\d{2}$")) }
             .groupBy { it.second.period }.toSortedMap().toList().takeLast(36)
         val periods = JSONArray()
         rows.forEach { (period, records) ->
