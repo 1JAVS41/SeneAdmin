@@ -82,8 +82,6 @@ object GuardianSnapshotExporter {
             connection.outputStream.use { it.write(payload.toString().toByteArray(Charsets.UTF_8)) }
 
             val status = connection.responseCode
-            val responseStream = if (status in 200..299) connection.inputStream else connection.errorStream
-            val responseText = responseStream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
             if (status == HttpURLConnection.HTTP_OK) {
                 ExportResult(true, status, "Captura agregada aceptada por SENE GUARDIÁN.")
             } else {
