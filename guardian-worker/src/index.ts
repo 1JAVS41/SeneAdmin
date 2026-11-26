@@ -14,7 +14,7 @@ type Category = {
   category: "INVENTARIO_MAESTRO" | "INVENTARIO_SENE";
   itemCount: number;
   unitsInStock: number;
-  lowStockCount: number;
+  lowStockCount: number | null;
   outOfStockCount: number;
   updatedAt: string;
 };
@@ -74,9 +74,9 @@ function validSnapshot(value: unknown): value is Snapshot {
     !seen.has(c.category) && !!seen.add(c.category) &&
     Number.isInteger(c.itemCount) && c.itemCount >= 0 &&
     Number.isInteger(c.unitsInStock) && c.unitsInStock >= 0 &&
-    Number.isInteger(c.lowStockCount) && c.lowStockCount >= 0 &&
+    (c.lowStockCount === null || (Number.isInteger(c.lowStockCount) && c.lowStockCount >= 0 && c.lowStockCount <= c.itemCount)) &&
     Number.isInteger(c.outOfStockCount) && c.outOfStockCount >= 0 &&
-    c.lowStockCount <= c.itemCount && c.outOfStockCount <= c.itemCount &&
+    c.outOfStockCount <= c.itemCount &&
     typeof c.updatedAt === "string" && Number.isFinite(Date.parse(c.updatedAt)));
 }
 async function installation(env: Env, id: string): Promise<Installation | null> {
