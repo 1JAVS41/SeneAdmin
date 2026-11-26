@@ -62,8 +62,13 @@ class GuardianSettingsActivity : Activity() {
         root.addView(save)
         save.setOnClickListener {
             try {
-                GuardianConfigStore.save(this, installation.text.toString().trim(), token.text.toString().trim(), consent.isChecked)
-                token.text?.clear()
+                val enteredToken = token.text.toString().trim()
+                if (enteredToken.isNotEmpty()) {
+                    GuardianConfigStore.save(this, installation.text.toString().trim(), enteredToken, consent.isChecked)
+                    token.text?.clear()
+                } else {
+                    GuardianConfigStore.updateConsent(this, consent.isChecked)
+                }
                 status.text = if (consent.isChecked) "Configuración protegida. El envío manual está autorizado." else
                     "Configuración protegida. El envío está desactivado porque no hay consentimiento."
                 Toast.makeText(this, "Configuración guardada de forma cifrada.", Toast.LENGTH_SHORT).show()
