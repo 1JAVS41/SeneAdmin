@@ -78,7 +78,7 @@ export async function handleOwnerDelivery(request: Request, env: OwnerDeliveryEn
       if (!verified) return json({ error: "invalid_signature" }, 401);
       plaintext = await crypto.subtle.decrypt(
         { name: "AES-GCM", iv: fromB64(body.iv) as unknown as BufferSource, additionalData: enc.encode(eventId) as unknown as BufferSource, tagLength: 128 },
-        await aesKey(env.GUARDIAN_DELIVERY_ENC_KEY), fromB64(body.ciphertext));
+        await aesKey(env.GUARDIAN_DELIVERY_ENC_KEY), fromB64(body.ciphertext) as unknown as BufferSource);
     } catch { return json({ error: "invalid_envelope" }, 400); }
     let event: any;
     try { event = JSON.parse(dec.decode(plaintext)); } catch { return json({ error: "invalid_event" }, 400); }
@@ -104,7 +104,7 @@ export async function handleOwnerDelivery(request: Request, env: OwnerDeliveryEn
         try {
           const plaintext = await crypto.subtle.decrypt(
             { name: "AES-GCM", iv: fromB64(stored.iv) as unknown as BufferSource, additionalData: enc.encode(stored.eventId) as unknown as BufferSource, tagLength: 128 },
-            await aesKey(env.GUARDIAN_DELIVERY_ENC_KEY), fromB64(stored.ciphertext));
+            await aesKey(env.GUARDIAN_DELIVERY_ENC_KEY), fromB64(stored.ciphertext) as unknown as BufferSource);
           const event = JSON.parse(dec.decode(plaintext));
           if (validEvent(event, stored.eventId) && event.installation_id === stored.installationId) events.push(event);
         } catch { /* malformed ciphertext is never returned */ }
