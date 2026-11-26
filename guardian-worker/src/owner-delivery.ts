@@ -1,7 +1,7 @@
 /**
  * Encrypted owner-event transport for SERVER-SENE request codes.
- * KV stores ciphertext only. Plaintext is returned only through the separately
- * provisioned ownerReadToken route in index.ts (never through the Muse snapshot token).
+ * KV stores ciphertext only. Plaintext is returned only through the centrally
+ * authenticated owner route in index.ts, never through an installation/Muse token.
  */
 export interface OwnerDeliveryEnv {
   GUARDIAN_DATA: KVNamespace;
@@ -21,12 +21,12 @@ function json(data: unknown, status = 200): Response {
 async function hmacKey(value: string): Promise<CryptoKey> {
   const raw = fromB64(value);
   if (raw.byteLength < 32) throw new Error("invalid_hmac_key");
-  return crypto.subtle.importKey("raw", raw, { name: "HMAC", hash: "SHA-256" }, false, ["verify"]);
+  return crypto.subtle.importKey("raw", raw as unknown as BufferSource, { name: "HMAC", hash: "SHA-256" }, false, ["verify"]);
 }
 async function aesKey(value: string): Promise<CryptoKey> {
   const raw = fromB64(value);
   if (raw.byteLength !== 32) throw new Error("invalid_aes_key");
-  return crypto.subtle.importKey("raw", raw, "AES-GCM", false, ["decrypt"]);
+  return crypto.subtle.importKey("raw", raw as unknown as BufferSource, "AES-GCM", false, ["decrypt"]);
 }
 function validUuid(value: unknown): value is string {
   return typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
@@ -74,10 +74,10 @@ export async function handleOwnerDelivery(request: Request, env: OwnerDeliveryEn
     let plaintext: ArrayBuffer;
     try {
       const verified = await crypto.subtle.verify("HMAC", await hmacKey(env.GUARDIAN_DELIVERY_HMAC_KEY),
-        fromB64(signature), enc.encode(canonical));
+        fromB64(signature) as unknown as BufferSource, enc.encode(canonical) as unknown as BufferSource);
       if (!verified) return json({ error: "invalid_signature" }, 401);
       plaintext = await crypto.subtle.decrypt(
-        { name: "AES-GCM", iv: fromB64(body.iv), additionalData: enc.encode(eventId), tagLength: 128 },
+        { name: "AES-GCM", iv: fromB64(body.iv) as unknown as BufferSource, additionalData: enc.encode(eventId) as unknown as BufferSource, tagLength: 128 },
         await aesKey(env.GUARDIAN_DELIVERY_ENC_KEY), fromB64(body.ciphertext));
     } catch { return json({ error: "invalid_envelope" }, 400); }
     let event: any;
@@ -103,7 +103,7 @@ export async function handleOwnerDelivery(request: Request, env: OwnerDeliveryEn
         if (!stored || typeof stored.installationId !== "string") continue;
         try {
           const plaintext = await crypto.subtle.decrypt(
-            { name: "AES-GCM", iv: fromB64(stored.iv), additionalData: enc.encode(stored.eventId), tagLength: 128 },
+            { name: "AES-GCM", iv: fromB64(stored.iv) as unknown as BufferSource, additionalData: enc.encode(stored.eventId) as unknown as BufferSource, tagLength: 128 },
             await aesKey(env.GUARDIAN_DELIVERY_ENC_KEY), fromB64(stored.ciphertext));
           const event = JSON.parse(dec.decode(plaintext));
           if (validEvent(event, stored.eventId) && event.installation_id === stored.installationId) events.push(event);
