@@ -21,7 +21,8 @@ private object AdminSeneRobotPainter {
         val bob = sin(phase * Math.PI * 2.0).toFloat()
         val breathing = sin(phase * Math.PI * 4.0).toFloat()
         canvas.translate(0f, bob * 2.8f)
-        val moodTilt = when (mood) { 0 -> -2.2f; 1 -> 3.5f; 2 -> -1.0f; 3 -> 2.8f; 4 -> -3.8f; 5 -> 2.0f; else -> 0f }\n        canvas.rotate(sin(phase * Math.PI * 2.0).toFloat() * 1.65f + sin(phase * Math.PI * 4.0).toFloat() * .35f + moodTilt, 100f, 120f)
+        val moodTilt = when (mood) { 0 -> -2.2f; 1 -> 3.5f; 2 -> -1.0f; 3 -> 2.8f; 4 -> -3.8f; 5 -> 2.0f; else -> 0f }
+        canvas.rotate(sin(phase * Math.PI * 2.0).toFloat() * 1.65f + sin(phase * Math.PI * 4.0).toFloat() * .35f + moodTilt, 100f, 120f)
         val p = Paint(Paint.ANTI_ALIAS_FLAG)
         fun solid(c: Int) { p.shader = null; p.clearShadowLayer(); p.style = Paint.Style.FILL; p.color = c }
         fun grad(r: RectF, colors: IntArray, horizontal: Boolean = false) {
