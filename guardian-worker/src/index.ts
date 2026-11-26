@@ -173,6 +173,23 @@ export default {
       return handleOwnerDelivery(request, env);
     }
 
+    if (url.pathname === "/v1/muse/owner/mcp") {
+      if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
+      const token = bearer(request);
+      const expectedHash = env.GUARDIAN_OWNER_CENTRAL_TOKEN_HASH ?? "";
+      if (token.length < 40 || !/^[a-f0-9]{64}$/i.test(expectedHash) ||
+          !constantTimeEqual(await sha256(token), expectedHash.toLowerCase()))
+        return json({ error: "unauthorized" }, 401);
+      return handleOwnerMuseMcp(request, async () => {
+        const response = await handleOwnerDelivery(new Request("https://internal/v1/guardian/owner-events", {
+          method: "GET", headers: { authorization: "Bearer " + token }
+        }), env);
+        if (!response.ok) return null;
+        const payload = await response.json() as { events?: unknown[] };
+        return Array.isArray(payload.events) ? payload.events : [];
+      });
+    }
+
     const museMatch = url.pathname.match(/^\/v1\/muse\/([a-f0-9-]{16,64})\/mcp$/i);
     if (museMatch) {
       if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
