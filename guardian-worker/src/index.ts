@@ -280,6 +280,7 @@ export default {
         ...(snapshot.damagedProducts ? { damagedProducts: snapshot.damagedProducts } : {}),
           ...(snapshot.approvedMovements ? { approvedMovements: snapshot.approvedMovements } : {}),
           ...(snapshot.payroll ? { payroll: snapshot.payroll } : {}),
+        ...(snapshot.sales ? { sales: snapshot.sales } : {}),
         dataAgeSeconds: Math.max(0, Math.floor((Date.now() - Date.parse(snapshot.capturedAt)) / 1000)),
       });
     }
