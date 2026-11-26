@@ -12,7 +12,7 @@ concurrency:
 
 jobs:
   deploy:
-    name: Deploy sene-guardian-api (manual only)
+    name: Validate and deploy sene-guardian-api (manual only)
     if: github.ref == 'refs/heads/feature/guardian-damaged-products-readonly'
     runs-on: ubuntu-latest
     defaults:
@@ -28,6 +28,17 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: npm
+          cache-dependency-path: guardian-worker/package.json
+
+      - name: Install project dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Run automated tests
+        run: npm test
+
+      - name: TypeScript type check
+        run: npm run typecheck
 
       - name: Validate production configuration
         env:
