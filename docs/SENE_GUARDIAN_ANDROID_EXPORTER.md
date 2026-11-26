@@ -1,47 +1,44 @@
-# Exportador Android de SENE GUARDIÁN (fase inicial)
+# Exportador Android de SENE GUARDIÁN
 
-Estado: implementación de preparación en rama de pruebas. No está integrada en pantallas, no se ejecuta automáticamente y no está incluida en una APK publicada.
+Estado: código fuente preparado en la rama de pruebas. No se ha publicado ni instalado una APK.
 
-## Alcance
+## Qué está implementado
 
-`GuardianSnapshotExporter.export(context, installationId, ingestToken)` crea y envía una captura agregada a:
+- `GuardianSnapshotExporter`: lectura de snapshots locales de `INVENTARIO_MAESTRO` y `INVENTARIO_SENE`, reducción a conteos agregados y envío HTTPS manual al Worker de pruebas.
+- `GuardianConfigStore`: cifra instalación, token de ingestión y consentimiento con AES-GCM; la clave AES no exportable se genera y conserva en Android Keystore.
+- `GuardianSettingsActivity`: pantalla privada para registrar la instalación, guardar el token, otorgar o retirar consentimiento, enviar una captura manual y borrar la configuración local.
+- Acceso desde la opción SENE GUARDIÁN en el menú principal. La pantalla está registrada como Activity no exportada y solo se abre desde SeneAdmin después del acceso habitual del propietario.
+- El envío no se programa automáticamente. Cada captura requiere consentimiento guardado y pulsar "ENVIAR CAPTURA AHORA".
 
-`https://sene-guardian-test.nagavs28.workers.dev/v1/snapshot`
+## Configuración manual
 
-Lee exclusivamente `InventoryLocalStore.snapshot` para `INVENTARIO_MAESTRO` y `INVENTARIO_SENE`. No utiliza `SharedInventoryManager.list`, porque esa ruta puede migrar y escribir en la caché.
+En el archivo de conexión descifrado, copiar únicamente:
+- `installationId`
+- `ingestToken`
 
-Por categoría solo envía:
-- categoría;
-- cantidad de artículos;
-- suma de existencias no negativas;
-- cantidad de artículos agotados;
-- fecha de captura.
+No introducir `adminToken` ni `museReadToken` en SeneAdmin. El token se introduce en el campo protegido y se guarda cifrado. El campo se limpia después de guardar.
 
-El estado general del negocio se envía como `unknown` porque todavía no se ha identificado una fuente de lectura pura y fiable para ese estado.
+## Datos transmitidos
 
-## Bajo stock
+Por cada inventario local disponible: categoría, cantidad de artículos, suma de existencias no negativas, cantidad agotada y fecha de captura. No se transmiten códigos, nombres, precios, pasillos ni estantes.
 
-`lowStockCount` se envía como `null` (desconocido). No se establece un umbral artificial. El Worker valida y conserva ese valor nulo; MUSE lo recibirá como desconocido hasta que se documente una regla de negocio existente.
+El estado del negocio se transmite como `unknown` y el indicador de bajo stock como `null`, hasta verificar las fuentes y reglas reales. No se inventan valores.
 
-## Seguridad y límites
+## Límites
 
-- La llamada es explícita; no hay scheduler, WorkManager, polling ni servicio persistente.
-- Debe invocarse desde un hilo de fondo; la clase rechaza el hilo principal.
-- La URL es HTTPS fija de pruebas; no sigue redirecciones.
-- El token de ingestión se recibe como argumento, no se persiste, registra ni devuelve.
-- No añadir el token a preferencias, archivos, logs ni recursos.
-- La identidad de instalación debe corresponder al token de ingestión de esa misma instalación.
-- Se descartan filas detalladas y no se transmiten códigos, nombres, precios, pasillos ni estantes.
-- No se leen PIN, claves privadas, licencias, códigos comerciales, nómina, asistencia ni reportes.
-- La clase no cambia inventarios, respaldos ni otros datos locales.
+- Solo lectura: no modifica almacenes locales ni datos del negocio.
+- No lee PIN, licencias, códigos comerciales, nómina, asistencia, reportes ni claves privadas.
+- No usa `ServerPairing`, `AdminPayrollRequestSync` ni el token de MUSE.
+- HTTPS fijo de Worker de pruebas; no sigue redirecciones.
+- Sin sincronización automática, scheduler ni servicio persistente.
+- "Desactivar y borrar credenciales" elimina la configuración local; no revoca la instalación en el servidor. La revocación administrativa sigue siendo un procedimiento separado.
 
-## Pendiente antes de usar en un dispositivo real
+## Pendiente antes de datos reales
 
-1. Definir e implementar almacenamiento seguro y ciclo de vida de la credencial de ingestión, con revocación y sin exponerla.
-2. Añadir consentimiento explícito del propietario y una interfaz para activar/desactivar y solicitar la captura.
-3. Acordar si la captura será manual o periódica; no añadir automatización sin decisión expresa.
-4. Confirmar el estado real del negocio y la regla oficial de bajo stock.
-5. Añadir pruebas Android con snapshots ficticios y compilar la app en CI.
-6. Verificar el Worker de pruebas y sus límites gratuitos antes de cualquier envío real.
+1. Compilar la fuente Android y corregir cualquier error detectado.
+2. Probar la pantalla, el cifrado/descifrado y el envío con una instalación ficticia y datos inventados.
+3. Verificar la identidad y correspondencia entre installationId y token de ingestión.
+4. Confirmar el alcance de los datos y el comportamiento de consentimiento con el propietario.
+5. Verificar los límites gratuitos y retención de Cloudflare antes de un uso sostenido.
 
-Esta entrega solo añade código fuente a la rama de trabajo. No modifica MainActivity, AndroidManifest, APK, Worker desplegado ni producción.
+Esta fase no genera APK, no cambia producción y no despliega Worker. La prueba de compilación de CI solo compila Kotlin; no ensambla APK.
