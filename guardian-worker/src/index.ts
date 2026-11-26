@@ -1,4 +1,5 @@
 import { handleOwnerDelivery } from "./owner-delivery";
+import { handleMuseMcp } from "./muse-mcp";
 
 export interface Env {
   GUARDIAN_DATA: KVNamespace;
@@ -168,6 +169,24 @@ export default {
           !constantTimeEqual(await sha256(token), expectedHash.toLowerCase()))
         return json({ error: "unauthorized" }, 401);
       return handleOwnerDelivery(request, env);
+    }
+
+    const museMatch = url.pathname.match(/^\/v1\/muse\/([a-f0-9-]{16,64})\/mcp$/i);
+    if (museMatch) {
+      if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
+      const id = museMatch[1];
+      if (!await authorizedFor(env, id, bearer(request), "muse")) return json({ error: "unauthorized" }, 401);
+      return handleMuseMcp(request, id, async () => {
+        const snapshot = await env.GUARDIAN_DATA.get<Snapshot>(`snapshot:v1:${id}`, "json");
+        if (!snapshot) return null;
+        return {
+          installationId: snapshot.installationId,
+          capturedAt: snapshot.capturedAt,
+          business: snapshot.business,
+          inventory: snapshot.inventory,
+          dataAgeSeconds: Math.max(0, Math.floor((Date.now() - Date.parse(snapshot.capturedAt)) / 1000)),
+        };
+      });
     }
 
     if (request.method === "POST" && url.pathname === "/v1/snapshot") {
