@@ -105,6 +105,7 @@ function validSnapshot(value: unknown): value is Snapshot {
         Number.isInteger(p.payrollCount) && p.payrollCount >= p.employeeCount && p.payrollCount <= 10000 &&
         [p.grossCents,p.absenceCents,p.earlyExitCents,p.loanCents,p.consumptionCents,p.netCents,p.deliveredCents]
           .every(n => Number.isSafeInteger(n) && n >= 0)))) &&
+    // Sales periods are calendar months (YYYY-MM); keep this validator digit-based.
     (v.sales === undefined || (
       Array.isArray(v.sales.periods) && v.sales.periods.length <= 36 &&
       v.sales.periods.every(p => /^\d{4}-\d{2}$/.test(p.period) &&
