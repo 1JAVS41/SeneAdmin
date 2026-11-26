@@ -5,6 +5,7 @@ export interface Env {
   GUARDIAN_ADMIN_TOKEN: string;
   GUARDIAN_DELIVERY_ENC_KEY: string;
   GUARDIAN_DELIVERY_HMAC_KEY: string;
+  GUARDIAN_OWNER_CENTRAL_TOKEN_HASH: string;
 }
 
 type Category = {
@@ -27,7 +28,6 @@ type Installation = {
   revoked: boolean;
   ingestTokenHash: string;
   museTokenHash: string;
-  ownerReadTokenHash: string;
   createdAt: string;
   revokedAt?: string;
 };
@@ -130,16 +130,14 @@ export default {
       if (await installation(env, id)) return json({ error: "already_exists" }, 409);
       const ingestToken = randomToken();
       const museToken = randomToken();
-      const ownerReadToken = randomToken();
       const record: Installation = {
         schema: 1, revoked: false,
         ingestTokenHash: await sha256(ingestToken),
         museTokenHash: await sha256(museToken),
-        ownerReadTokenHash: await sha256(ownerReadToken),
         createdAt: new Date().toISOString(),
       };
       await env.GUARDIAN_DATA.put(`installation:v1:${id}`, JSON.stringify(record));
-      return json({ installationId: id, ingestToken, museReadToken: museToken, ownerReadToken, shownOnce: true }, 201);
+      return json({ installationId: id, ingestToken, museReadToken: museToken, shownOnce: true }, 201);
     }
 
     if (request.method === "POST" && url.pathname === "/v1/admin/installations/revoke") {
@@ -155,11 +153,8 @@ export default {
       record.revokedAt = new Date().toISOString();
       await env.GUARDIAN_DATA.put(`installation:v1:${id}`, JSON.stringify(record));
       await env.GUARDIAN_DATA.delete(`snapshot:v1:${id}`);
-      const pending = await env.GUARDIAN_DATA.list({ prefix: "owner-event:v1:", limit: 1000 });
-      for (const item of pending.keys) {
-        const metadata = await env.GUARDIAN_DATA.get<any>(item.name, "json");
-        if (metadata?.installationId === id) await env.GUARDIAN_DATA.delete(item.name);
-      }
+      // Central license events are not installation-owned; revoking a business
+      // installation must never delete or redirect central license requests.
       return json({ revoked: true, installationId: id });
     }
 
@@ -167,12 +162,10 @@ export default {
       return handleOwnerDelivery(request, env);
 
     if (request.method === "GET" && url.pathname === "/v1/guardian/owner-events") {
-      const id = url.searchParams.get("installationId") ?? "";
       const token = bearer(request);
-      const record = validId(id) ? await installation(env, id) : null;
-      if (!record || record.revoked || token.length < 40 ||
-          typeof record.ownerReadTokenHash !== "string" ||
-          !constantTimeEqual(await sha256(token), record.ownerReadTokenHash))
+      const expectedHash = env.GUARDIAN_OWNER_CENTRAL_TOKEN_HASH ?? "";
+      if (token.length < 40 || !/^[a-f0-9]{64}$/i.test(expectedHash) ||
+          !constantTimeEqual(await sha256(token), expectedHash.toLowerCase()))
         return json({ error: "unauthorized" }, 401);
       return handleOwnerDelivery(request, env);
     }
