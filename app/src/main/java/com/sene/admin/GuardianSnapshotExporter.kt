@@ -173,7 +173,7 @@ object GuardianSnapshotExporter {
             val month = report.date.take(7)
             val values = linkedMapOf<String, Long>()
             var inCashSummary = false
-            report.body.replace("\\r", "").lines().forEach { raw ->
+            report.body.replace("\r", "").lines().forEach { raw ->
                 val line = raw.trim()
                 if (line.startsWith("ETIQUETA:", true)) {
                     inCashSummary = line.substringAfter(":").trim().equals("RESUMEN DE CAJA", true)
