@@ -33,7 +33,7 @@ test("central owner credential reads events across installations without install
   const eventId = "123e4567-e89b-42d3-a456-426614174000";
   const event = {
     event_id: eventId, event_type: "activation.requested",
-    installation_id: "install-000000000000000001", folio: "SENE-20261126-ABC123",
+    installation_id: "abcdef12-3456-7890-abcd-ef1234567890", folio: "SENE-20261126-ABC123",
     request_type: "activation", created_at: new Date().toISOString(),
     expires_at: new Date(Date.now() + 3600000).toISOString(),
     payment_status: "pending", amount_cents: 29900, currency: "MXN",
