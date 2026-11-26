@@ -171,6 +171,7 @@ export default {
       const token = bearer(request);
       const record = validId(id) ? await installation(env, id) : null;
       if (!record || record.revoked || token.length < 40 ||
+          typeof record.ownerReadTokenHash !== "string" ||
           !constantTimeEqual(await sha256(token), record.ownerReadTokenHash))
         return json({ error: "unauthorized" }, 401);
       return handleOwnerDelivery(request, env);
