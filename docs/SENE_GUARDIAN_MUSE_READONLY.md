@@ -195,3 +195,9 @@ Se corrigió el primer diseño de credenciales globales:
 - El README fue actualizado con rutas, secretos y bloqueos pendientes.
 
 Esto reduce el riesgo de acceso cruzado entre instalaciones, pero NO certifica la API para producción. Siguen pendientes pruebas automatizadas/locales, rate limiting, auditoría formal, prueba de concurrencia en aprovisionamiento, exportador Android y compatibilidad Muse. El Worker sigue sin desplegarse, sin namespace KV y sin secretos configurados. No se enviaron datos reales.
+
+
+## Pruebas automatizadas preparadas
+Se añadieron `guardian-worker/package.json`, `tsconfig.json`, pruebas de seguridad en `guardian-worker/test/worker.test.ts` y el workflow `.github/workflows/guardian-worker-checks.yml`. El workflow ejecuta typecheck y pruebas en cambios del Worker de esta rama. Los casos cubren salud, provisión de dos instalaciones, aislamiento de credenciales, lectura autorizada, rechazo de snapshots antiguos, revocación y rechazo de payload inválido.
+
+**Estado de verificación:** pruebas y workflow ya escritos, pero aún no se confirma que CI haya terminado correctamente. No se ha ejecutado despliegue. Tampoco se ha creado el namespace KV ni secretos Cloudflare.
