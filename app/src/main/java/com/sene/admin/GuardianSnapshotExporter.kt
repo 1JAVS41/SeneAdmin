@@ -62,12 +62,16 @@ object GuardianSnapshotExporter {
                 .put("updatedAt", capturedAt))
         }
 
+        val damagedProductCount = damagedProductCount(context.applicationContext)
         val payload = JSONObject()
             .put("schema", 1)
             .put("installationId", installationId)
             .put("capturedAt", capturedAt)
             .put("business", JSONObject().put("status", "unknown"))
             .put("inventory", JSONObject().put("categories", categories))
+            .put("damagedProducts", JSONObject()
+                .put("itemCount", damagedProductCount)
+                .put("updatedAt", capturedAt))
 
         val connection = (URL(SNAPSHOT_URL).openConnection() as HttpURLConnection)
         return try {
@@ -91,6 +95,26 @@ object GuardianSnapshotExporter {
         } finally {
             connection.disconnect()
         }
+    }
+
+    /** Cuenta registros únicos de productos dañados sin exportar códigos, nombres ni motivos. */
+    private fun damagedProductCount(context: Context): Int {
+        val identities = linkedSetOf<String>()
+        SeneAdminStore.reports(context).forEach { report ->
+            val lines = report.body.replace("\\r", "").lines()
+            val marker = lines.indexOfLast { it.trim().equals("PRODUCTOS_DANADOS_SENE_V1", true) }
+            if (marker < 0) return@forEach
+            for (raw in lines.drop(marker + 1)) {
+                val line = raw.trim()
+                if (line.isBlank() || line.startsWith("ETIQUETA:", true) ||
+                    line.startsWith("Guarde este reporte", true)) break
+                if (line.startsWith("CODIGO", true) || line.startsWith("CÓDIGO", true)) continue
+                val parts = line.split("|").map { it.trim() }
+                if (parts.size < 6) continue
+                identities.add(listOf(parts[0], parts[3], parts[4], parts[5]).joinToString("|"))
+            }
+        }
+        return identities.size
     }
 
     private fun utcNow(): String =
