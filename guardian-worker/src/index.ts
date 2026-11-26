@@ -1,5 +1,6 @@
 import { handleOwnerDelivery } from "./owner-delivery";
 import { handleMuseMcp } from "./muse-mcp";
+import { handleOwnerMuseMcp } from "./owner-muse-mcp";
 
 export interface Env {
   GUARDIAN_DATA: KVNamespace;
