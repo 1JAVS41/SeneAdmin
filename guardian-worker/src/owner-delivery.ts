@@ -1,10 +1,7 @@
 /**
- * SENE GUARDIÁN private owner-event receiver.
- *
- * Isolated handler module. It is not yet mounted in the main Worker router.
- * Stores only the encrypted envelope in KV; decrypts only after the owner/Muse
- * installation token is validated. Configure dedicated 32-byte AES and HMAC
- * keys matching SERVER-SENE, plus GUARDIAN_DATA.
+ * Encrypted owner-event transport for SERVER-SENE request codes.
+ * KV stores ciphertext only. Plaintext is returned only through the separately
+ * provisioned ownerReadToken route in index.ts (never through the Muse snapshot token).
  */
 export interface OwnerDeliveryEnv {
   GUARDIAN_DATA: KVNamespace;
@@ -13,20 +10,13 @@ export interface OwnerDeliveryEnv {
 }
 const enc = new TextEncoder();
 const dec = new TextDecoder();
-
 function fromB64(value: string): Uint8Array {
+  if (!/^[A-Za-z0-9_-]+$/.test(value)) throw new Error("invalid_base64");
   const raw = atob(value.replace(/-/g, "+").replace(/_/g, "/"));
   return Uint8Array.from(raw, c => c.charCodeAt(0));
 }
-function toB64(bytes: Uint8Array): string {
-  let raw = "";
-  for (const b of bytes) raw += String.fromCharCode(b);
-  return btoa(raw).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
-}
 function json(data: unknown, status = 200): Response {
-  return new Response(JSON.stringify(data), {
-    status, headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" }
-  });
+  return new Response(JSON.stringify(data), { status, headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" } });
 }
 async function hmacKey(value: string): Promise<CryptoKey> {
   const raw = fromB64(value);
@@ -38,37 +28,39 @@ async function aesKey(value: string): Promise<CryptoKey> {
   if (raw.byteLength !== 32) throw new Error("invalid_aes_key");
   return crypto.subtle.importKey("raw", raw, "AES-GCM", false, ["decrypt"]);
 }
-function bearer(request: Request): string {
-  const value = request.headers.get("authorization") ?? "";
-  return value.startsWith("Bearer ") ? value.slice(7) : "";
+function validUuid(value: unknown): value is string {
+  return typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
-async function sha256(value: string): Promise<string> {
-  const digest = await crypto.subtle.digest("SHA-256", enc.encode(value));
-  return Array.from(new Uint8Array(digest), b => b.toString(16).padStart(2, "0")).join("");
+function validInstallationId(value: unknown): value is string {
+  return typeof value === "string" && /^[a-f0-9-]{20,100}$/i.test(value);
 }
-function equal(a: string, b: string): boolean {
-  if (a.length !== b.length) return false;
-  let n = 0;
-  for (let i = 0; i < a.length; i++) n |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  return n === 0;
+function validEvent(value: any, eventId: string): boolean {
+  return !!value && value.event_id === eventId &&
+    ["activation.requested", "renewal.requested"].includes(value.event_type) &&
+    validInstallationId(value.installation_id) &&
+    typeof value.folio === "string" && /^SENE-[A-Z0-9-]{8,40}$/.test(value.folio) &&
+    ["activation", "renewal"].includes(value.request_type) &&
+    typeof value.created_at === "string" && Number.isFinite(Date.parse(value.created_at)) &&
+    typeof value.expires_at === "string" && Number.isFinite(Date.parse(value.expires_at)) &&
+    value.payment_status === "pending" &&
+    Number.isSafeInteger(value.amount_cents) && value.amount_cents > 0 &&
+    value.currency === "MXN" &&
+    typeof value.business_name === "string" && value.business_name.length >= 2 && value.business_name.length <= 80 &&
+    typeof value.holder_name === "string" && value.holder_name.length >= 2 && value.holder_name.length <= 100 &&
+    typeof value.whatsapp === "string" && /^\d{10,15}$/.test(value.whatsapp) &&
+    typeof value.code === "string" && /^[A-HJ-NP-Z2-9]{10}$/.test(value.code);
 }
-function validId(value: string): boolean { return /^[a-f0-9-]{16,64}$/i.test(value); }
-
-/** Mount at POST /v1/guardian/owner-events and GET /v1/guardian/owner-events. */
 export async function handleOwnerDelivery(request: Request, env: OwnerDeliveryEnv): Promise<Response> {
   if (!env.GUARDIAN_DELIVERY_ENC_KEY || !env.GUARDIAN_DELIVERY_HMAC_KEY)
     return json({ error: "delivery_not_configured" }, 503);
-
   if (request.method === "POST") {
     const timestamp = request.headers.get("x-sene-timestamp") ?? "";
     const eventId = request.headers.get("x-sene-event-id") ?? "";
     const signature = request.headers.get("x-sene-signature") ?? "";
     const seconds = Number(timestamp);
     if (!/^\d{10}$/.test(timestamp) || !Number.isFinite(seconds) ||
-        Math.abs(Date.now() / 1000 - seconds) > 300 ||
-        !/^[0-9a-f-]{36}$/i.test(eventId) || !signature)
+        Math.abs(Date.now() / 1000 - seconds) > 300 || !validUuid(eventId) || !signature)
       return json({ error: "invalid_delivery_headers" }, 400);
-
     let body: any;
     try {
       const raw = await request.text();
@@ -76,51 +68,43 @@ export async function handleOwnerDelivery(request: Request, env: OwnerDeliveryEn
       body = JSON.parse(raw);
     } catch { return json({ error: "invalid_json" }, 400); }
     if (body?.event_id !== eventId || typeof body.iv !== "string" ||
-        typeof body.ciphertext !== "string") return json({ error: "invalid_envelope" }, 400);
-
+        typeof body.ciphertext !== "string" || body.iv.length > 32 || body.ciphertext.length > 44000)
+      return json({ error: "invalid_envelope" }, 400);
     const canonical = [timestamp, eventId, body.iv, body.ciphertext].join(".");
-    let verified = false;
+    let plaintext: ArrayBuffer;
     try {
-      verified = await crypto.subtle.verify(
-        "HMAC", await hmacKey(env.GUARDIAN_DELIVERY_HMAC_KEY),
-        fromB64(signature), enc.encode(canonical)
-      );
-    } catch { return json({ error: "invalid_signature" }, 401); }
-    if (!verified) return json({ error: "invalid_signature" }, 401);
-
+      const verified = await crypto.subtle.verify("HMAC", await hmacKey(env.GUARDIAN_DELIVERY_HMAC_KEY),
+        fromB64(signature), enc.encode(canonical));
+      if (!verified) return json({ error: "invalid_signature" }, 401);
+      plaintext = await crypto.subtle.decrypt(
+        { name: "AES-GCM", iv: fromB64(body.iv), additionalData: enc.encode(eventId), tagLength: 128 },
+        await aesKey(env.GUARDIAN_DELIVERY_ENC_KEY), fromB64(body.ciphertext));
+    } catch { return json({ error: "invalid_envelope" }, 400); }
+    let event: any;
+    try { event = JSON.parse(dec.decode(plaintext)); } catch { return json({ error: "invalid_event" }, 400); }
+    if (!validEvent(event, eventId)) return json({ error: "invalid_event" }, 400);
     const key = "owner-event:v1:" + eventId;
     if (await env.GUARDIAN_DATA.get(key)) return json({ accepted: true, duplicate: true });
-    // Ciphertext only: code never enters KV in plaintext.
     await env.GUARDIAN_DATA.put(key, JSON.stringify({
-      eventId, timestamp, iv: body.iv, ciphertext: body.ciphertext
-    }), { expirationTtl: 60 * 60 * 24 });
+      eventId, installationId: event.installation_id, timestamp, iv: body.iv, ciphertext: body.ciphertext
+    }), { expirationTtl: 86400 });
     return json({ accepted: true }, 202);
   }
-
   if (request.method === "GET") {
     const installationId = new URL(request.url).searchParams.get("installationId") ?? "";
-    const token = bearer(request);
-    if (!validId(installationId) || token.length < 40) return json({ error: "unauthorized" }, 401);
-    const installation = await env.GUARDIAN_DATA.get<any>("installation:v1:" + installationId, "json");
-    if (!installation || installation.revoked ||
-        !equal(await sha256(token), installation.museTokenHash))
-      return json({ error: "unauthorized" }, 401);
-
-    const list = await env.GUARDIAN_DATA.list({ prefix: "owner-event:v1:", limit: 50 });
+    if (!validInstallationId(installationId)) return json({ error: "invalid_installation" }, 400);
+    const list = await env.GUARDIAN_DATA.list({ prefix: "owner-event:v1:", limit: 100 });
     const events: unknown[] = [];
     for (const item of list.keys) {
       const stored = await env.GUARDIAN_DATA.get<any>(item.name, "json");
-      if (!stored) continue;
+      if (!stored || stored.installationId !== installationId) continue;
       try {
         const plaintext = await crypto.subtle.decrypt(
           { name: "AES-GCM", iv: fromB64(stored.iv), additionalData: enc.encode(stored.eventId), tagLength: 128 },
-          await aesKey(env.GUARDIAN_DELIVERY_ENC_KEY), fromB64(stored.ciphertext)
-        );
+          await aesKey(env.GUARDIAN_DELIVERY_ENC_KEY), fromB64(stored.ciphertext));
         const event = JSON.parse(dec.decode(plaintext));
-        if (event.installation_id === installationId) events.push(event);
-      } catch {
-        // Invalid or unrelated ciphertext is never returned.
-      }
+        if (validEvent(event, stored.eventId) && event.installation_id === installationId) events.push(event);
+      } catch { /* malformed ciphertext is never returned */ }
     }
     return json({ events });
   }
