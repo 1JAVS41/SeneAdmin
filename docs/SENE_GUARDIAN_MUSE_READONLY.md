@@ -55,3 +55,32 @@ No se crearán herramientas para editar, borrar, confirmar nóminas, sincronizar
 
 ## Estado de seguridad
 La rama es una propuesta de implementación, no una conexión activa. No hay Worker desplegado, credenciales de Cloudflare configuradas, APK modificada ni conexión con Muse. No se deben generar códigos, compartir secretos, instalar una APK ni conectar una cuenta Muse real hasta completar los requisitos y probar con datos ficticios.
+
+
+## Primera revisión estática del código (26-11-2026)
+Revisada la rama de trabajo, sin modificar archivos de la APK ni desplegar servicios.
+
+### Componentes y datos localizados
+- `InventoryLocalStore`: mantiene snapshots de `INVENTARIO_MAESTRO` y `INVENTARIO_SENE` en un archivo cifrado AES-GCM con clave Android Keystore. Es el punto de lectura preferente para un resumen de inventario; no se debe leer directamente el archivo cifrado desde el exportador.
+- `SharedInventoryManager`: gestiona la carpeta compartida, inventarios y reportes. Sus operaciones de carpeta permiten lectura y escritura, por lo que GUARDIÁN no debe invocar métodos genéricos de guardado, limpieza ni sincronización. La lectura de reportes archivados depende de claves del propietario y descifradores existentes; no exportar archivos crudos.
+- `OwnerPayrollStore`: contiene perfiles, movimientos, nóminas, solicitudes y asistencia. Los modelos incluyen nombre, teléfono, salario, importes y eventos personales. La persistencia usa preferencias compartidas y JSON; el exportador deberá llamar únicamente a getters de lectura y construir DTO minimizados. No exponer teléfonos ni identificadores de trabajador por defecto.
+- `SeneAdminStore`: historial de reportes cifrado con AES-GCM y Android Keystore. Su método `reports()` devuelve cuerpos completos de reportes; no exponer cuerpos completos a Muse sin un filtro y una autorización específica.
+- `ReportInboxStore`: mantiene eventos y acuses cifrados. No debe reutilizarse para GUARDIÁN porque es parte del flujo de sincronización administrativa.
+- `ServerPairing` y `AdminPayrollRequestSync`: contienen el token administrativo y ejecutan flujos comerciales/de sincronización con el servidor. GUARDIÁN queda expresamente separado; no llamar ni reutilizar estas clases, credenciales, endpoints o colas.
+- `AndroidManifest.xml`: declara INTERNET; no existe aún un componente/exportador GUARDIÁN ni un flujo de consentimiento/revocación para esta integración.
+- `MainActivity`: programa sincronización administrativa existente y controla el PIN/huella. GUARDIÁN no debe interceptar ni alterar ese flujo.
+
+### Consecuencias para el diseño
+1. La primera versión de GUARDIÁN no enviará nóminas nominales, teléfonos, reportes completos ni cuerpos sin filtrar. Empezará con resúmenes agregados y campos estrictamente necesarios.
+2. Se necesita un módulo Android separado con interfaz de lectura explícita, DTO allowlist y pruebas; no se debe dar acceso genérico a preferencias, archivos o clases de sincronización.
+3. La sincronización hacia Cloudflare deberá ser una operación HTTPS saliente autenticada, limitada, reintentable y disparada por el dispositivo bajo una política clara. No crear un servicio Android permanente ni polling.
+4. El Worker deberá exponer endpoints de consulta separados de la ruta de recepción de snapshots; validar tamaño, esquema, fecha, instalación autorizada, cuota y revocación antes de almacenar.
+5. La identidad de negocio/instalación debe generarse para GUARDIÁN y no derivarse de códigos de vinculación, tokens, licencias ni claves comerciales.
+6. Antes de habilitar nómina/asistencia individual, se debe definir consentimiento y base de acceso; la primera fase puede limitarse a métricas agregadas.
+7. Esta revisión es estática y parcial: todavía falta recorrer todas las funciones y formatos de reportes, validar las reglas de cálculo de nómina/asistencia, revisar pruebas y compilar. No equivale a una auditoría completa.
+
+### Próximas tareas seguras
+- Completar el inventario de getters y formatos de reportes sin ejecutar operaciones de escritura.
+- Diseñar DTO allowlist y pruebas unitarias con datos ficticios.
+- Preparar el Worker localmente en la rama de trabajo, sin secretos, sin despliegue y sin enlazar almacenamiento de pago.
+- Verificar por separado los límites de la cuenta Cloudflare y la compatibilidad documentada de conectores de Muse antes de cualquier conexión real.
