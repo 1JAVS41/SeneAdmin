@@ -91,21 +91,26 @@ export async function handleOwnerDelivery(request: Request, env: OwnerDeliveryEn
     return json({ accepted: true }, 202);
   }
   if (request.method === "GET") {
-    const installationId = new URL(request.url).searchParams.get("installationId") ?? "";
-    if (!validInstallationId(installationId)) return json({ error: "invalid_installation" }, 400);
-    const list = await env.GUARDIAN_DATA.list({ prefix: "owner-event:v1:", limit: 100 });
+    // This endpoint is called only after index.ts validates the central owner
+    // credential. It deliberately does not accept installationId as a filter:
+    // all license events belong to the central owner channel.
     const events: unknown[] = [];
-    for (const item of list.keys) {
-      const stored = await env.GUARDIAN_DATA.get<any>(item.name, "json");
-      if (!stored || stored.installationId !== installationId) continue;
-      try {
-        const plaintext = await crypto.subtle.decrypt(
-          { name: "AES-GCM", iv: fromB64(stored.iv), additionalData: enc.encode(stored.eventId), tagLength: 128 },
-          await aesKey(env.GUARDIAN_DELIVERY_ENC_KEY), fromB64(stored.ciphertext));
-        const event = JSON.parse(dec.decode(plaintext));
-        if (validEvent(event, stored.eventId) && event.installation_id === installationId) events.push(event);
-      } catch { /* malformed ciphertext is never returned */ }
-    }
+    let cursor: string | undefined;
+    do {
+      const page = await env.GUARDIAN_DATA.list({ prefix: "owner-event:v1:", limit: 100, cursor });
+      for (const item of page.keys) {
+        const stored = await env.GUARDIAN_DATA.get<any>(item.name, "json");
+        if (!stored || typeof stored.installationId !== "string") continue;
+        try {
+          const plaintext = await crypto.subtle.decrypt(
+            { name: "AES-GCM", iv: fromB64(stored.iv), additionalData: enc.encode(stored.eventId), tagLength: 128 },
+            await aesKey(env.GUARDIAN_DELIVERY_ENC_KEY), fromB64(stored.ciphertext));
+          const event = JSON.parse(dec.decode(plaintext));
+          if (validEvent(event, stored.eventId) && event.installation_id === stored.installationId) events.push(event);
+        } catch { /* malformed ciphertext is never returned */ }
+      }
+      cursor = page.list_complete ? undefined : page.cursor;
+    } while (cursor);
     return json({ events });
   }
   return json({ error: "method_not_allowed" }, 405);
