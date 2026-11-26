@@ -501,6 +501,9 @@ class MainActivity : AppCompatActivity() {
         mainOption("!", "PENDIENTES") {
             showPendingReviews()
         }
+        mainOption("🛡", "SENE GUARDIÁN", "Consulta administrativa de solo lectura") {
+            startActivity(Intent(this, GuardianSettingsActivity::class.java))
+        }
         mainOption("⚙", "AJUSTES") {
             showSettings()
         }
