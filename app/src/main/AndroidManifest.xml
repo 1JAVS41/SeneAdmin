@@ -3,6 +3,7 @@
     <application android:allowBackup="false" android:icon="@drawable/sene_admin_icon_color" android:roundIcon="@drawable/sene_admin_icon_color" android:label="SeneAdmin"
         android:theme="@style/Theme.AppCompat.Light.NoActionBar" android:supportsRtl="true">
         <activity android:name=".PayrollActivity" android:exported="false" />
+        <activity android:name=".GuardianSettingsActivity" android:exported="false" />
         <activity android:name=".MainActivity" android:exported="true" android:launchMode="singleTop">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
