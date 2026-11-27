@@ -98,3 +98,23 @@ test("snapshot accepts unknown low-stock metric without inventing a threshold", 
   const result = await read.json() as any;
   assert.equal(result.inventory.categories[0].lowStockCount, null);
 });
+
+
+test("SENE VENTAS provisioning creates separate ingest and MUSE credentials bound to one business", async () => {
+  const installationId = "55555555-5555-4555-8555-555555555555";
+  const response = await call("POST", "/v1/admin/installations/provision", {
+    installationId,
+    seneInstallationId: installationId,
+  }, admin);
+  assert.equal(response.status, 201);
+  const credentials = await response.json() as any;
+  assert.equal(credentials.installationId, installationId);
+  assert.equal(typeof credentials.ingestToken, "string");
+  assert.equal(typeof credentials.museReadToken, "string");
+  assert.ok(credentials.ingestToken.length >= 40);
+  assert.ok(credentials.museReadToken.length >= 40);
+  assert.notEqual(credentials.ingestToken, credentials.museReadToken);
+
+  const record = await env.GUARDIAN_DATA.get("installation:v1:" + installationId, "json") as any;
+  assert.equal(record.seneInstallationId, installationId);
+});
