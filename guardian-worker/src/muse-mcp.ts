@@ -69,12 +69,13 @@ function selectData(name: string, overview: Record<string, any>, args: Record<st
     case "list_approved_movements": {
       const kind = String(args.type ?? "ALL");
       const movements = (overview.approvedMovements ?? []).filter((m: any) =>
-        kind === "ALL" || (kind === "SALES" && m.type === "SALE") ||
-        (kind === "INVENTORY" && m.type === "INVENTORY_CONSUMPTION") ||
+        kind === "ALL" || (kind === "INVENTORY" && m.type === "INVENTORY_CONSUMPTION") ||
         (kind === "CASH" && m.type === "CASH_DISBURSEMENT"));
-      return { sales: movements.filter((m: any) => m.type === "SALE"),
+      return {
+        sales: { available: false, reason: "Esta instalación no conserva una lista de ventas; SeneAdmin solo recibe sus totales cuando están incluidos en un reporte." },
         inventoryMovements: movements.filter((m: any) => m.type === "INVENTORY_CONSUMPTION"),
-        cashMovements: movements.filter((m: any) => m.type === "CASH_DISBURSEMENT") };
+        cashMovements: movements.filter((m: any) => m.type === "CASH_DISBURSEMENT"),
+      };
     }
     default:
       return overview;
@@ -114,7 +115,7 @@ export async function handleMuseMcp(request: Request, installationId: string, lo
           : name === "search_products"
           ? { type: "object", properties: { query: { type: "string", minLength: 1, maxLength: 128 } }, required: ["query"], additionalProperties: false }
           : name === "list_approved_movements"
-          ? { type: "object", properties: { type: { type: "string", enum: ["ALL", "SALES", "INVENTORY", "CASH"] } }, additionalProperties: false }
+          ? { type: "object", properties: { type: { type: "string", enum: ["ALL", "INVENTORY", "CASH"] } }, additionalProperties: false }
           : { type: "object", properties: {}, additionalProperties: false },
         annotations: READ_ONLY,
       })),
@@ -130,7 +131,7 @@ export async function handleMuseMcp(request: Request, installationId: string, lo
       return rpcError(message.id, -32602, "A product code is required");
     if (name === "search_products" && (typeof args.query !== "string" || !args.query.trim()))
       return rpcError(message.id, -32602, "A product search query is required");
-    if (name === "list_approved_movements" && args.type !== undefined && !["ALL", "SALES", "INVENTORY", "CASH"].includes(String(args.type)))
+    if (name === "list_approved_movements" && args.type !== undefined && !["ALL", "INVENTORY", "CASH"].includes(String(args.type)))
       return rpcError(message.id, -32602, "Invalid movement type");
     if (!["get_product_by_code", "search_products", "list_approved_movements"].includes(name) && Object.keys(args).length > 0)
       return rpcError(message.id, -32602, "This read-only tool accepts no arguments");
