@@ -25,6 +25,7 @@ const snapshot = {
   inventory: { categories: [{ category: "INVENTARIO_MAESTRO", itemCount: 12, unitsInStock: 30, lowStockCount: 2, outOfStockCount: 1, updatedAt: new Date().toISOString() }] },
   products: [{ code: "ABC-01", name: "Producto de prueba", price: 25.5, stock: 7, aisle: "A", shelf: "2", category: "INVENTARIO_MAESTRO" }],
   approvedMovements: [{ id: "move-1", type: "INVENTORY_CONSUMPTION", date: new Date().toISOString(), productCode: "ABC-01", quantity: 2 }],
+  sales: { dailyTotals: [{ date: new Date().toISOString().slice(0, 10), amountCents: 2550 }], totalAmountCents: 2550, source: "reports" },
   operations: {
     employees: { profileCount: 3 },
     payroll: { recordCount: 6, paidCount: 4, pendingCount: 2 },
@@ -61,7 +62,7 @@ test("Muse MCP initializes and exposes read-only customer tools", async () => {
   assert.deepEqual(body.result.tools.map((t: any) => t.name), [
     "get_business_overview", "get_inventory_summary", "get_reports_summary", "get_workers_summary",
     "get_attendance_summary", "get_payroll_summary", "get_damaged_products_summary",
-    "get_product_by_code", "search_products", "list_approved_movements"
+    "get_product_by_code", "search_products", "list_approved_movements", "get_sales_summary"
   ]);
   assert.ok(body.result.tools.every((t: any) => t.annotations.readOnlyHint === true));
 });
@@ -94,7 +95,12 @@ test("Muse product lookup and approved movements return scoped snapshot data", a
   const movementsBody = await movementsResponse.json() as any;
   const movements = JSON.parse(movementsBody.result.content[0].text);
   assert.equal(movements.inventoryMovements.length, 1);
-  assert.equal(movements.sales.available, false);
+  assert.equal(movements.sales.totalAmountCents, 2550);
+  const salesResponse = await worker.fetch(post({
+    jsonrpc: "2.0", id: 33, method: "tools/call", params: { name: "get_sales_summary", arguments: {} }
+  }), env);
+  const salesBody = await salesResponse.json() as any;
+  assert.equal(JSON.parse(salesBody.result.content[0].text).sales.totalAmountCents, 2550);
 });
 
 test("Muse MCP rejects wrong tokens and revoked installations", async () => {
