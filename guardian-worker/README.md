@@ -1,67 +1,52 @@
-# SENE GUARDIÁN Worker · despliegue en Cloudflare
+# SENE GUARDIÁN Worker
 
-Este Worker proporciona a MUSE una consulta administrativa de solo lectura, separada por instalación. La ruta MCP de cliente verifica la licencia SENE VENTAS en cada consulta y deniega los datos si está vencida o si la API de licencias no responde correctamente. El canal MCP del propietario permanece separado.
+Este Worker ofrece dos conectores MCP separados y de solo lectura:
 
-## 1. Crear el almacenamiento KV
+- **MUSE propietario:** `/v1/muse/owner/mcp`, autenticado con la credencial central exclusiva ya existente.
+- **MUSE de cada cliente:** `/v1/muse/{installationId}/mcp`, autenticado con el token propio de esa instalación.
 
-Con Wrangler autenticado en la cuenta Cloudflare correcta:
+El MUSE propietario conserva sus credenciales y conexión actuales. No se debe volver a invitar, reconectar ni rotar su token como parte de estos cambios.
 
-```bash
-cd guardian-worker
-npx wrangler kv namespace create GUARDIAN_DATA
-```
+## Datos y separación
 
-Copia el `id` devuelto y sustituye únicamente `REPLACE_WITH_KV_NAMESPACE_ID` en `wrangler.toml`. El binding debe llamarse exactamente `GUARDIAN_DATA`. No inventes ni reutilices IDs de otra cuenta.
+- El almacenamiento propio de GUARDIÁN es el binding KV `GUARDIAN_DATA`.
+- No se conecta a D1 de SENE VENTAS ni consulta su tabla de negocios para construir el inventario de licencias.
+- No llama a `/redeem`, no administra licencias y no ejecuta aprobaciones, activaciones, renovaciones ni cancelaciones.
+- El conector de clientes solo entrega indicadores de su propia instalación: inventario, personal, totales de nómina, asistencia, reportes y productos dañados.
+- El conector de clientes no publica licencias, folios, códigos, solicitudes ni información de otros negocios.
+- La verificación de vigencia que ya existe para el MUSE cliente consulta únicamente el estado de suscripción mediante la ruta `/subscription/status`; si no puede comprobarlo, deniega la consulta. Esto no convierte a SERVER-SENE en el servidor de GUARDIÁN.
 
-## 2. Configurar secretos
+## Herramientas del MUSE propietario
 
-Genera un secreto administrativo privado de al menos 32 bytes, por ejemplo localmente con `openssl rand -hex 32`. Configura exactamente el mismo valor en este Worker y en el Worker `server-sene-api` de SENE VENTAS:
+- `list_owner_license_requests`: consulta solicitudes pendientes de licencia nueva y renovación recibidas por el canal cifrado del propietario.
+- `list_owner_license_inventory`: herramienta reservada al propietario. Actualmente informa que el inventario no está disponible porque GUARDIÁN todavía no recibe una fuente autenticada de altas y renovaciones completadas. No debe mostrar cero licencias ni datos inventados.
 
-```bash
-npx wrangler secret put GUARDIAN_ADMIN_TOKEN
-```
+Las solicitudes recibidas no equivalen al inventario de licencias activas. El canal actual de eventos contiene solicitudes pendientes; no demuestra por sí mismo qué licencias fueron activadas o renovadas después. Para habilitar el inventario real se necesita un emisor autorizado de eventos de activación/renovación hacia GUARDIÁN. Hasta contar con ese emisor, no se debe fingir sincronización ni modificar SERVER-SENE para obtenerla.
 
-No pegues el valor en el repositorio, en WhatsApp ni en esta conversación.
+## Configuración y despliegue
 
-Este Worker también usa los secretos ya existentes para el canal central del propietario:
+El archivo `wrangler.toml` declara el binding `GUARDIAN_DATA`. Su ID debe corresponder al namespace KV existente de GUARDIÁN. El valor de marcador `REPLACE_WITH_KV_NAMESPACE_ID` no es un ID válido: antes de cualquier despliegue debe identificarse el namespace ya existente y verificarse que pertenece a la cuenta correcta. No crear namespaces, bases de datos ni servicios nuevos para resolverlo.
+
+Secretos que deben conservarse sin cambios:
+
+- `GUARDIAN_OWNER_CENTRAL_TOKEN_HASH`
 - `GUARDIAN_DELIVERY_ENC_KEY`
 - `GUARDIAN_DELIVERY_HMAC_KEY`
-- `GUARDIAN_OWNER_CENTRAL_TOKEN_HASH`
+- `GUARDIAN_ADMIN_TOKEN` (si sigue siendo necesario para la administración de instalaciones)
 
-Consérvalos sin cambios. No los regeneres como parte de esta integración porque podría interrumpirse la conexión del MUSE propietario. Si alguno falta en producción, detén el despliegue y revisa primero la configuración actual.
+No imprimir ni compartir secretos. No regenerar la credencial central del propietario.
 
-## 3. Variables opcionales
+## Pruebas
 
-- `SENE_API_URL`: URL base del Worker SENE VENTAS; si se omite, se usa `https://server-sene-api.nagavs28.workers.dev`.
-- `MUSE_ALLOWED_ORIGINS`: lista separada por comas solo si se requieren clientes de navegador con encabezado Origin. Las llamadas servidor-a-servidor pueden omitirlo.
-
-## 4. Desplegar y verificar
-
-Después de confirmar KV y secretos:
+Desde `guardian-worker`:
 
 ```bash
-npx wrangler deploy
+npm run typecheck
+npm test
 ```
 
-Comprueba `GET https://sene-guardian-api.nagavs28.workers.dev/v1/health`, el binding KV y que el secreto administrativo coincide con el de SENE VENTAS. En SENE VENTAS conserva D1 `DB` y los secretos Telegram; agrega `GUARDIAN_ADMIN_TOKEN` sin sustituir los existentes.
+Las pruebas automatizadas del Worker pasaron en CI para el último cambio registrado en la rama de trabajo. El APK se compila en un flujo separado y no demuestra que GUARDIÁN esté desplegado ni que el inventario central esté sincronizado.
 
-No ejecutes aprovisionamiento real hasta confirmar ambos Workers. La validación funcional debe cubrir licencia activa, vencida y error de API. La ruta de cliente es `/v1/muse/{installationId}/mcp`; la del MUSE propietario es `/v1/muse/owner/mcp` y debe permanecer separada.
+## Límites de esta rama
 
-## 5. Alcance de la captura
-
-SeneAdmin envía una captura agregada cuando el propietario la autoriza y pulsa el envío manual. No es sincronización automática en segundo plano. Se envían contadores de inventario, personal, nómina, asistencia, reportes y productos dañados; no se envían nombres, teléfonos, importes individuales ni textos de reportes. Las ventas individuales no tienen una lista propia disponible en SeneAdmin, por lo que no se deben inventar.
-
-## 6. Pruebas
-
-`npm run typecheck` y `npm test` comprueban tipos y rutas del Worker. Las pruebas automatizadas ya pasaron en CI antes del último ajuste del exportador Android; vuelve a ejecutarlas antes del despliegue final. No se ha desplegado este código en Cloudflare.
-
-
-
-## Inventario central para el MUSE propietario
-
-- La ruta MCP existente `/v1/muse/owner/mcp` conserva la credencial central exclusiva; no requiere reconectar ni rotar el token del propietario.
-- La herramienta de solo lectura `list_owner_license_inventory` consulta directamente la misma base D1 de licencias usada por SERVER-SENE mediante el binding `SENE_LICENSE_DB`. No realiza peticiones HTTP a SENE VENTAS ni necesita una ruta de inventario en ese Worker.
-- En `wrangler.toml`, configura `SENE_LICENSE_DB` con el `database_name` y `database_id` de la base D1 existente de SERVER-SENE. No crees otra base: ambos Workers deben apuntar a la misma.
-- `list_owner_license_requests` continúa leyendo los eventos cifrados de solicitudes y códigos del canal central del propietario.
-- El binding se utiliza solo después de autenticar la credencial central existente del propietario. No se expone en MCP de clientes.
-- Conserva sin cambios `GUARDIAN_OWNER_CENTRAL_TOKEN_HASH`, `GUARDIAN_DELIVERY_ENC_KEY` y `GUARDIAN_DELIVERY_HMAC_KEY`.
+Los cambios de esta rama no deben desplegarse en producción sin autorización. No modificar SERVER-SENE, su base D1, el flujo comercial de SENE VENTAS ni la conexión exclusiva del MUSE propietario. Cualquier costo o recurso nuevo requiere autorización previa.
