@@ -19,7 +19,7 @@ import java.util.TimeZone
  * suministrar el token de ingestión de esta instalación desde almacenamiento seguro.
  */
 object GuardianSnapshotExporter {
-    private const val SNAPSHOT_URL = "https://sene-guardian-test.nagavs28.workers.dev/v1/snapshot"
+    private const val SNAPSHOT_URL = "https://sene-guardian-api.nagavs28.workers.dev/v1/snapshot"
     private val ALLOWED_CATEGORIES = setOf("INVENTARIO_MAESTRO", "INVENTARIO_SENE")
 
     data class ExportResult(val accepted: Boolean, val httpStatus: Int, val message: String)
