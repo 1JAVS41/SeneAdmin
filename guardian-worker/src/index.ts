@@ -248,6 +248,23 @@ export default {
         if (!response.ok) return null;
         const payload = await response.json() as { events?: unknown[] };
         return Array.isArray(payload.events) ? payload.events : [];
+      }, async () => {
+        // This call is reachable only after authenticating the existing central owner credential.
+        // GUARDIAN_ADMIN_TOKEN is a server-to-server secret and is never exposed to any MUSE client.
+        const adminToken = env.GUARDIAN_ADMIN_TOKEN ?? "";
+        if (adminToken.length < 40) return null;
+        const base = (env.SENE_API_URL ?? "https://server-sene-api.nagavs28.workers.dev").replace(/\\/+$/, "");
+        try {
+          const inventoryResponse = await fetch(base + "/admin/owner/license-inventory", {
+            method: "GET",
+            headers: { authorization: "Bearer " + adminToken, "cache-control": "no-store" }
+          });
+          if (!inventoryResponse.ok) return null;
+          const inventory = await inventoryResponse.json() as Record<string, unknown>;
+          return inventory && inventory.ok === true ? inventory : null;
+        } catch {
+          return null;
+        }
       });
     }
 
