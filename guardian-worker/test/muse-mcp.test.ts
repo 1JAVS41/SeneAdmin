@@ -1,0 +1,195 @@
+import { strict as assert } from "node:assert";
+import { test } from "node:test";
+import worker from "../src/index";
+
+class MemoryKV {
+  values = new Map<string, string>();
+  async get(key: string, type?: string) {
+    const value = this.values.get(key);
+    if (value === undefined) return null;
+    return type === "json" ? JSON.parse(value) : value;
+  }
+  async put(key: string, value: string) { this.values.set(key, value); }
+  async delete(key: string) { this.values.delete(key); }
+  async list(options: { prefix?: string; limit?: number; cursor?: string } = {}) {
+    const names = [...this.values.keys()].filter(k => k.startsWith(options.prefix ?? ""));
+    return { keys: names.map(name => ({ name })), list_complete: true, cursor: "" };
+  }
+}
+const token = "muse-installation-token-longer-than-forty-characters";
+const sha256 = async (value: string) => Buffer.from(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value))).toString("hex");
+const id = "abcdef12-3456-7890-abcd-ef1234567890";
+const snapshot = {
+  schema: 2, installationId: id, capturedAt: new Date().toISOString(),
+  business: { status: "active" },
+  inventory: { categories: [{ category: "INVENTARIO_MAESTRO", itemCount: 12, unitsInStock: 30, lowStockCount: 2, outOfStockCount: 1, updatedAt: new Date().toISOString() }] },
+  products: [{ code: "ABC-01", name: "Producto de prueba", price: 25.5, stock: 7, aisle: "A", shelf: "2", category: "INVENTARIO_MAESTRO" }],
+  approvedMovements: [{ id: "move-1", type: "INVENTORY_CONSUMPTION", date: new Date().toISOString(), productCode: "ABC-01", quantity: 2 }],
+  sales: { available: true, dailyTotals: [{ date: new Date().toISOString().slice(0, 10), amountCents: 2550 }], totalAmountCents: 2550, source: "reports" },
+  operations: {
+    employees: { profileCount: 3 },
+    payroll: { recordCount: 6, paidCount: 4, pendingCount: 2 },
+    attendance: { workersTracked: 3, trackedDaysThisWeek: 15, absenceDaysThisWeek: 1, earlyExitsThisWeek: 0 },
+    reports: { totalCount: 8, orderCount: 2 },
+    damagedProducts: { recordCount: 1 }
+  }
+};
+const envFor = async () => {
+  const kv = new MemoryKV();
+  await kv.put("installation:v1:" + id, JSON.stringify({
+    schema: 1, revoked: false, seneInstallationId: id, ingestTokenHash: await sha256("unused"),
+    museTokenHash: await sha256(token), createdAt: new Date().toISOString()
+  }));
+  await kv.put("snapshot:v1:" + id, JSON.stringify(snapshot));
+  return { GUARDIAN_DATA: kv, GUARDIAN_ADMIN_TOKEN: "unused", GUARDIAN_DELIVERY_ENC_KEY: "", GUARDIAN_DELIVERY_HMAC_KEY: "", GUARDIAN_OWNER_CENTRAL_TOKEN_HASH: "" } as any;
+};
+const originalFetch = globalThis.fetch;
+(globalThis as any).fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+  const url = String(input);
+  if (url.includes("/subscription/status")) return Response.json({ active: true, expires_at: "2099-01-01T00:00:00.000Z" }, { status: 200 });
+  return originalFetch(input, init);
+};
+const post = (body: unknown, auth = token, origin?: string) => new Request("https://guardian.test/v1/muse/" + id + "/mcp", {
+  method: "POST", headers: { "content-type": "application/json", authorization: "Bearer " + auth, ...(origin ? { origin } : {}) }, body: JSON.stringify(body)
+});
+
+test("Muse MCP initializes and exposes read-only customer tools", async () => {
+  const env = await envFor();
+  const init = await worker.fetch(post({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-03-26", capabilities: {}, clientInfo: { name: "test", version: "1" } } }), env);
+  assert.equal(init.status, 200);
+  const list = await worker.fetch(post({ jsonrpc: "2.0", id: 2, method: "tools/list" }), env);
+  const body = await list.json() as any;
+  assert.deepEqual(body.result.tools.map((t: any) => t.name), [
+    "get_business_overview", "get_inventory_summary", "get_reports_summary", "get_workers_summary",
+    "get_attendance_summary", "get_payroll_summary", "get_damaged_products_summary",
+    "get_product_by_code", "search_products", "list_approved_movements", "get_sales_summary"
+  ]);
+  assert.ok(body.result.tools.every((t: any) => t.annotations.readOnlyHint === true));
+});
+
+test("Muse tool returns only its own installation overview and never central license events", async () => {
+  const env = await envFor();
+  const response = await worker.fetch(post({ jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "get_business_overview", arguments: {} } }), env);
+  const body = await response.json() as any;
+  const result = JSON.parse(body.result.content[0].text);
+  assert.equal(result.business.status, "active");
+  assert.equal(result.operations.employees.profileCount, 3);
+  assert.equal(result.operations.damagedProducts.recordCount, 1);
+  assert.equal(result.installationId, undefined);
+  assert.equal(JSON.stringify(result).includes("activation"), false);
+});
+
+test("Muse product lookup and approved movements return scoped snapshot data", async () => {
+  const env = await envFor();
+  const productResponse = await worker.fetch(post({
+    jsonrpc: "2.0", id: 31, method: "tools/call",
+    params: { name: "get_product_by_code", arguments: { code: "ABC-01" } }
+  }), env);
+  const productBody = await productResponse.json() as any;
+  const product = JSON.parse(productBody.result.content[0].text);
+  assert.equal(product.product.name, "Producto de prueba");
+  const movementsResponse = await worker.fetch(post({
+    jsonrpc: "2.0", id: 32, method: "tools/call",
+    params: { name: "list_approved_movements", arguments: { type: "INVENTORY" } }
+  }), env);
+  const movementsBody = await movementsResponse.json() as any;
+  const movements = JSON.parse(movementsBody.result.content[0].text);
+  assert.equal(movements.inventoryMovements.length, 1);
+  assert.equal(movements.sales.totalAmountCents, 2550);
+  const salesResponse = await worker.fetch(post({
+    jsonrpc: "2.0", id: 33, method: "tools/call", params: { name: "get_sales_summary", arguments: {} }
+  }), env);
+  const salesBody = await salesResponse.json() as any;
+  assert.equal(JSON.parse(salesBody.result.content[0].text).sales.totalAmountCents, 2550);
+});
+
+test("Muse MCP rejects wrong tokens and revoked installations", async () => {
+  const env = await envFor();
+  assert.equal((await worker.fetch(post({ jsonrpc: "2.0", id: 1, method: "tools/list" }, "wrong-token"), env)).status, 401);
+  const record = await env.GUARDIAN_DATA.get("installation:v1:" + id, "json") as any;
+  record.revoked = true;
+  await env.GUARDIAN_DATA.put("installation:v1:" + id, JSON.stringify(record));
+  assert.equal((await worker.fetch(post({ jsonrpc: "2.0", id: 1, method: "tools/list" }), env)).status, 401);
+});
+
+test("Muse MCP rejects writes and unknown methods", async () => {
+  const env = await envFor();
+  const write = await worker.fetch(post({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "delete_inventory", arguments: {} } }), env);
+  assert.equal((await write.json() as any).error.code, -32602);
+});
+
+
+test("Muse MCP rejects browser origins unless explicitly allowlisted", async () => {
+  const env = await envFor();
+  const message = { jsonrpc: "2.0", id: 7, method: "tools/list" };
+  const blocked = await worker.fetch(post(message, token, "https://untrusted.example"), env);
+  assert.equal(blocked.status, 403);
+  env.MUSE_ALLOWED_ORIGINS = "https://muse.example, https://admin.example";
+  const allowed = await worker.fetch(post(message, token, "https://muse.example"), env);
+  assert.equal(allowed.status, 200);
+  const serverToServer = await worker.fetch(post(message), env);
+  assert.equal(serverToServer.status, 200);
+});
+
+test("Muse MCP negotiates initialization, answers ping, and accepts initialized notification", async () => {
+  const env = await envFor();
+  const init = await worker.fetch(post({
+    jsonrpc: "2.0", id: "init-1", method: "initialize",
+    params: { protocolVersion: "2025-03-26", capabilities: {}, clientInfo: { name: "Muse compatibility test", version: "1.0" } }
+  }), env);
+  const initBody = await init.json() as any;
+  assert.equal(initBody.result.protocolVersion, "2025-03-26");
+  assert.equal(init.headers.get("mcp-protocol-version"), "2025-03-26");
+  const ping = await worker.fetch(post({ jsonrpc: "2.0", id: "ping-1", method: "ping" }), env);
+  assert.deepEqual((await ping.json() as any).result, {});
+  const notification = await worker.fetch(post({ jsonrpc: "2.0", method: "notifications/initialized" }), env);
+  assert.equal(notification.status, 202);
+  assert.equal(await notification.text(), "");
+});
+
+test("Muse MCP returns method-not-allowed for unsupported GET transport", async () => {
+  const env = await envFor();
+  const response = await worker.fetch(new Request("https://guardian.test/v1/muse/" + id + "/mcp", {
+    method: "GET", headers: { authorization: "Bearer " + token }
+  }), env);
+  assert.equal(response.status, 405);
+});
+
+test("Muse MCP rejects arguments that could attempt to change installation scope", async () => {
+  const env = await envFor();
+  const response = await worker.fetch(post({
+    jsonrpc: "2.0", id: "scope-1", method: "tools/call",
+    params: { name: "get_business_overview", arguments: { installationId: "ffffffff-ffff-ffff-ffff-ffffffffffff" } }
+  }), env);
+  const body = await response.json() as any;
+  assert.equal(body.error.code, -32602);
+});
+
+
+test("Muse MCP blocks an expired SENE VENTAS license", async () => {
+  const env = await envFor();
+  const activeFetch = globalThis.fetch;
+  (globalThis as any).fetch = async () => Response.json({
+    active: false, expires_at: "2026-01-01T00:00:00.000Z"
+  }, { status: 200 });
+  try {
+    const response = await worker.fetch(post({ jsonrpc: "2.0", id: 12, method: "tools/list" }), env);
+    assert.equal(response.status, 403);
+    assert.equal((await response.json() as any).error, "license_inactive");
+  } finally {
+    globalThis.fetch = activeFetch;
+  }
+});
+
+test("Muse MCP fails closed when SENE VENTAS license status cannot be checked", async () => {
+  const env = await envFor();
+  const activeFetch = globalThis.fetch;
+  (globalThis as any).fetch = async () => { throw new Error("network unavailable"); };
+  try {
+    const response = await worker.fetch(post({ jsonrpc: "2.0", id: 13, method: "tools/list" }), env);
+    assert.equal(response.status, 403);
+    assert.equal((await response.json() as any).error, "license_inactive");
+  } finally {
+    globalThis.fetch = activeFetch;
+  }
+});

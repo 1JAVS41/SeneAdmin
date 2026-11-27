@@ -1,0 +1,161 @@
+name: SENE GUARDIAN Free Test Deploy
+
+on:
+  push:
+    branches:
+      - feature/sene-guardian-muse-readonly
+    paths:
+      - "guardian-worker/**"
+      - ".github/workflows/sene-guardian-free-test-deploy.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  deploy-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Confirm required secrets exist
+        env:
+          CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CF_ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          test -n "$CF_TOKEN" || { echo "::error::Missing CLOUDFLARE_API_TOKEN"; exit 1; }
+          test -n "$CF_ACCOUNT" || { echo "::error::Missing CLOUDFLARE_ACCOUNT_ID"; exit 1; }
+      - name: Create or reuse isolated free-tier KV namespace
+        id: kv
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/storage/kv/namespaces"
+          LIST="$(curl --fail --silent --show-error "$API" -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN")"
+          KV_ID="$(printf '%s' "$LIST" | jq -r '.result[] | select(.title == "SENE_GUARDIAN_TEST_DATA") | .id' | head -n 1)"
+          if [ -z "$KV_ID" ] || [ "$KV_ID" = "null" ]; then
+            CREATED="$(curl --fail --silent --show-error -X POST "$API" \
+              -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+              -H "Content-Type: application/json" \
+              --data '{"title":"SENE_GUARDIAN_TEST_DATA"}')"
+            KV_ID="$(printf '%s' "$CREATED" | jq -r '.result.id')"
+          fi
+          test -n "$KV_ID" && test "$KV_ID" != "null"
+          echo "namespace_id=$KV_ID" >> "$GITHUB_OUTPUT"
+          echo "KV namespace ready: SENE_GUARDIAN_TEST_DATA"
+      - name: Prepare isolated test Worker config
+        env:
+          KV_ID: ${{ steps.kv.outputs.namespace_id }}
+        run: |
+          set -euo pipefail
+          sed -e 's/name = "sene-guardian-api"/name = "sene-guardian-test"/' \
+              -e "s/id = \"REPLACE_WITH_KV_NAMESPACE_ID\"/id = \"$KV_ID\"/" \
+              guardian-worker/wrangler.toml > guardian-worker/wrangler.test.toml
+          grep -q 'name = "sene-guardian-test"' guardian-worker/wrangler.test.toml
+          ! grep -q 'REPLACE_WITH_KV_NAMESPACE_ID' guardian-worker/wrangler.test.toml
+      - name: Deploy test Worker on Cloudflare Free
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: npx --yes wrangler@4 deploy --config guardian-worker/wrangler.test.toml
+      - name: End-to-end test with ephemeral fictional installation
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        working-directory: guardian-worker
+        run: |
+          set -euo pipefail
+          set +x
+          BASE_URL="https://sene-guardian-test.nagavs28.workers.dev"
+          ADMIN_TOKEN=""
+          INGEST_TOKEN=""
+          MUSE_TOKEN=""
+          INSTALLATION_ID=""
+          cleanup() {
+            if [ -n "$ADMIN_TOKEN" ] && [ -n "$INSTALLATION_ID" ]; then
+              curl --silent --show-error -o /tmp/sene-cleanup.json \
+                -X POST "$BASE_URL/v1/admin/installations/revoke" \
+                -H "Authorization: Bearer $ADMIN_TOKEN" -H "Content-Type: application/json" \
+                --data "$(jq -nc --arg id "$INSTALLATION_ID" '{installationId:$id}')" || true
+            fi
+            ROTATED_ADMIN_TOKEN="$(openssl rand -hex 32)"
+            printf '%s' "$ROTATED_ADMIN_TOKEN" | npx --yes wrangler@4 secret put GUARDIAN_ADMIN_TOKEN --config wrangler.test.toml >/dev/null 2>&1 || true
+            npx --yes wrangler@4 deploy --config wrangler.test.toml >/dev/null 2>&1 || true
+            unset ADMIN_TOKEN INGEST_TOKEN MUSE_TOKEN ROTATED_ADMIN_TOKEN
+            rm -f /tmp/sene-installation.json /tmp/sene-fictional-snapshot.json /tmp/sene-mcp-*.json /tmp/sene-mcp-headers /tmp/sene-mcp-notify.txt /tmp/sene-notify-status /tmp/sene-snapshot-result.json /tmp/sene-revoke.json /tmp/sene-cleanup.json
+          }
+          trap cleanup EXIT
+
+          echo "Stage 1/7: checking test Worker health"
+          HEALTH="$(curl --fail --silent --show-error "$BASE_URL/v1/health")"
+          printf '%s' "$HEALTH" | jq -e '.service == "SENE GUARDIAN" and .status == "online" and .api == 1' >/dev/null
+
+          echo "Stage 2/7: installing temporary admin credential"
+          ADMIN_TOKEN="$(openssl rand -hex 32)"
+          printf '%s' "$ADMIN_TOKEN" | npx --yes wrangler@4 secret put GUARDIAN_ADMIN_TOKEN --config wrangler.test.toml >/dev/null 2>&1
+          npx --yes wrangler@4 secret list --config wrangler.test.toml > /tmp/sene-secret-list.txt
+          grep -q 'GUARDIAN_ADMIN_TOKEN' /tmp/sene-secret-list.txt
+          npx --yes wrangler@4 deploy --config wrangler.test.toml >/dev/null 2>&1
+          sleep 2
+
+          echo "Stage 3/7: provisioning fictional installation"
+          INSTALLATION_ID="$(cat /proc/sys/kernel/random/uuid)"
+          INSTALL_STATUS="$(curl --silent --show-error -o /tmp/sene-installation.json -w '%{http_code}' \
+            -X POST "$BASE_URL/v1/admin/installations" \
+            -H "Authorization: Bearer $ADMIN_TOKEN" -H "Content-Type: application/json" \
+            --data "$(jq -nc --arg id "$INSTALLATION_ID" '{installationId:$id}')")"
+          if [ "$INSTALL_STATUS" != "201" ]; then echo "Provisioning returned HTTP $INSTALL_STATUS"; cat /tmp/sene-installation.json; exit 1; fi
+          INGEST_TOKEN="$(jq -er '.ingestToken' /tmp/sene-installation.json)"
+          MUSE_TOKEN="$(jq -er '.museReadToken' /tmp/sene-installation.json)"
+
+          echo "Stage 4/7: ingesting fictional inventory snapshot"
+          CAPTURED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          jq -nc --arg id "$INSTALLATION_ID" --arg captured "$CAPTURED_AT" \
+            '{schema:1,installationId:$id,capturedAt:$captured,business:{status:"active"},inventory:{categories:[{category:"INVENTARIO_MAESTRO",itemCount:7,unitsInStock:24,lowStockCount:2,outOfStockCount:1,updatedAt:$captured}]}}' \
+            > /tmp/sene-fictional-snapshot.json
+          SNAPSHOT_STATUS="$(curl --silent --show-error -o /tmp/sene-snapshot-result.json -w '%{http_code}' \
+            -X POST "$BASE_URL/v1/snapshot" -H "Authorization: Bearer $INGEST_TOKEN" \
+            -H "Content-Type: application/json" --data-binary @/tmp/sene-fictional-snapshot.json)"
+          if [ "$SNAPSHOT_STATUS" != "200" ]; then echo "Snapshot returned HTTP $SNAPSHOT_STATUS"; cat /tmp/sene-snapshot-result.json; exit 1; fi
+          jq -e '.accepted == true' /tmp/sene-snapshot-result.json >/dev/null
+
+          MCP_URL="$BASE_URL/v1/muse/$INSTALLATION_ID/mcp"
+          echo "Stage 5/7: initializing MCP session"
+          INIT_STATUS="$(curl --silent --show-error -D /tmp/sene-mcp-headers -o /tmp/sene-mcp-init.json -w '%{http_code}' \
+            -X POST "$MCP_URL" -H "Authorization: Bearer $MUSE_TOKEN" \
+            -H "Content-Type: application/json" -H "Accept: application/json, text/event-stream" \
+            --data '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"SENE test runner","version":"1.0"}}}')"
+          if [ "$INIT_STATUS" != "200" ]; then echo "MCP initialize returned HTTP $INIT_STATUS"; cat /tmp/sene-mcp-init.json; exit 1; fi
+          jq -e '.result.protocolVersion == "2025-03-26"' /tmp/sene-mcp-init.json >/dev/null
+          grep -qi '^mcp-protocol-version: 2025-03-26' /tmp/sene-mcp-headers
+
+          echo "Stage 6/7: listing and calling the read-only business tool"
+          NOTIFY_STATUS="$(curl --silent --show-error -o /tmp/sene-mcp-notify.txt -w '%{http_code}' \
+            -X POST "$MCP_URL" -H "Authorization: Bearer $MUSE_TOKEN" \
+            -H "Content-Type: application/json" -H "Accept: application/json, text/event-stream" \
+            --data '{"jsonrpc":"2.0","method":"notifications/initialized"}')"
+          test "$NOTIFY_STATUS" = "202"
+          TOOLS_STATUS="$(curl --silent --show-error -o /tmp/sene-mcp-tools.json -w '%{http_code}' \
+            -X POST "$MCP_URL" -H "Authorization: Bearer $MUSE_TOKEN" \
+            -H "Content-Type: application/json" -H "Accept: application/json, text/event-stream" \
+            --data '{"jsonrpc":"2.0","id":2,"method":"tools/list"}')"
+          if [ "$TOOLS_STATUS" != "200" ]; then echo "tools/list returned HTTP $TOOLS_STATUS"; cat /tmp/sene-mcp-tools.json; exit 1; fi
+          jq -e '.result.tools | length == 1 and .[0].name == "get_business_overview" and .[0].annotations.readOnlyHint == true' /tmp/sene-mcp-tools.json >/dev/null
+          CALL_STATUS="$(curl --silent --show-error -o /tmp/sene-mcp-call.json -w '%{http_code}' \
+            -X POST "$MCP_URL" -H "Authorization: Bearer $MUSE_TOKEN" \
+            -H "Content-Type: application/json" -H "Accept: application/json, text/event-stream" \
+            --data '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"get_business_overview","arguments":{}}}')"
+          if [ "$CALL_STATUS" != "200" ]; then echo "tools/call returned HTTP $CALL_STATUS"; cat /tmp/sene-mcp-call.json; exit 1; fi
+          jq -e '.result.structuredContent.business.status == "active" and .result.structuredContent.inventory.categories[0].itemCount == 7 and (.result.structuredContent | has("installationId") | not)' /tmp/sene-mcp-call.json >/dev/null
+
+          echo "Stage 7/7: revoking temporary installation"
+          REVOKE_STATUS="$(curl --silent --show-error -o /tmp/sene-revoke.json -w '%{http_code}' \
+            -X POST "$BASE_URL/v1/admin/installations/revoke" \
+            -H "Authorization: Bearer $ADMIN_TOKEN" -H "Content-Type: application/json" \
+            --data "$(jq -nc --arg id "$INSTALLATION_ID" '{installationId:$id}')")"
+          if [ "$REVOKE_STATUS" != "200" ]; then echo "Revocation returned HTTP $REVOKE_STATUS"; cat /tmp/sene-revoke.json; exit 1; fi
+          jq -e '.revoked == true' /tmp/sene-revoke.json >/dev/null
+          echo "PASS: fake installation provisioned, test snapshot ingested, MCP initialized, read-only tool listed and called, and installation revoked."

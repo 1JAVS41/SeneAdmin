@@ -1,0 +1,33 @@
+name: SENE GUARDIAN Worker CI
+
+on:
+  push:
+    branches:
+      - feature/sene-guardian-muse-readonly
+    paths:
+      - "guardian-worker/**"
+      - ".github/workflows/guardian-worker-ci.yml"
+  pull_request:
+    branches:
+      - feature/sene-guardian-muse-readonly
+    paths:
+      - "guardian-worker/**"
+      - ".github/workflows/guardian-worker-ci.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: guardian-worker
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install --no-audit --no-fund
+      - run: npm run typecheck
+      - run: npm test
