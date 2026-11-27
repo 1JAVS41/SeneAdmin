@@ -69,7 +69,8 @@ class GuardianSettingsActivity : Activity() {
                 } else {
                     GuardianConfigStore.updateConsent(this, consent.isChecked)
                 }
-                status.text = if (consent.isChecked) "Configuración protegida. El envío automático cada dos horas está autorizado." else
+                if (consent.isChecked) SeneAdminAutoSyncScheduler.syncNow(this)
+                status.text = if (consent.isChecked) "Configuración protegida. Se iniciará la primera sincronización y después se repetirá cada dos horas." else
                     "Configuración protegida. El envío automático está desactivado porque no hay consentimiento."
                 Toast.makeText(this, "Configuración guardada de forma cifrada.", Toast.LENGTH_SHORT).show()
             } catch (e: Exception) {
