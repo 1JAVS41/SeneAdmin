@@ -78,7 +78,7 @@ function validId(value: string): boolean {
 function validSnapshot(value: unknown): value is Snapshot {
   if (!value || typeof value !== "object") return false;
   const v = value as Partial<Snapshot>;
-  if (v.schema !== 1 || typeof v.installationId !== "string" || !validId(v.installationId) ||
+  if ((v.schema !== 1 && v.schema !== 2) || typeof v.installationId !== "string" || !validId(v.installationId) ||
       typeof v.capturedAt !== "string" || !Number.isFinite(Date.parse(v.capturedAt)) ||
       !v.business || !["active", "unknown"].includes(v.business.status) ||
       !Array.isArray(v.inventory?.categories) || v.inventory.categories.length > 2 ||
