@@ -15,8 +15,24 @@ Código de desarrollo de SENE GUARDIÁN. Esta rama no se ha desplegado en produc
 ## Conectores MUSE
 
 - Cliente: `POST /v1/muse/{installationId}/mcp`. Expone únicamente cuatro herramientas de solo lectura y limitadas a una instalación, todas sin argumentos y recortadas del mismo resumen administrativo ya cargado (`get_business_overview`): `get_business_overview` (resumen completo), `list_workers` (devuelve `{ total, employees }` de `workers`; si no hay trabajadores, responde "Todavía no hay trabajadores registrados para esta instalación."), `get_inventory_summary` (devuelve `inventory.categories` y `damagedProducts`) y `get_sales_summary` (devuelve `sales.periods` y `approvedMovements.periods`).
-- Propietario: `POST /v1/muse/owner/mcp`. Expone únicamente `list_owner_license_requests`, autenticado con la credencial central del propietario. No acepta tokens de instalación.
+- Propietario: `POST /v1/muse/owner/mcp`. Expone `list_owner_license_requests` (solicitudes pendientes, con folio y código) y `list_owner_active_licenses` (total y lista de licencias activas, sin código), autenticado con la credencial central del propietario. No acepta tokens de instalación.
 - Las solicitudes de licencia nueva y renovación pertenecen exclusivamente al MUSE del propietario. No se exponen en el MCP de clientes ni se ejecutan acciones de aprobación, activación o envío.
+
+## Licencias activas (solo propietario)
+
+Una licencia activa es una activación o renovación **completada** que el productor de SENE VENTAS envió al canal del propietario. No se inventa ninguna licencia a partir de una solicitud pendiente: si no hay eventos completados, el total es 0.
+
+Contrato del productor (evento cifrado a `POST /v1/guardian/owner-events`, mismos encabezados, HMAC y AES-GCM que las solicitudes):
+
+- `event_type`: `"activation.completed"` o `"renewal.completed"`.
+- `payment_status`: `"paid"`.
+- `valid_from` / `valid_until`: fechas ISO, con `valid_until` después de `valid_from`.
+- Los demás campos son los mismos que en una solicitud: `event_id` (UUID), `installation_id`, `folio` (`SENE-...`), `request_type` (`activation` o `renewal`), `created_at`, `amount_cents` (> 0), `currency` (`MXN`), `business_name`, `holder_name`, `whatsapp`, `code`.
+- Retención: una licencia completada se guarda hasta un día después de su `valid_until` (máximo 90 días); una solicitud pendiente se guarda un día.
+- `GET /v1/guardian/owner-events?kind=active` devuelve `{ total, licenses }` con solo `folio`, `installationId`, `businessName`, `requestType`, `validFrom`, `validUntil` y `status: "active"`, ordenadas por vencimiento. Sin código, sin WhatsApp, sin nombre del titular y sin importe.
+- `GET /v1/guardian/owner-events` (sin `kind`) sigue devolviendo solo las solicitudes pendientes.
+
+**Pendiente:** el productor de SENE VENTAS todavía no envía eventos completados (tampoco envía las solicitudes). Hasta que lo haga, `list_owner_active_licenses` devuelve total 0, lo cual no es un error ni significa que no haya licencias: significa que el servidor no ha recibido ninguna.
 
 ## Datos agregados
 
@@ -51,7 +67,7 @@ El snapshot no contiene lista de artículos ni movimientos individuales, solo co
 
 ## Pendiente antes de producción
 
-1. Completar y probar el productor de eventos de licencia hacia el MUSE del propietario, sin enviar códigos al MUSE cliente.
+1. Completar y probar el productor de eventos de licencia hacia el MUSE del propietario, sin enviar códigos al MUSE cliente. El productor debe enviar también los eventos completados (`activation.completed` / `renewal.completed`, con `payment_status: "paid"` y `valid_from` / `valid_until`) para que `list_owner_active_licenses` pueda devolver licencias reales; hoy devuelve total 0 porque no recibe ninguno.
 2. Verificar secretos, KV, cuotas, retención y límites del plan gratuito.
 3. Integrar consentimiento, configuración y revocación del exportador en el flujo Android.
 4. Probar en entorno de pruebas real el aislamiento, la revocación, la ingestión, los MCP cliente/propietario y el cifrado de eventos.
