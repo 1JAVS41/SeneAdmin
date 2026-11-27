@@ -124,3 +124,32 @@ test("Muse MCP rejects arguments that could attempt to change installation scope
   const body = await response.json() as any;
   assert.equal(body.error.code, -32602);
 });
+
+
+test("Muse MCP blocks an expired SENE VENTAS license", async () => {
+  const env = await envFor();
+  const activeFetch = globalThis.fetch;
+  (globalThis as any).fetch = async () => Response.json({
+    active: false, expires_at: "2026-01-01T00:00:00.000Z"
+  }, { status: 200 });
+  try {
+    const response = await worker.fetch(post({ jsonrpc: "2.0", id: 12, method: "tools/list" }), env);
+    assert.equal(response.status, 403);
+    assert.equal((await response.json() as any).error, "license_inactive");
+  } finally {
+    globalThis.fetch = activeFetch;
+  }
+});
+
+test("Muse MCP fails closed when SENE VENTAS license status cannot be checked", async () => {
+  const env = await envFor();
+  const activeFetch = globalThis.fetch;
+  (globalThis as any).fetch = async () => { throw new Error("network unavailable"); };
+  try {
+    const response = await worker.fetch(post({ jsonrpc: "2.0", id: 13, method: "tools/list" }), env);
+    assert.equal(response.status, 403);
+    assert.equal((await response.json() as any).error, "license_inactive");
+  } finally {
+    globalThis.fetch = activeFetch;
+  }
+});
