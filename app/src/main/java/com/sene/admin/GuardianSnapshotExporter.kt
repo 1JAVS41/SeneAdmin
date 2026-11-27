@@ -19,6 +19,8 @@ import java.util.TimeZone
  * suministrar el token de ingestión de esta instalación desde almacenamiento seguro.
  */
 object GuardianSnapshotExporter {
+    // URL del Worker de PRUEBAS. No cambiar a producción en este cambio;
+    // no se despliega nada y la URL sigue apuntando a pruebas.
     private const val SNAPSHOT_URL = "https://sene-guardian-test.nagavs28.workers.dev/v1/snapshot"
     private val ALLOWED_CATEGORIES = setOf("INVENTARIO_MAESTRO", "INVENTARIO_SENE")
 
@@ -74,6 +76,7 @@ object GuardianSnapshotExporter {
                 .put("updatedAt", capturedAt))
             .put("approvedMovements", approvedMovementSummary(context.applicationContext))
             .put("payroll", payrollSummary(context.applicationContext))
+            .put("workers", workersSummary(context.applicationContext))
             .put("sales", salesSummary(context.applicationContext))
 
         val connection = (URL(SNAPSHOT_URL).openConnection() as HttpURLConnection)
@@ -124,8 +127,9 @@ object GuardianSnapshotExporter {
     }
 
     /**
-     * Totales de nómina por periodo. Se omiten importes con menos de tres
-     * trabajadores distintos para evitar revelar un sueldo individual.
+     * Totales de nómina por periodo. Se incluyen todos los periodos, también
+     * los de menos de tres trabajadores, para coincidir con el servidor, que
+     * acepta periodos con un solo trabajador (employeeCount mínimo 1).
      */
     private fun payrollSummary(context: Context): JSONObject {
         val rows = OwnerPayrollStore.profiles(context).flatMap { profile ->
@@ -135,7 +139,6 @@ object GuardianSnapshotExporter {
         val periods = JSONArray()
         rows.forEach { (period, records) ->
             val employeeCount = records.map { it.first }.distinct().size
-            if (employeeCount < 3) return@forEach
             periods.put(JSONObject()
                 .put("period", period)
                 .put("employeeCount", employeeCount)
@@ -149,6 +152,26 @@ object GuardianSnapshotExporter {
                 .put("deliveredCents", records.sumOf { it.second.deliveredCents.coerceAtLeast(0L) }))
         }
         return JSONObject().put("periods", periods)
+    }
+
+    /**
+     * Trabajadores de esta instalación: nombre y sueldo individual.
+     * El sueldo en el perfil es SEMANAL: profile.weeklySalaryCents se lee del
+     * JSON "salary" y se envía como salaryCents, en centavos por semana
+     * (no es un sueldo mensual). Solo para el MUSE de esta instalación;
+     * nunca se comparte con otra instalación ni con el MUSE propietario.
+     * No se envían teléfono, PIN, credenciales ni identificadores.
+     */
+    private fun workersSummary(context: Context): JSONObject {
+        val employees = JSONArray()
+        OwnerPayrollStore.profiles(context)
+            .sortedBy { it.name.trim().lowercase(Locale.ROOT) }
+            .forEach { profile ->
+                employees.put(JSONObject()
+                    .put("name", profile.name.trim())
+                    .put("salaryCents", profile.weeklySalaryCents.toLong().coerceAtLeast(0L)))
+            }
+        return JSONObject().put("employees", employees)
     }
 
 

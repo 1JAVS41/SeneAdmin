@@ -23,7 +23,10 @@ const snapshot = {
   schema: 1, installationId: id, capturedAt: new Date().toISOString(),
   business: { status: "active" },
   inventory: { categories: [{ category: "INVENTARIO_MAESTRO", itemCount: 12, unitsInStock: 30, lowStockCount: 2, outOfStockCount: 1, updatedAt: new Date().toISOString() }] },
-  workers: { employees: [{ name: "Ana", salaryCents: 100000 }] }
+  damagedProducts: { itemCount: 2, updatedAt: new Date().toISOString() },
+  approvedMovements: { periods: [{ period: "2026-11", cashDisbursementCount: 1, inventoryConsumptionCount: 2, inventoryConsumptionUnits: 5 }] },
+  sales: { periods: [{ period: "2026-11", workerCount: 1, reportCount: 1, salesNetCents: 50000, providerPaymentsCents: 1000, loansDisbursedCents: 0 }] },
+  workers: { employees: [{ name: "Ana", salaryCents: 100000 }, { name: "Luis", salaryCents: 90000 }] }
 };
 const envFor = async () => {
   const kv = new MemoryKV();
@@ -37,16 +40,25 @@ const envFor = async () => {
 const post = (body: unknown, auth = token, origin?: string) => new Request("https://guardian.test/v1/muse/" + id + "/mcp", {
   method: "POST", headers: { "content-type": "application/json", authorization: "Bearer " + auth, ...(origin ? { origin } : {}) }, body: JSON.stringify(body)
 });
+const callTool = async (env: any, toolId: number, name: string) => {
+  const response = await worker.fetch(post({ jsonrpc: "2.0", id: toolId, method: "tools/call", params: { name, arguments: {} } }), env);
+  const body = await response.json() as any;
+  return body.result;
+};
 
-test("Muse MCP initializes and exposes only one read-only administrative tool", async () => {
+test("Muse MCP initializes and exposes only four read-only administrative tools", async () => {
   const env = await envFor();
   const init = await worker.fetch(post({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-03-26", capabilities: {}, clientInfo: { name: "test", version: "1" } } }), env);
   assert.equal(init.status, 200);
   const list = await worker.fetch(post({ jsonrpc: "2.0", id: 2, method: "tools/list" }), env);
   const body = await list.json() as any;
-  assert.deepEqual(body.result.tools.map((t: any) => t.name), ["get_business_overview"]);
-  assert.equal(body.result.tools[0].annotations.readOnlyHint, true);
+  assert.deepEqual(body.result.tools.map((t: any) => t.name), ["get_business_overview", "list_workers", "get_inventory_summary", "get_sales_summary"]);
+  assert.equal(body.result.tools.every((t: any) => t.annotations.readOnlyHint === true), true);
+  assert.equal(body.result.tools.every((t: any) => t.annotations.destructiveHint === false), true);
   assert.equal(body.result.tools[0].description.includes("trabajadores"), true);
+  // No hay herramientas de lista de artículos ni de movimientos individuales:
+  // el snapshot solo tiene conteos y totales, no listas.
+  assert.equal(body.result.tools.some((t: any) => ["list_out_of_stock_items", "get_inventory_item", "list_sales_movements"].includes(t.name)), false);
 });
 
 test("Muse tool returns only its own installation overview and never central license events", async () => {
@@ -55,9 +67,49 @@ test("Muse tool returns only its own installation overview and never central lic
   const body = await response.json() as any;
   const result = JSON.parse(body.result.content[0].text);
   assert.equal(result.business.status, "active");
-  assert.deepEqual(result.workers.employees, [{ name: "Ana", salaryCents: 100000 }]);
+  assert.deepEqual(result.workers.employees, [{ name: "Ana", salaryCents: 100000 }, { name: "Luis", salaryCents: 90000 }]);
   assert.equal(result.installationId, undefined);
   assert.equal(JSON.stringify(result).includes("activation"), false);
+});
+
+test("list_workers returns total and employees from the same overview", async () => {
+  const env = await envFor();
+  const result = await callTool(env, 4, "list_workers");
+  const parsed = JSON.parse(result.content[0].text);
+  assert.equal(parsed.total, 2);
+  assert.deepEqual(parsed.employees, [{ name: "Ana", salaryCents: 100000 }, { name: "Luis", salaryCents: 90000 }]);
+  assert.deepEqual(result.structuredContent, { total: 2, employees: [{ name: "Ana", salaryCents: 100000 }, { name: "Luis", salaryCents: 90000 }] });
+  assert.equal(result.isError, false);
+});
+
+test("list_workers says so when the installation has no workers registered", async () => {
+  const env = await envFor();
+  const withoutWorkers: any = { ...snapshot };
+  delete withoutWorkers.workers;
+  await env.GUARDIAN_DATA.put("snapshot:v1:" + id, JSON.stringify(withoutWorkers));
+  const result = await callTool(env, 5, "list_workers");
+  assert.equal(result.content[0].text, "Todavía no hay trabajadores registrados para esta instalación.");
+  assert.equal(result.isError, false);
+});
+
+test("get_inventory_summary returns categories and damaged products from the same overview", async () => {
+  const env = await envFor();
+  const result = await callTool(env, 6, "get_inventory_summary");
+  const parsed = JSON.parse(result.content[0].text);
+  assert.equal(parsed.categories.length, 1);
+  assert.equal(parsed.categories[0].category, "INVENTARIO_MAESTRO");
+  assert.equal(parsed.categories[0].outOfStockCount, 1);
+  assert.equal(parsed.damagedProducts.itemCount, 2);
+  assert.equal(result.isError, false);
+});
+
+test("get_sales_summary returns sales periods and approved movement periods from the same overview", async () => {
+  const env = await envFor();
+  const result = await callTool(env, 7, "get_sales_summary");
+  const parsed = JSON.parse(result.content[0].text);
+  assert.deepEqual(parsed.sales.periods, [{ period: "2026-11", workerCount: 1, reportCount: 1, salesNetCents: 50000, providerPaymentsCents: 1000, loansDisbursedCents: 0 }]);
+  assert.deepEqual(parsed.approvedMovements.periods, [{ period: "2026-11", cashDisbursementCount: 1, inventoryConsumptionCount: 2, inventoryConsumptionUnits: 5 }]);
+  assert.equal(result.isError, false);
 });
 
 test("Muse MCP rejects wrong tokens and revoked installations", async () => {

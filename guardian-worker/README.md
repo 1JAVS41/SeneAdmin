@@ -14,7 +14,7 @@ Código de desarrollo de SENE GUARDIÁN. Esta rama no se ha desplegado en produc
 
 ## Conectores MUSE
 
-- Cliente: `POST /v1/muse/{installationId}/mcp`. Expone únicamente `get_business_overview`, de solo lectura y limitado a una instalación.
+- Cliente: `POST /v1/muse/{installationId}/mcp`. Expone únicamente cuatro herramientas de solo lectura y limitadas a una instalación, todas sin argumentos y recortadas del mismo resumen administrativo ya cargado (`get_business_overview`): `get_business_overview` (resumen completo), `list_workers` (devuelve `{ total, employees }` de `workers`; si no hay trabajadores, responde "Todavía no hay trabajadores registrados para esta instalación."), `get_inventory_summary` (devuelve `inventory.categories` y `damagedProducts`) y `get_sales_summary` (devuelve `sales.periods` y `approvedMovements.periods`).
 - Propietario: `POST /v1/muse/owner/mcp`. Expone únicamente `list_owner_license_requests`, autenticado con la credencial central del propietario. No acepta tokens de instalación.
 - Las solicitudes de licencia nueva y renovación pertenecen exclusivamente al MUSE del propietario. No se exponen en el MCP de clientes ni se ejecutan acciones de aprobación, activación o envío.
 
@@ -26,10 +26,14 @@ El exportador Android construye una lista permitida de datos y no envía filas p
 - Productos dañados: conteo, sin códigos, nombres ni motivos.
 - Movimientos aprobados: conteos y unidades por mes, sin importes ni identificadores.
 - Nómina: totales por periodo. Se aceptan periodos con un solo trabajador.
-- Trabajadores: lista de esa instalación con nombre y sueldo individual por trabajador, solo para el MUSE de esa instalación. Nunca se muestran a otra instalación ni al MUSE propietario.
+- Trabajadores: lista de esa instalación con nombre y sueldo individual por trabajador, solo para el MUSE de esa instalación. Nunca se muestran a otra instalación ni al MUSE propietario. El sueldo es SEMANAL: el exportador toma `profile.weeklySalaryCents` del perfil (leído del JSON `"salary"`) y lo envía como `salaryCents`, en centavos por semana, no mensual. La lista va ordenada por nombre.
 - Ventas: ventas netas, pagos a proveedores y préstamos entregados por mes. Se toma el último reporte de cada trabajador y fecha para no sumar reportes acumulativos repetidos; solo se utilizan reportes SYNC que sigan disponibles en el historial local.
 
 No se exportan teléfonos, identificadores de trabajadores, productos, códigos comerciales, credenciales ni PIN. Los nombres y sueldos individuales sí se exportan, solo a la instalación a la que pertenecen: el servidor guarda el resumen solo con los campos permitidos y descarta cualquier otro dato que llegue por accidente.
+
+### Por qué no existen herramientas de lista de artículos ni de movimientos individuales
+
+El snapshot no contiene lista de artículos ni movimientos individuales, solo conteos y totales: inventario trae conteos por categoría, productos dañados trae solo un conteo, ventas y movimientos aprobados traen solo totales por mes. Por eso no existen `list_out_of_stock_items`, `get_inventory_item` ni `list_sales_movements`: no hay datos en el resumen para responderlas sin inventar campos. `get_inventory_summary` devuelve los conteos por categoría y el conteo de dañados, y `get_sales_summary` devuelve los totales mensuales de ventas y de movimientos aprobados.
 
 ## Configuración y estado
 
@@ -41,8 +45,8 @@ No se exportan teléfonos, identificadores de trabajadores, productos, códigos 
 
 ## Verificación automatizada
 
-- Worker CI: TypeScript y pruebas automatizadas de aislamiento entre instalaciones, revocación, validación de snapshots, datos agregados y separación del canal del propietario.
-- Android: workflow de compilación Kotlin; no ensambla APK.
+- Worker CI: TypeScript y pruebas automatizadas de aislamiento entre instalaciones, revocación, validación de snapshots, datos agregados y separación del canal del propietario. Incluye pruebas de `list_workers` (con trabajadores y sin trabajadores), `get_inventory_summary` y `get_sales_summary`.
+- Android: workflow de compilación Kotlin; no ensambla APK. El workflow `guardian-android-compile.yml` solo corre en push, no en `pull_request`, así que la compilación Kotlin no corre en los PR de esta rama.
 - Las pruebas no sustituyen la verificación de runtime real en Cloudflare ni la validación con datos de una instalación.
 
 ## Pendiente antes de producción
