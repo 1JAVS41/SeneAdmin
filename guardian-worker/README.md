@@ -54,3 +54,12 @@ SeneAdmin envía una captura agregada cuando el propietario la autoriza y pulsa 
 ## 6. Pruebas
 
 `npm run typecheck` y `npm test` comprueban tipos y rutas del Worker. Las pruebas automatizadas ya pasaron en CI antes del último ajuste del exportador Android; vuelve a ejecutarlas antes del despliegue final. No se ha desplegado este código en Cloudflare.
+
+
+## Inventario central para el MUSE propietario
+
+- La ruta MCP existente `/v1/muse/owner/mcp` conserva su credencial central exclusiva; no requiere reconectar ni rotar el token del propietario.
+- La herramienta de solo lectura `list_owner_license_inventory` consulta SERVER-SENE mediante `GET /admin/owner/license-inventory`, autenticado servidor-a-servidor con el secreto `GUARDIAN_ADMIN_TOKEN`.
+- `list_owner_license_requests` continúa consultando los eventos cifrados de solicitudes y códigos entregados al canal central del propietario.
+- El endpoint de inventario no está disponible en las rutas MCP de clientes. No mover ni compartir la credencial central ni `GUARDIAN_ADMIN_TOKEN`.
+- Configura el mismo `GUARDIAN_ADMIN_TOKEN` en ambos Workers y conserva sin cambios `GUARDIAN_OWNER_CENTRAL_TOKEN_HASH`, `GUARDIAN_DELIVERY_ENC_KEY` y `GUARDIAN_DELIVERY_HMAC_KEY`.
