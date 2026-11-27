@@ -4,7 +4,6 @@ import { handleOwnerMuseMcp } from "./owner-muse-mcp";
 
 export interface Env {
   GUARDIAN_DATA: KVNamespace;
-  SENE_LICENSE_DB: D1Database;
   GUARDIAN_ADMIN_TOKEN: string;
   GUARDIAN_DELIVERY_ENC_KEY: string;
   GUARDIAN_DELIVERY_HMAC_KEY: string;
@@ -249,45 +248,7 @@ export default {
         if (!response.ok) return null;
         const payload = await response.json() as { events?: unknown[] };
         return Array.isArray(payload.events) ? payload.events : [];
-      }, async () => {
-        // Direct read-only D1 binding to the existing SENE license database.
-        // No HTTP route or API call to SENE VENTAS is involved. This callback is
-        // reachable only after authenticating the owner's existing central MUSE credential.
-        try {
-          const result = await env.SENE_LICENSE_DB.prepare(`
-            SELECT business_name, status, activated_at, expires_at, created_at, updated_at
-            FROM businesses
-            ORDER BY business_name_normalized ASC
-            LIMIT 1000
-          `).all();
-          const businesses = (result.results ?? []).map((row: any) => {
-            const expiry = row.expires_at ? Date.parse(String(row.expires_at)) : 0;
-            const status = row.status === "blocked" ? "blocked"
-              : expiry > 0 && expiry <= Date.now() ? "expired"
-              : String(row.status ?? "unknown");
-            return {
-              business_name: row.business_name,
-              status,
-              activated_at: row.activated_at ?? null,
-              expires_at: row.expires_at ?? null,
-              created_at: row.created_at ?? null,
-              updated_at: row.updated_at ?? null
-            };
-          });
-          return {
-            as_of: new Date().toISOString(),
-            totals: {
-              businesses: businesses.length,
-              active: businesses.filter((item: any) => item.status === "active").length,
-              expired: businesses.filter((item: any) => item.status === "expired").length,
-              blocked: businesses.filter((item: any) => item.status === "blocked").length
-            },
-            businesses
-          };
-        } catch {
-          return null;
-        }
-      });
+      }, async () => null);;
     }
 
     const museMatch = url.pathname.match(/^\/v1\/muse\/([a-f0-9-]{16,64})\/mcp$/i);
