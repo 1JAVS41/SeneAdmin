@@ -115,14 +115,23 @@ object GuardianSnapshotExporter {
         }
         val salesByDay = sortedMapOf<String, Long>()
         reports.sortedWith(compareBy<SeneReport> { it.date }.thenBy { it.time }.thenBy { it.number }).forEach { report ->
-            report.body.replace("\\r", "").lines().forEach lineLoop@{ raw ->
+            report.body.replace("\r", "").lines().forEach lineLoop@{ raw ->
                 val separator = raw.indexOf(':')
                 if (separator <= 0) return@lineLoop
                 val key = normalizeSalesKey(raw.substring(0, separator))
                 if (key !in setOf("VENTAS DEL DIA", "VENTA DEL DIA", "TOTAL DE VENTAS", "VENTAS TOTALES",
                         "VENTA NETA DEL DIA", "VENTAS NETAS") && !key.startsWith("VENTAS NETAS ")) return@lineLoop
                 val cents = moneyCents(raw.substring(separator + 1)) ?: return@lineLoop
-                if (report.date.isNotBlank()) salesByDay[report.date] = cents
+                val reportDay = report.date.trim().let { rawDate ->
+                    val patterns = listOf("yyyy-MM-dd", "dd/MM/yyyy")
+                    patterns.firstNotNullOfOrNull { pattern ->
+                        try {
+                            val parsed = SimpleDateFormat(pattern, Locale.US).apply { isLenient = false }.parse(rawDate)
+                            parsed?.let { SimpleDateFormat("yyyy-MM-dd", Locale.US).format(it) }
+                        } catch (_: Exception) { null }
+                    }
+                }
+                if (!reportDay.isNullOrBlank()) salesByDay[reportDay] = cents
             }
         }
         val salesDays = JSONArray()
