@@ -50,7 +50,7 @@ class GuardianSettingsActivity : Activity() {
         }
         root.addView(token)
         consent = CheckBox(this).apply {
-            text = "Autorizo a SENE GUARDIÁN a enviar el indicadores agregados de inventario, personal, nómina, asistencia, reportes y productos dañados de este dispositivo."
+            text = "Autorizo a SENE GUARDIÁN a enviar indicadores agregados de inventario, personal, nómina, asistencia, reportes y productos dañados de este dispositivo."
             textSize = 14f
             setPadding(0, dp(12), 0, dp(12))
         }
