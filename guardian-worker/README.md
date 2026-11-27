@@ -25,10 +25,11 @@ El exportador Android construye una lista permitida de datos y no envía filas p
 - Inventario: conteos de artículos, unidades y agotados por categoría.
 - Productos dañados: conteo, sin códigos, nombres ni motivos.
 - Movimientos aprobados: conteos y unidades por mes, sin importes ni identificadores.
-- Nómina: totales por periodo; omite los importes si hay menos de tres trabajadores distintos.
+- Nómina: totales por periodo. Se aceptan periodos con un solo trabajador.
+- Trabajadores: lista de esa instalación con nombre y sueldo individual por trabajador, solo para el MUSE de esa instalación. Nunca se muestran a otra instalación ni al MUSE propietario.
 - Ventas: ventas netas, pagos a proveedores y préstamos entregados por mes. Se toma el último reporte de cada trabajador y fecha para no sumar reportes acumulativos repetidos; solo se utilizan reportes SYNC que sigan disponibles en el historial local.
 
-No se exportan nombres, teléfonos, identificadores de trabajadores, productos, códigos comerciales, credenciales ni importes salariales individuales.
+No se exportan teléfonos, identificadores de trabajadores, productos, códigos comerciales, credenciales ni PIN. Los nombres y sueldos individuales sí se exportan, solo a la instalación a la que pertenecen: el servidor guarda el resumen solo con los campos permitidos y descarta cualquier otro dato que llegue por accidente.
 
 ## Configuración y estado
 

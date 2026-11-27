@@ -61,7 +61,7 @@ export async function handleMuseMcp(request: Request, installationId: string, lo
     return rpc(message.id, {
       tools: [{
         name: "get_business_overview",
-        description: "Consulta el resumen administrativo de solo lectura de la instalación conectada: estado del negocio, indicadores agregados de inventario, conteo de productos dañados, movimientos aprobados agregados y totales de nómina por periodo y ventas netas agregadas, pagos a proveedores y préstamos entregados. No incluye datos ni códigos de licencias.",
+        description: "Consulta el resumen administrativo de solo lectura de la instalación conectada: estado del negocio, indicadores agregados de inventario, conteo de productos dañados, movimientos aprobados agregados, totales de nómina por periodo, ventas netas agregadas, pagos a proveedores y préstamos entregados, y la lista de trabajadores de esa instalación con nombre y sueldo individual. No incluye datos ni códigos de licencias, ni trabajadores de otra instalación.",
         inputSchema: { type: "object", properties: {}, additionalProperties: false },
         annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
       }],

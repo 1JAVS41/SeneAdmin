@@ -22,7 +22,8 @@ const id = "abcdef12-3456-7890-abcd-ef1234567890";
 const snapshot = {
   schema: 1, installationId: id, capturedAt: new Date().toISOString(),
   business: { status: "active" },
-  inventory: { categories: [{ category: "INVENTARIO_MAESTRO", itemCount: 12, unitsInStock: 30, lowStockCount: 2, outOfStockCount: 1, updatedAt: new Date().toISOString() }] }
+  inventory: { categories: [{ category: "INVENTARIO_MAESTRO", itemCount: 12, unitsInStock: 30, lowStockCount: 2, outOfStockCount: 1, updatedAt: new Date().toISOString() }] },
+  workers: { employees: [{ name: "Ana", salaryCents: 100000 }] }
 };
 const envFor = async () => {
   const kv = new MemoryKV();
@@ -45,6 +46,7 @@ test("Muse MCP initializes and exposes only one read-only administrative tool", 
   const body = await list.json() as any;
   assert.deepEqual(body.result.tools.map((t: any) => t.name), ["get_business_overview"]);
   assert.equal(body.result.tools[0].annotations.readOnlyHint, true);
+  assert.equal(body.result.tools[0].description.includes("trabajadores"), true);
 });
 
 test("Muse tool returns only its own installation overview and never central license events", async () => {
@@ -53,6 +55,7 @@ test("Muse tool returns only its own installation overview and never central lic
   const body = await response.json() as any;
   const result = JSON.parse(body.result.content[0].text);
   assert.equal(result.business.status, "active");
+  assert.deepEqual(result.workers.employees, [{ name: "Ana", salaryCents: 100000 }]);
   assert.equal(result.installationId, undefined);
   assert.equal(JSON.stringify(result).includes("activation"), false);
 });

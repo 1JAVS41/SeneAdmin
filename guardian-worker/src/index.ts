@@ -34,6 +34,10 @@ type Snapshot = {
     earlyExitCents: number; loanCents: number; consumptionCents: number; netCents: number; deliveredCents: number;
   }> };
   sales?: { periods: Array<{ period: string; workerCount: number; reportCount: number; salesNetCents: number; providerPaymentsCents: number; loansDisbursedCents: number }> };
+  // Workers of this installation only: name + individual salary, for that
+  // installation's client Muse. Never shared with another installation or
+  // with the owner Muse. No other personal data (no phone, PIN, credentials).
+  workers?: { employees: Array<{ name: string; salaryCents: number }> };
 };
 type Installation = {
   schema: 1;
@@ -101,10 +105,18 @@ function validSnapshot(value: unknown): value is Snapshot {
     (v.payroll === undefined || (
       Array.isArray(v.payroll.periods) && v.payroll.periods.length <= 36 &&
       v.payroll.periods.every(p => /^\d{4}-\d{2}-\d{2}$/.test(p.period) &&
-        Number.isInteger(p.employeeCount) && p.employeeCount >= 3 && p.employeeCount <= 10000 &&
+        Number.isInteger(p.employeeCount) && p.employeeCount >= 1 && p.employeeCount <= 10000 &&
         Number.isInteger(p.payrollCount) && p.payrollCount >= p.employeeCount && p.payrollCount <= 10000 &&
         [p.grossCents,p.absenceCents,p.earlyExitCents,p.loanCents,p.consumptionCents,p.netCents,p.deliveredCents]
           .every(n => Number.isSafeInteger(n) && n >= 0)))) &&
+    // Workers: only name + individual salary for this installation's client
+    // Muse. Extra fields on an employee are ignored on save (see
+    // sanitizeSnapshot); they are never stored or returned.
+    (v.workers === undefined || (
+      Array.isArray(v.workers.employees) && v.workers.employees.length <= 10000 &&
+      v.workers.employees.every(e =>
+        typeof e.name === "string" && e.name.trim().length >= 1 && e.name.trim().length <= 100 &&
+        Number.isSafeInteger(e.salaryCents) && e.salaryCents >= 0))) &&
     // Sales periods are calendar months (YYYY-MM); keep this validator digit-based.
     (v.sales === undefined || (
       Array.isArray(v.sales.periods) && v.sales.periods.length <= 36 &&
@@ -113,6 +125,47 @@ function validSnapshot(value: unknown): value is Snapshot {
         Number.isInteger(p.reportCount) && p.reportCount >= p.workerCount && p.reportCount <= 10000 &&
         Number.isSafeInteger(p.salesNetCents) &&
         [p.providerPaymentsCents,p.loansDisbursedCents].every(n => Number.isSafeInteger(n) && n >= 0))));
+}
+// Rebuild a snapshot keeping only allowlisted fields, so nothing extra
+// sent by the exporter (e.g. a phone number) is ever stored or returned.
+// Employee names are trimmed; only name + salaryCents survive for workers.
+function sanitizeSnapshot(value: Snapshot): Snapshot {
+  const clean: Snapshot = {
+    schema: 1,
+    installationId: value.installationId,
+    capturedAt: value.capturedAt,
+    business: { status: value.business.status },
+    inventory: {
+      categories: value.inventory.categories.map(c => ({
+        category: c.category, itemCount: c.itemCount, unitsInStock: c.unitsInStock,
+        lowStockCount: c.lowStockCount, outOfStockCount: c.outOfStockCount, updatedAt: c.updatedAt,
+      })),
+    },
+  };
+  if (value.damagedProducts) clean.damagedProducts = { itemCount: value.damagedProducts.itemCount, updatedAt: value.damagedProducts.updatedAt };
+  if (value.approvedMovements) clean.approvedMovements = {
+    periods: value.approvedMovements.periods.map(p => ({
+      period: p.period, cashDisbursementCount: p.cashDisbursementCount,
+      inventoryConsumptionCount: p.inventoryConsumptionCount, inventoryConsumptionUnits: p.inventoryConsumptionUnits,
+    })),
+  };
+  if (value.payroll) clean.payroll = {
+    periods: value.payroll.periods.map(p => ({
+      period: p.period, employeeCount: p.employeeCount, payrollCount: p.payrollCount,
+      grossCents: p.grossCents, absenceCents: p.absenceCents, earlyExitCents: p.earlyExitCents,
+      loanCents: p.loanCents, consumptionCents: p.consumptionCents, netCents: p.netCents, deliveredCents: p.deliveredCents,
+    })),
+  };
+  if (value.sales) clean.sales = {
+    periods: value.sales.periods.map(p => ({
+      period: p.period, workerCount: p.workerCount, reportCount: p.reportCount,
+      salesNetCents: p.salesNetCents, providerPaymentsCents: p.providerPaymentsCents, loansDisbursedCents: p.loansDisbursedCents,
+    })),
+  };
+  if (value.workers) clean.workers = {
+    employees: value.workers.employees.map(e => ({ name: e.name.trim(), salaryCents: e.salaryCents })),
+  };
+  return clean;
 }
 async function installation(env: Env, id: string): Promise<Installation | null> {
   return env.GUARDIAN_DATA.get<Installation>(`installation:v1:${id}`, "json");
@@ -249,6 +302,7 @@ export default {
           ...(snapshot.approvedMovements ? { approvedMovements: snapshot.approvedMovements } : {}),
           ...(snapshot.payroll ? { payroll: snapshot.payroll } : {}),
           ...(snapshot.sales ? { sales: snapshot.sales } : {}),
+          ...(snapshot.workers ? { workers: snapshot.workers } : {}),
           dataAgeSeconds: Math.max(0, Math.floor((Date.now() - Date.parse(snapshot.capturedAt)) / 1000)),
         };
       });
@@ -265,8 +319,9 @@ export default {
       const prior = await env.GUARDIAN_DATA.get<Snapshot>(key, "json");
       if (prior && Date.parse(value.capturedAt) < Date.parse(prior.capturedAt))
         return json({ error: "stale_snapshot" }, 409);
-      await env.GUARDIAN_DATA.put(key, JSON.stringify(value), { expirationTtl: 60 * 60 * 24 * 35 });
-      return json({ accepted: true, capturedAt: value.capturedAt });
+      const clean = sanitizeSnapshot(value as Snapshot);
+      await env.GUARDIAN_DATA.put(key, JSON.stringify(clean), { expirationTtl: 60 * 60 * 24 * 35 });
+      return json({ accepted: true, capturedAt: clean.capturedAt });
     }
 
     if (request.method === "GET" && url.pathname === "/v1/guardian/business-overview") {
@@ -282,6 +337,7 @@ export default {
           ...(snapshot.approvedMovements ? { approvedMovements: snapshot.approvedMovements } : {}),
           ...(snapshot.payroll ? { payroll: snapshot.payroll } : {}),
         ...(snapshot.sales ? { sales: snapshot.sales } : {}),
+        ...(snapshot.workers ? { workers: snapshot.workers } : {}),
         dataAgeSeconds: Math.max(0, Math.floor((Date.now() - Date.parse(snapshot.capturedAt)) / 1000)),
       });
     }
