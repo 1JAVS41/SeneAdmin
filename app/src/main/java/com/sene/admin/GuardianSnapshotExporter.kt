@@ -44,6 +44,26 @@ object GuardianSnapshotExporter {
                 .put("updatedAt", capturedAt))
         }
 
+        // Catálogo consultable por producto: solo campos del inventario, sin datos personales.
+        val products = JSONArray()
+        for (category in listOf("INVENTARIO_MAESTRO", "INVENTARIO_SENE")) {
+            val local = InventoryLocalStore.snapshot(app, category) ?: continue
+            if (local.category !in ALLOWED_CATEGORIES) continue
+            local.items.take(2500).forEach { item ->
+                products.put(JSONObject().put("code", item.code).put("name", item.name)
+                    .put("price", item.price).put("stock", item.stock)
+                    .put("aisle", item.aisle).put("shelf", item.shelf).put("category", category))
+            }
+        }
+
+        // Solo movimientos aprobados. Se omiten trabajador, descripción e importes individuales.
+        val approvedMovements = JSONArray()
+        OwnerPayrollStore.approvedMovements(app).takeLast(1000).forEach { movement ->
+            approvedMovements.put(JSONObject().put("id", movement.id).put("type", movement.type)
+                .put("date", movement.date).put("productCode", movement.productCode)
+                .put("quantity", movement.quantity))
+        }
+
         // Solo contadores de negocio: nunca se exportan identidades ni contenido privado.
         val profiles = OwnerPayrollStore.profiles(app)
         var payrollRecords = 0
@@ -102,11 +122,13 @@ object GuardianSnapshotExporter {
             .put("damagedProducts", JSONObject().put("recordCount", damaged.size))
 
         val payload = JSONObject()
-            .put("schema", 1)
+            .put("schema", 2)
             .put("installationId", installationId)
             .put("capturedAt", capturedAt)
             .put("business", JSONObject().put("status", "unknown"))
             .put("inventory", JSONObject().put("categories", categories))
+            .put("products", products)
+            .put("approvedMovements", approvedMovements)
             .put("operations", operations)
 
         val connection = URL(SNAPSHOT_URL).openConnection() as HttpURLConnection
@@ -122,7 +144,7 @@ object GuardianSnapshotExporter {
             connection.outputStream.use { it.write(payload.toString().toByteArray(Charsets.UTF_8)) }
             val status = connection.responseCode
             if (status == HttpURLConnection.HTTP_OK || status == HttpURLConnection.HTTP_CREATED)
-                ExportResult(true, status, "Captura agregada de inventario, personal, nómina, asistencia y reportes aceptada.")
+                ExportResult(true, status, "Captura agregada, catálogo de productos y movimientos aprobados aceptados.")
             else ExportResult(false, status, "El servidor rechazó la captura (HTTP $status).")
         } finally { connection.disconnect() }
     }
