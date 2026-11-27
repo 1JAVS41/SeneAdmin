@@ -34,21 +34,71 @@ function validUuid(value: unknown): value is string {
 function validInstallationId(value: unknown): value is string {
   return typeof value === "string" && /^[a-f0-9-]{20,100}$/i.test(value);
 }
+function validDate(value: unknown): value is string {
+  return typeof value === "string" && Number.isFinite(Date.parse(value));
+}
+/** A license that is actually active, as reported by the SENE VENTAS producer.
+ * It is built only from a completed activation/renewal event; it is never
+ * invented from a pending request. The activation code is deliberately NOT
+ * included here: the owner already has it from the request, and the active
+ * list only needs folio, business, type and validity dates. */
+export type ActiveLicense = {
+  folio: string;
+  installationId: string;
+  businessName: string;
+  requestType: "activation" | "renewal";
+  validFrom: string;
+  validUntil: string;
+  status: "active";
+};
+export function isCompletedLicenseEvent(value: any): boolean {
+  return !!value && ["activation.completed", "renewal.completed"].includes(value.event_type);
+}
+export function isActiveLicense(value: any, now = Date.now()): boolean {
+  return isCompletedLicenseEvent(value) &&
+    validDate(value.valid_from) && validDate(value.valid_until) &&
+    Date.parse(value.valid_until) >= now;
+}
+/** Keep only active licenses, in a safe public shape (no code, no whatsapp,
+ * no holder name, no amount). Sorted by expiry, soonest first. */
+export function activeLicensesFromEvents(events: unknown[], now = Date.now()): { total: number; licenses: ActiveLicense[] } {
+  const licenses = (events as any[])
+    .filter((event) => isActiveLicense(event, now))
+    .map((event) => ({
+      folio: event.folio as string,
+      installationId: event.installation_id as string,
+      businessName: event.business_name as string,
+      requestType: event.request_type as "activation" | "renewal",
+      validFrom: event.valid_from as string,
+      validUntil: event.valid_until as string,
+      status: "active" as const,
+    }))
+    .sort((a, b) => Date.parse(a.validUntil) - Date.parse(b.validUntil) || a.folio.localeCompare(b.folio));
+  return { total: licenses.length, licenses };
+}
 function validEvent(value: any, eventId: string): boolean {
-  return !!value && value.event_id === eventId &&
-    ["activation.requested", "renewal.requested"].includes(value.event_type) &&
-    validInstallationId(value.installation_id) &&
-    typeof value.folio === "string" && /^SENE-[A-Z0-9-]{8,40}$/.test(value.folio) &&
-    ["activation", "renewal"].includes(value.request_type) &&
-    typeof value.created_at === "string" && Number.isFinite(Date.parse(value.created_at)) &&
-    typeof value.expires_at === "string" && Number.isFinite(Date.parse(value.expires_at)) &&
-    value.payment_status === "pending" &&
-    Number.isSafeInteger(value.amount_cents) && value.amount_cents > 0 &&
-    value.currency === "MXN" &&
-    typeof value.business_name === "string" && value.business_name.length >= 2 && value.business_name.length <= 80 &&
-    typeof value.holder_name === "string" && value.holder_name.length >= 2 && value.holder_name.length <= 100 &&
-    typeof value.whatsapp === "string" && /^\d{10,15}$/.test(value.whatsapp) &&
-    typeof value.code === "string" && /^[A-HJ-NP-Z2-9]{10}$/.test(value.code);
+  if (!value || value.event_id !== eventId ||
+      !validInstallationId(value.installation_id) ||
+      typeof value.folio !== "string" || !/^SENE-[A-Z0-9-]{8,40}$/.test(value.folio) ||
+      !["activation", "renewal"].includes(value.request_type) ||
+      !validDate(value.created_at) ||
+      !Number.isSafeInteger(value.amount_cents) || value.amount_cents <= 0 ||
+      value.currency !== "MXN" ||
+      typeof value.business_name !== "string" || value.business_name.length < 2 || value.business_name.length > 80 ||
+      typeof value.holder_name !== "string" || value.holder_name.length < 2 || value.holder_name.length > 100 ||
+      typeof value.whatsapp !== "string" || !/^\d{10,15}$/.test(value.whatsapp) ||
+      typeof value.code !== "string" || !/^[A-HJ-NP-Z2-9]{10}$/.test(value.code)) return false;
+  if (["activation.requested", "renewal.requested"].includes(value.event_type)) {
+    return value.payment_status === "pending" && validDate(value.expires_at);
+  }
+  if (isCompletedLicenseEvent(value)) {
+    // A completed activation/renewal: paid, with a validity window. It has
+    // no request expiry; valid_until must be after valid_from.
+    return value.payment_status === "paid" &&
+      validDate(value.valid_from) && validDate(value.valid_until) &&
+      Date.parse(value.valid_until) > Date.parse(value.valid_from);
+  }
+  return false;
 }
 export async function handleOwnerDelivery(request: Request, env: OwnerDeliveryEnv): Promise<Response> {
   if (!env.GUARDIAN_DELIVERY_ENC_KEY || !env.GUARDIAN_DELIVERY_HMAC_KEY)
@@ -85,16 +135,24 @@ export async function handleOwnerDelivery(request: Request, env: OwnerDeliveryEn
     if (!validEvent(event, eventId)) return json({ error: "invalid_event" }, 400);
     const key = "owner-event:v1:" + eventId;
     if (await env.GUARDIAN_DATA.get(key)) return json({ accepted: true, duplicate: true });
+    // A completed license is kept until one day after it expires (at most
+    // 90 days); a pending request is kept one day, as before.
+    const ttl = isCompletedLicenseEvent(event)
+      ? Math.min(Math.max(Math.floor((Date.parse(event.valid_until) - Date.now()) / 1000) + 86400, 86400), 90 * 86400)
+      : 86400;
     await env.GUARDIAN_DATA.put(key, JSON.stringify({
       eventId, installationId: event.installation_id, timestamp, iv: body.iv, ciphertext: body.ciphertext
-    }), { expirationTtl: 86400 });
+    }), { expirationTtl: ttl });
     return json({ accepted: true }, 202);
   }
   if (request.method === "GET") {
     // This endpoint is called only after index.ts validates the central owner
     // credential. It deliberately does not accept installationId as a filter:
     // all license events belong to the central owner channel.
-    const events: unknown[] = [];
+    // ?kind=active returns only active licenses (total + safe list, no code);
+    // the default returns only pending requests, never completed events.
+    const kind = new URL(request.url).searchParams.get("kind");
+    const all: unknown[] = [];
     let cursor: string | undefined;
     do {
       const page = await env.GUARDIAN_DATA.list({ prefix: "owner-event:v1:", limit: 100, cursor });
@@ -106,11 +164,13 @@ export async function handleOwnerDelivery(request: Request, env: OwnerDeliveryEn
             { name: "AES-GCM", iv: fromB64(stored.iv) as unknown as BufferSource, additionalData: enc.encode(stored.eventId) as unknown as BufferSource, tagLength: 128 },
             await aesKey(env.GUARDIAN_DELIVERY_ENC_KEY), fromB64(stored.ciphertext) as unknown as BufferSource);
           const event = JSON.parse(dec.decode(plaintext));
-          if (validEvent(event, stored.eventId) && event.installation_id === stored.installationId) events.push(event);
+          if (validEvent(event, stored.eventId) && event.installation_id === stored.installationId) all.push(event);
         } catch { /* malformed ciphertext is never returned */ }
       }
       cursor = page.list_complete ? undefined : page.cursor;
     } while (cursor);
+    if (kind === "active") return json(activeLicensesFromEvents(all));
+    const events = all.filter((event: any) => ["activation.requested", "renewal.requested"].includes(event.event_type));
     return json({ events });
   }
   return json({ error: "method_not_allowed" }, 405);

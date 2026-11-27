@@ -274,6 +274,14 @@ export default {
         if (!response.ok) return null;
         const payload = await response.json() as { events?: unknown[] };
         return Array.isArray(payload.events) ? payload.events : [];
+      }, async () => {
+        const response = await handleOwnerDelivery(new Request("https://internal/v1/guardian/owner-events?kind=active", {
+          method: "GET", headers: { authorization: "Bearer " + token }
+        }), env);
+        if (!response.ok) return null;
+        const payload = await response.json() as { total?: number; licenses?: unknown[] };
+        if (!Array.isArray(payload.licenses)) return null;
+        return { total: typeof payload.total === "number" ? payload.total : payload.licenses.length, licenses: payload.licenses };
       });
     }
 
