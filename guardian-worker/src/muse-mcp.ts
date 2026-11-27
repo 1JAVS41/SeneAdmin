@@ -56,7 +56,7 @@ function selectData(name: string, overview: Record<string, any>, args: Record<st
     case "get_damaged_products_summary":
       return { damagedProducts: overview.operations?.damagedProducts ?? null };
     case "get_sales_summary":
-      return { sales: overview.sales ?? { available: false, reason: "No hay totales de ventas en los reportes recibidos." } };
+      return { sales: overview.sales?.available ? overview.sales : { available: false, reason: "No hay totales de ventas registrados en los reportes recibidos." } };
     case "get_product_by_code": {
       const code = String(args.code ?? "").trim().toLowerCase();
       const product = (overview.products ?? []).find((p: any) => String(p.code ?? "").trim().toLowerCase() === code);
@@ -75,7 +75,7 @@ function selectData(name: string, overview: Record<string, any>, args: Record<st
         kind === "ALL" || (kind === "INVENTORY" && m.type === "INVENTORY_CONSUMPTION") ||
         (kind === "CASH" && m.type === "CASH_DISBURSEMENT"));
       return {
-        sales: overview.sales ?? { available: false, reason: "No hay totales de ventas en los reportes recibidos." },
+        sales: overview.sales?.available ? overview.sales : { available: false, reason: "No hay totales de ventas registrados en los reportes recibidos." },
         inventoryMovements: movements.filter((m: any) => m.type === "INVENTORY_CONSUMPTION"),
         cashMovements: movements.filter((m: any) => m.type === "CASH_DISBURSEMENT"),
       };
