@@ -1,7 +1,6 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
 import worker from "../src/index";
-import { handleOwnerMuseMcp } from "../src/owner-muse-mcp";
 
 class MemoryKV {
   values = new Map<string, string>();
@@ -63,31 +62,23 @@ test("owner MUSE returns an empty safe result when no license requests exist", a
 });
 
 
-test("owner MUSE exposes central inventory only through its dedicated read-only tool", async () => {
-  const inventory = {
-    ok: true,
-    totals: { businesses: 2, active: 1, expired: 1, blocked: 0, requests: 3, pending_requests: 1 },
-    businesses: [{ business_name: "Negocio A", status: "active", expires_at: "2026-12-01T00:00:00.000Z" }],
-    requests: [{ folio: "SENE-20261127-ABC123", request_type: "renewal", status: "pending" }]
-  };
-  const response = await handleOwnerMuseMcp(
-    new Request("https://guardian.test/v1/muse/owner/mcp", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        jsonrpc: "2.0", id: 4, method: "tools/call",
-        params: { name: "list_owner_license_inventory", arguments: {} }
-      })
-    }),
-    async () => [],
-    async () => inventory
-  );
+
+test("owner MUSE reports central inventory as not synchronized rather than inventing an empty inventory", async () => {
+  const token = "owner-muse-test-token-with-more-than-forty-characters";
+  const env = {
+    GUARDIAN_DATA: new MemoryKV(), GUARDIAN_ADMIN_TOKEN: "unused",
+    GUARDIAN_DELIVERY_ENC_KEY: "", GUARDIAN_DELIVERY_HMAC_KEY: "",
+    GUARDIAN_OWNER_CENTRAL_TOKEN_HASH: await hash(token)
+  } as any;
+  const response = await worker.fetch(new Request("https://guardian.test/v1/muse/owner/mcp", {
+    method: "POST", headers: { "content-type": "application/json", authorization: "Bearer " + token },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 4, method: "tools/call", params: { name: "list_owner_license_inventory", arguments: {} } })
+  }), env);
   assert.equal(response.status, 200);
   const body = await response.json() as any;
-  assert.equal(body.result.structuredContent.totals.active, 1);
-  assert.equal(body.result.structuredContent.totals.expired, 1);
+  assert.equal(body.result.isError, true);
+  assert.match(body.result.content[0].text, /no está disponible/);
 });
-
 
 test("customer MUSE tools never include owner license inventory or request tools", async () => {
   const { handleMuseMcp } = await import("../src/muse-mcp");
