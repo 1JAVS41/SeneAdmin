@@ -20,12 +20,16 @@ type Category = {
   outOfStockCount: number;
   updatedAt: string;
 };
+type Product = { code: string; name: string; price: number; stock: number; aisle: string; shelf: string; category: "INVENTARIO_MAESTRO" | "INVENTARIO_SENE" };
+type ApprovedMovement = { id: string; type: "CASH_DISBURSEMENT" | "INVENTORY_CONSUMPTION"; date: string; productCode: string; quantity: number };
 type Snapshot = {
-  schema: 1;
+  schema: 1 | 2;
   installationId: string;
   capturedAt: string;
   business: { status: "active" | "unknown" };
   inventory: { categories: Category[] };
+  products?: Product[];
+  approvedMovements?: ApprovedMovement[];
   operations: {
     employees: { profileCount: number };
     payroll: { recordCount: number; paidCount: number; pendingCount: number };
@@ -91,6 +95,18 @@ function validSnapshot(value: unknown): value is Snapshot {
   if (!countFields.every(n => Number.isInteger(n) && n >= 0)) return false;
   if (v.operations.payroll.paidCount + v.operations.payroll.pendingCount > v.operations.payroll.recordCount ||
       v.operations.reports.orderCount > v.operations.reports.totalCount) return false;
+  if (v.schema === 2) {
+    if (!Array.isArray(v.products) || v.products.length > 5000 || !Array.isArray(v.approvedMovements) || v.approvedMovements.length > 1000) return false;
+    if (!v.products.every(p => typeof p.code === "string" && p.code.length > 0 && p.code.length <= 128 &&
+      typeof p.name === "string" && p.name.length > 0 && p.name.length <= 256 &&
+      Number.isFinite(p.price) && p.price >= 0 && Number.isInteger(p.stock) &&
+      typeof p.aisle === "string" && typeof p.shelf === "string" &&
+      (p.category === "INVENTARIO_MAESTRO" || p.category === "INVENTARIO_SENE"))) return false;
+    if (!v.approvedMovements.every(m => typeof m.id === "string" && m.id.length > 0 &&
+      (m.type === "CASH_DISBURSEMENT" || m.type === "INVENTORY_CONSUMPTION") &&
+      typeof m.date === "string" && Number.isFinite(Date.parse(m.date)) &&
+      typeof m.productCode === "string" && Number.isInteger(m.quantity) && m.quantity >= 0)) return false;
+  }
   const seen = new Set<string>();
   return v.inventory.categories.every(c =>
     (c.category === "INVENTARIO_MAESTRO" || c.category === "INVENTARIO_SENE") &&
@@ -295,6 +311,8 @@ export default {
           business: snapshot.business,
           inventory: snapshot.inventory,
           operations: snapshot.operations,
+          products: snapshot.products ?? [],
+          approvedMovements: snapshot.approvedMovements ?? [],
           dataAgeSeconds: Math.max(0, Math.floor((Date.now() - Date.parse(snapshot.capturedAt)) / 1000)),
         };
       });
