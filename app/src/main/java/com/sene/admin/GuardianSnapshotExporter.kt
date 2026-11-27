@@ -49,6 +49,7 @@ object GuardianSnapshotExporter {
         var payrollRecords = 0
         var paidPayrolls = 0
         var pendingPayrolls = 0
+        var workersTracked = 0
         var trackedAttendanceDays = 0
         var absences = 0
         var earlyExits = 0
@@ -57,11 +58,21 @@ object GuardianSnapshotExporter {
             payrollRecords += payrolls.size
             paidPayrolls += payrolls.count { it.status == "PAGADA" }
             pendingPayrolls += payrolls.count { it.status != "PAGADA" }
-            OwnerPayrollStore.weekAttendance(app, profile).forEach { day ->
-                if (day.status !in setOf("SIN REGISTRO", "NO PROGRAMADO")) trackedAttendanceDays++
-                if (day.status.contains("FALTA", true)) absences++
-                if (day.shifts.any { it.status == "EARLY_EXIT" }) earlyExits++
+
+            val week = OwnerPayrollStore.weekAttendance(app, profile)
+            var profileHasAttendance = false
+            week.forEach { day ->
+                val hasRecord = day.shifts.isNotEmpty() ||
+                    day.status in setOf("WORKED", "WORKING", "EARLY_EXIT", "ADMIN_CLOSED")
+                if (hasRecord) {
+                    trackedAttendanceDays++
+                    profileHasAttendance = true
+                }
+                // weekAttendance marks scheduled days without a shift as NOT_WORKED.
+                if (day.status == "NOT_WORKED") absences++
+                if (day.status == "EARLY_EXIT" || day.shifts.any { it.status == "EARLY_EXIT" }) earlyExits++
             }
+            if (profileHasAttendance) workersTracked++
         }
 
         val reports = SeneAdminStore.reports(app)
@@ -84,7 +95,7 @@ object GuardianSnapshotExporter {
             .put("employees", JSONObject().put("profileCount", profiles.size))
             .put("payroll", JSONObject().put("recordCount", payrollRecords)
                 .put("paidCount", paidPayrolls).put("pendingCount", pendingPayrolls))
-            .put("attendance", JSONObject().put("workersTracked", profiles.size)
+            .put("attendance", JSONObject().put("workersTracked", workersTracked)
                 .put("trackedDaysThisWeek", trackedAttendanceDays).put("absenceDaysThisWeek", absences)
                 .put("earlyExitsThisWeek", earlyExits))
             .put("reports", JSONObject().put("totalCount", reports.size).put("orderCount", orderReports))
