@@ -84,6 +84,18 @@ object SeneAdminAutoSyncScheduler {
         )
     }
 
+    /** Ejecuta ahora la primera captura al guardar credenciales y consentimiento. */
+    fun syncNow(context: Context) {
+        WorkManager.getInstance(context.applicationContext).enqueueUniqueWork(
+            UNIQUE_WORK,
+            ExistingWorkPolicy.REPLACE,
+            OneTimeWorkRequestBuilder<SeneAdminAutoSyncWorker>()
+                .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
+                .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 15, TimeUnit.MINUTES)
+                .build()
+        )
+    }
+
     /** Cada ciclo exitoso programa el siguiente dos horas después de finalizar. */
     fun scheduleNext(context: Context) {
         WorkManager.getInstance(context.applicationContext).enqueueUniqueWork(
