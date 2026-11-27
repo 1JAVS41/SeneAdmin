@@ -2,7 +2,7 @@ name: SENE GUARDIAN Worker checks
 
 on:
   push:
-    branches: [feature/sene-guardian-muse-readonly]
+    branches: [feature/sene-guardian-muse-readonly, feature/muse-license-gate]
     paths:
       - "guardian-worker/**"
       - ".github/workflows/guardian-worker-checks.yml"
