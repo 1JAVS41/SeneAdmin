@@ -87,3 +87,52 @@ test("owner MUSE exposes central inventory only through its dedicated read-only 
   assert.equal(body.result.structuredContent.totals.active, 1);
   assert.equal(body.result.structuredContent.totals.expired, 1);
 });
+
+
+test("owner MUSE reads license inventory directly from the shared D1 binding", async () => {
+  const token = "owner-muse-test-token-with-more-than-forty-characters";
+  const rows = [
+    { business_name: "Negocio activo", status: "active", activated_at: "2026-11-01T00:00:00.000Z", expires_at: "2099-12-01T00:00:00.000Z" },
+    { business_name: "Negocio vencido", status: "active", activated_at: "2026-09-01T00:00:00.000Z", expires_at: "2026-10-01T00:00:00.000Z" },
+    { business_name: "Negocio bloqueado", status: "blocked", activated_at: null, expires_at: null }
+  ];
+  let sql = "";
+  const env = {
+    GUARDIAN_DATA: new MemoryKV(),
+    GUARDIAN_ADMIN_TOKEN: "unused",
+    GUARDIAN_DELIVERY_ENC_KEY: "",
+    GUARDIAN_DELIVERY_HMAC_KEY: "",
+    GUARDIAN_OWNER_CENTRAL_TOKEN_HASH: await hash(token),
+    SENE_LICENSE_DB: {
+      prepare(query: string) {
+        sql = query;
+        return { all: async () => ({ results: rows }) };
+      }
+    }
+  } as any;
+  const response = await worker.fetch(new Request("https://guardian.test/v1/muse/owner/mcp", {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: "Bearer " + token },
+    body: JSON.stringify({
+      jsonrpc: "2.0", id: 9, method: "tools/call",
+      params: { name: "list_owner_license_inventory", arguments: {} }
+    })
+  }), env);
+  assert.equal(response.status, 200);
+  assert.match(sql, /FROM businesses/);
+  const body = await response.json() as any;
+  assert.equal(body.result.structuredContent.totals.active, 1);
+  assert.equal(body.result.structuredContent.totals.expired, 1);
+  assert.equal(body.result.structuredContent.totals.blocked, 1);
+});
+
+test("customer MUSE tools never include owner license inventory or request tools", async () => {
+  const { handleMuseMcp } = await import("../src/muse-mcp");
+  const response = await handleMuseMcp(new Request("https://guardian.test/mcp", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: rpc("tools/list", 10)
+  }), "12345678-1234-1234-1234-123456789012", async () => null);
+  const body = await response.json() as any;
+  assert.deepEqual(body.result.tools.map((tool: any) => tool.name), ["get_business_overview"]);
+});
