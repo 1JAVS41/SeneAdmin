@@ -27,11 +27,17 @@ const snapshot = {
 const envFor = async () => {
   const kv = new MemoryKV();
   await kv.put("installation:v1:" + id, JSON.stringify({
-    schema: 1, revoked: false, ingestTokenHash: await sha256("unused"),
+    schema: 1, revoked: false, seneInstallationId: id, ingestTokenHash: await sha256("unused"),
     museTokenHash: await sha256(token), createdAt: new Date().toISOString()
   }));
   await kv.put("snapshot:v1:" + id, JSON.stringify(snapshot));
   return { GUARDIAN_DATA: kv, GUARDIAN_ADMIN_TOKEN: "unused", GUARDIAN_DELIVERY_ENC_KEY: "", GUARDIAN_DELIVERY_HMAC_KEY: "", GUARDIAN_OWNER_CENTRAL_TOKEN_HASH: "" } as any;
+};
+const originalFetch = globalThis.fetch;
+(globalThis as any).fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+  const url = String(input);
+  if (url.includes("/subscription/status")) return Response.json({ active: true, expires_at: "2099-01-01T00:00:00.000Z" }, { status: 200 });
+  return originalFetch(input, init);
 };
 const post = (body: unknown, auth = token, origin?: string) => new Request("https://guardian.test/v1/muse/" + id + "/mcp", {
   method: "POST", headers: { "content-type": "application/json", authorization: "Bearer " + auth, ...(origin ? { origin } : {}) }, body: JSON.stringify(body)
