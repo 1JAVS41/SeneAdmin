@@ -26,6 +26,13 @@ type Snapshot = {
   capturedAt: string;
   business: { status: "active" | "unknown" };
   inventory: { categories: Category[] };
+  operations: {
+    employees: { profileCount: number };
+    payroll: { recordCount: number; paidCount: number; pendingCount: number };
+    attendance: { workersTracked: number; trackedDaysThisWeek: number; absenceDaysThisWeek: number; earlyExitsThisWeek: number };
+    reports: { totalCount: number; orderCount: number };
+    damagedProducts: { recordCount: number };
+  };
 };
 type Installation = {
   schema: 1;
@@ -70,7 +77,20 @@ function validSnapshot(value: unknown): value is Snapshot {
   if (v.schema !== 1 || typeof v.installationId !== "string" || !validId(v.installationId) ||
       typeof v.capturedAt !== "string" || !Number.isFinite(Date.parse(v.capturedAt)) ||
       !v.business || !["active", "unknown"].includes(v.business.status) ||
-      !Array.isArray(v.inventory?.categories) || v.inventory.categories.length > 2) return false;
+      !Array.isArray(v.inventory?.categories) || v.inventory.categories.length > 2 ||
+      !v.operations || !v.operations.employees || !v.operations.payroll ||
+      !v.operations.attendance || !v.operations.reports || !v.operations.damagedProducts) return false;
+  const countFields = [
+    v.operations.employees.profileCount,
+    v.operations.payroll.recordCount, v.operations.payroll.paidCount, v.operations.payroll.pendingCount,
+    v.operations.attendance.workersTracked, v.operations.attendance.trackedDaysThisWeek,
+    v.operations.attendance.absenceDaysThisWeek, v.operations.attendance.earlyExitsThisWeek,
+    v.operations.reports.totalCount, v.operations.reports.orderCount,
+    v.operations.damagedProducts.recordCount,
+  ];
+  if (!countFields.every(n => Number.isInteger(n) && n >= 0)) return false;
+  if (v.operations.payroll.paidCount + v.operations.payroll.pendingCount > v.operations.payroll.recordCount ||
+      v.operations.reports.orderCount > v.operations.reports.totalCount) return false;
   const seen = new Set<string>();
   return v.inventory.categories.every(c =>
     (c.category === "INVENTARIO_MAESTRO" || c.category === "INVENTARIO_SENE") &&
@@ -274,6 +294,7 @@ export default {
           capturedAt: snapshot.capturedAt,
           business: snapshot.business,
           inventory: snapshot.inventory,
+          operations: snapshot.operations,
           dataAgeSeconds: Math.max(0, Math.floor((Date.now() - Date.parse(snapshot.capturedAt)) / 1000)),
         };
       });
@@ -303,6 +324,7 @@ export default {
         capturedAt: snapshot.capturedAt,
         business: snapshot.business,
         inventory: snapshot.inventory,
+        operations: snapshot.operations,
         dataAgeSeconds: Math.max(0, Math.floor((Date.now() - Date.parse(snapshot.capturedAt)) / 1000)),
       });
     }
