@@ -19,6 +19,7 @@ const TOOL_DESCRIPTIONS: Record<string, string> = {
   get_product_by_code: "Consulta un producto por su código exacto en esta instalación.",
   search_products: "Busca productos por código o nombre en esta instalación.",
   list_approved_movements: "Consulta movimientos aprobados de esta instalación; ventas y movimientos de inventario se mantienen separados.",
+  get_sales_summary: "Consulta únicamente los totales de ventas que aparecen en los reportes recibidos; no expone operaciones individuales.",
 };
 
 function rpc(id: unknown, result: unknown): Response {
@@ -54,6 +55,8 @@ function selectData(name: string, overview: Record<string, any>, args: Record<st
       return { payroll: overview.operations?.payroll ?? null };
     case "get_damaged_products_summary":
       return { damagedProducts: overview.operations?.damagedProducts ?? null };
+    case "get_sales_summary":
+      return { sales: overview.sales ?? { available: false, reason: "No hay totales de ventas en los reportes recibidos." } };
     case "get_product_by_code": {
       const code = String(args.code ?? "").trim().toLowerCase();
       const product = (overview.products ?? []).find((p: any) => String(p.code ?? "").trim().toLowerCase() === code);
@@ -72,7 +75,7 @@ function selectData(name: string, overview: Record<string, any>, args: Record<st
         kind === "ALL" || (kind === "INVENTORY" && m.type === "INVENTORY_CONSUMPTION") ||
         (kind === "CASH" && m.type === "CASH_DISBURSEMENT"));
       return {
-        sales: { available: false, reason: "Esta instalación no conserva una lista de ventas; SeneAdmin solo recibe sus totales cuando están incluidos en un reporte." },
+        sales: overview.sales ?? { available: false, reason: "No hay totales de ventas en los reportes recibidos." },
         inventoryMovements: movements.filter((m: any) => m.type === "INVENTORY_CONSUMPTION"),
         cashMovements: movements.filter((m: any) => m.type === "CASH_DISBURSEMENT"),
       };
