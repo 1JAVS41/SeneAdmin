@@ -13,8 +13,8 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
 /**
- * Consulta únicamente las novedades pendientes. El servidor conserva la entrega
- * hasta que SeneAdmin guarda los eventos y confirma sus ACK.
+ * Sincroniza novedades administrativas y, con consentimiento explícito,
+ * exporta indicadores agregados a la instalación aislada de SENE GUARDIÁN.
  */
 class SeneAdminAutoSyncWorker(
     context: Context,
@@ -22,28 +22,40 @@ class SeneAdminAutoSyncWorker(
 ) : Worker(context, params) {
     override fun doWork(): Result {
         val app = applicationContext
-        if (!ServerPairing.isLinked(app)) return Result.success()
 
-        val prefs = app.getSharedPreferences("sene_admin_payroll_sync", Context.MODE_PRIVATE)
-        val previousSuccess = prefs.getLong("last_success", 0L)
-        val finished = CountDownLatch(1)
+        if (ServerPairing.isLinked(app)) {
+            val prefs = app.getSharedPreferences("sene_admin_payroll_sync", Context.MODE_PRIVATE)
+            val previousSuccess = prefs.getLong("last_success", 0L)
+            val finished = CountDownLatch(1)
 
-        AdminPayrollRequestSync.sync(app, true) {
-            finished.countDown()
+            AdminPayrollRequestSync.sync(app, true) {
+                finished.countDown()
+            }
+
+            val completed = try {
+                finished.await(8, TimeUnit.MINUTES)
+            } catch (_: InterruptedException) {
+                Thread.currentThread().interrupt()
+                false
+            }
+            if (!completed) return Result.retry()
+
+            val latestSuccess = prefs.getLong("last_success", 0L)
+            if (latestSuccess <= previousSuccess) return Result.retry()
         }
 
-        val completed = try {
-            finished.await(8, TimeUnit.MINUTES)
-        } catch (_: InterruptedException) {
-            Thread.currentThread().interrupt()
-            false
+        // La exportación GUARDIÁN usa credenciales distintas por instalación.
+        // Nunca se ejecuta si no existe consentimiento explícito.
+        val guardian = GuardianConfigStore.read(app)
+        if (guardian != null && guardian.consent) {
+            val result = try {
+                GuardianSnapshotExporter.export(app, guardian.installationId, guardian.ingestToken)
+            } catch (_: Exception) {
+                GuardianSnapshotExporter.ExportResult(false, 0, "No se pudo enviar la captura GUARDIÁN.")
+            }
+            if (!result.accepted) return Result.retry()
         }
-        if (!completed) return Result.retry()
 
-        val latestSuccess = prefs.getLong("last_success", 0L)
-        if (latestSuccess <= previousSuccess) return Result.retry()
-
-        // El siguiente contador de dos horas comienza después de una respuesta exitosa.
         SeneAdminAutoSyncScheduler.scheduleNext(app)
         return Result.success()
     }
