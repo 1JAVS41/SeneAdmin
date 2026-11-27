@@ -9,6 +9,7 @@ export interface Env {
   GUARDIAN_DELIVERY_HMAC_KEY: string;
   GUARDIAN_OWNER_CENTRAL_TOKEN_HASH: string;
   MUSE_ALLOWED_ORIGINS?: string;
+  SENE_API_URL?: string;
 }
 
 type Category = {
@@ -31,6 +32,7 @@ type Installation = {
   revoked: boolean;
   ingestTokenHash: string;
   museTokenHash: string;
+  seneInstallationId?: string;
   createdAt: string;
   revokedAt?: string;
 };
@@ -143,6 +145,45 @@ export default {
       return json({ installationId: id, ingestToken, museReadToken: museToken, shownOnce: true }, 201);
     }
 
+    if (request.method === "POST" && url.pathname === "/v1/admin/installations/provision") {
+      if (!constantTimeEqual(bearer(request), env.GUARDIAN_ADMIN_TOKEN) || env.GUARDIAN_ADMIN_TOKEN.length < 40)
+        return json({ error: "unauthorized" }, 401);
+      let body: any;
+      try { body = await readJson(request, 2048); } catch { return json({ error: "invalid_json" }, 400); }
+      const id = typeof body?.installationId === "string" ? body.installationId : "";
+      const seneId = typeof body?.seneInstallationId === "string" ? body.seneInstallationId : "";
+      if (!validId(id) || !/^[a-f0-9-]{16,64}$/i.test(seneId))
+        return json({ error: "invalid_installation" }, 400);
+      let record = await installation(env, id);
+      let museToken = "";
+      let ingestToken = "";
+      if (record) {
+        if (record.revoked) return json({ error: "installation_revoked" }, 409);
+        if (record.seneInstallationId && record.seneInstallationId !== seneId)
+          return json({ error: "installation_already_linked" }, 409);
+        record.seneInstallationId = seneId;
+        await env.GUARDIAN_DATA.put(`installation:v1:${id}`, JSON.stringify(record));
+      } else {
+        ingestToken = randomToken();
+        museToken = randomToken();
+        record = {
+          schema: 1, revoked: false,
+          ingestTokenHash: await sha256(ingestToken),
+          museTokenHash: await sha256(museToken),
+          seneInstallationId: seneId,
+          createdAt: new Date().toISOString(),
+        };
+        await env.GUARDIAN_DATA.put(`installation:v1:${id}`, JSON.stringify(record));
+      }
+      // Tokens are returned only on first provisioning. Existing credentials are never rotated here.
+      return json({
+        installationId: id,
+        seneInstallationId: seneId,
+        ...(museToken ? { museReadToken: museToken, ingestToken, shownOnce: true } : { alreadyProvisioned: true }),
+        mcpUrl: `https://${url.host}/v1/muse/${id}/mcp`,
+      }, record && museToken ? 201 : 200);
+    }
+
     if (request.method === "POST" && url.pathname === "/v1/admin/installations/revoke") {
       if (!constantTimeEqual(bearer(request), env.GUARDIAN_ADMIN_TOKEN) || env.GUARDIAN_ADMIN_TOKEN.length < 40)
         return json({ error: "unauthorized" }, 401);
@@ -203,6 +244,28 @@ export default {
       }
       const id = museMatch[1];
       if (!await authorizedFor(env, id, bearer(request), "muse")) return json({ error: "unauthorized" }, 401);
+      const installationRecord = await installation(env, id);
+      const seneId = installationRecord?.seneInstallationId ?? "";
+      if (!seneId) return json({ error: "license_link_missing" }, 403);
+      // Check SENE VENTAS on every customer MCP request. Any network or API error denies data.
+      const licenseBase = (env.SENE_API_URL ?? "https://server-sene-api.nagavs28.workers.dev").replace(/\/+$/, "");
+      let licenseActive = false;
+      try {
+        const licenseResponse = await fetch(licenseBase + "/subscription/status", {
+          method: "POST",
+          headers: { "content-type": "application/json", "cache-control": "no-store" },
+          body: JSON.stringify({ installation_id: seneId }),
+        });
+        if (licenseResponse.ok) {
+          const license = await licenseResponse.json() as { active?: boolean; expires_at?: string | null };
+          licenseActive = license.active === true &&
+            typeof license.expires_at === "string" &&
+            Date.parse(license.expires_at) > Date.now();
+        }
+      } catch {
+        licenseActive = false;
+      }
+      if (!licenseActive) return json({ error: "license_inactive" }, 403);
       return handleMuseMcp(request, id, async () => {
         const snapshot = await env.GUARDIAN_DATA.get<Snapshot>(`snapshot:v1:${id}`, "json");
         if (!snapshot) return null;
