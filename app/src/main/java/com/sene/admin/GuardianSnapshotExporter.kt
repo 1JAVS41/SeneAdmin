@@ -172,7 +172,9 @@ object GuardianSnapshotExporter {
             .put("products", products)
             .put("approvedMovements", approvedMovements)
             .put("sales", JSONObject().put("dailyTotals", salesDays)
-                .put("totalAmountCents", salesTotalCents).put("source", "reports"))
+                .put("available", salesByDay.isNotEmpty())
+                .put("totalAmountCents", if (salesByDay.isNotEmpty()) salesTotalCents else JSONObject.NULL)
+                .put("source", "reports"))
             .put("operations", operations)
 
         val connection = URL(SNAPSHOT_URL).openConnection() as HttpURLConnection
