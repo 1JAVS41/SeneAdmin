@@ -1,40 +1,56 @@
-# SENE GUARDIAN Worker (staging scaffold)
+# SENE GUARDIÁN Worker · despliegue en Cloudflare
 
-Código fuente de preparación. No está desplegado y no contiene credenciales ni datos reales.
+Este Worker proporciona a MUSE una consulta administrativa de solo lectura, separada por instalación. La ruta MCP de cliente verifica la licencia SENE VENTAS en cada consulta y deniega los datos si está vencida o si la API de licencias no responde correctamente. El canal MCP del propietario permanece separado.
 
-## Rutas
-- `GET /v1/health`: estado del servicio, sin información del negocio.
-- `POST /v1/admin/installations`: provisiona una instalación. Requiere `GUARDIAN_ADMIN_TOKEN`. Devuelve una sola vez los tokens independientes de ingestión y lectura Muse.
-- `POST /v1/admin/installations/revoke`: revoca una instalación y elimina su último snapshot. Requiere `GUARDIAN_ADMIN_TOKEN`.
-- `POST /v1/snapshot`: ingestión autenticada con token exclusivo de esa instalación.
-- `GET /v1/guardian/business-overview?installationId=...`: consulta con token Muse exclusivo de esa instalación.
+## 1. Crear el almacenamiento KV
 
-## Secretos y aprovisionamiento (pendiente; no realizado)
-Configurar en Cloudflare Worker Secrets:
-- `GUARDIAN_ADMIN_TOKEN`: secreto administrativo aleatorio de al menos 32 bytes. No reutilizar credenciales de SeneAdmin, SENE-VENTAS, GitHub o Railway.
-- No se configuran tokens globales de ingestión ni lectura. La ruta administrativa genera tokens independientes por instalación y guarda sus hashes SHA-256 en KV. Los valores en claro se devuelven una sola vez; quien los pierda debe revocar y volver a provisionar con un flujo de rotación futuro.
+Con Wrangler autenticado en la cuenta Cloudflare correcta:
 
-Crear el namespace KV, sustituir el ID placeholder de wrangler.toml y revisar cuotas/retención del plan Free antes de desplegar.
+```bash
+cd guardian-worker
+npx wrangler kv namespace create GUARDIAN_DATA
+```
 
-## Límite de datos
-El esquema solo acepta identificador aleatorio e independiente, fecha, estado general y conteos agregados de inventario. No acepta nombres de empleados, teléfonos, nómina, asistencia individual, reportes, códigos de producto, precios, claves, licencias ni códigos de vinculación SENE-VENTAS.
+Copia el `id` devuelto y sustituye únicamente `REPLACE_WITH_KV_NAMESPACE_ID` en `wrangler.toml`. El binding debe llamarse exactamente `GUARDIAN_DATA`. No inventes ni reutilices IDs de otra cuenta.
 
-El identificador de instalación no se deriva de códigos comerciales ni de licencia. KV conserva el snapshot por 35 días y solo la última fotografía. Revocar elimina el snapshot e impide el acceso posterior.
+## 2. Configurar secretos
 
-## Verificación automatizada preparada
-- `npm run typecheck`: comprobación TypeScript.
-- `npm test`: pruebas de salud, credenciales por instalación, aislamiento cruzado, rechazo de snapshots antiguos, revocación y validación básica.
-- GitHub Actions ejecuta ambas comprobaciones al cambiar archivos del Worker en esta rama.
+Genera un secreto administrativo privado de al menos 32 bytes, por ejemplo localmente con `openssl rand -hex 32`. Configura exactamente el mismo valor en este Worker y en el Worker `server-sene-api` de SENE VENTAS:
 
-Estas pruebas están escritas, pero todavía no se ha confirmado un resultado exitoso de CI.
+```bash
+npx wrangler secret put GUARDIAN_ADMIN_TOKEN
+```
 
-## Bloqueos antes de producción
-1. Añadir y probar rate limiting por instalación, cuotas y auditoría de accesos.
-2. Añadir protección de tamaño de cuerpo en streaming y pruebas automatizadas de payloads grandes.
-3. Probar concurrencia y evitar carreras en el aprovisionamiento.
-4. Ejecutar pruebas locales con Wrangler/Workers runtime: auth separada, revocación, aislamiento cruzado, snapshots antiguos, validación de esquema, TTL y payloads inválidos.
-5. Implementar el exportador Android con consentimiento, revocación y DTO allowlist. No se ha modificado la APK.
-6. Confirmar protocolo real soportado por Muse; esta API REST no es un servidor MCP.
-7. Verificar política de privacidad, consentimiento y coste/cupo gratuito.
+No pegues el valor en el repositorio, en WhatsApp ni en esta conversación.
 
-No desplegar ni enviar datos reales hasta cerrar todos los bloqueos.
+Este Worker también usa los secretos ya existentes para el canal central del propietario:
+- `GUARDIAN_DELIVERY_ENC_KEY`
+- `GUARDIAN_DELIVERY_HMAC_KEY`
+- `GUARDIAN_OWNER_CENTRAL_TOKEN_HASH`
+
+Consérvalos sin cambios. No los regeneres como parte de esta integración porque podría interrumpirse la conexión del MUSE propietario. Si alguno falta en producción, detén el despliegue y revisa primero la configuración actual.
+
+## 3. Variables opcionales
+
+- `SENE_API_URL`: URL base del Worker SENE VENTAS; si se omite, se usa `https://server-sene-api.nagavs28.workers.dev`.
+- `MUSE_ALLOWED_ORIGINS`: lista separada por comas solo si se requieren clientes de navegador con encabezado Origin. Las llamadas servidor-a-servidor pueden omitirlo.
+
+## 4. Desplegar y verificar
+
+Después de confirmar KV y secretos:
+
+```bash
+npx wrangler deploy
+```
+
+Comprueba `GET https://sene-guardian-api.nagavs28.workers.dev/v1/health`, el binding KV y que el secreto administrativo coincide con el de SENE VENTAS. En SENE VENTAS conserva D1 `DB` y los secretos Telegram; agrega `GUARDIAN_ADMIN_TOKEN` sin sustituir los existentes.
+
+No ejecutes aprovisionamiento real hasta confirmar ambos Workers. La validación funcional debe cubrir licencia activa, vencida y error de API. La ruta de cliente es `/v1/muse/{installationId}/mcp`; la del MUSE propietario es `/v1/muse/owner/mcp` y debe permanecer separada.
+
+## 5. Alcance de la captura
+
+SeneAdmin envía una captura agregada cuando el propietario la autoriza y pulsa el envío manual. No es sincronización automática en segundo plano. Se envían contadores de inventario, personal, nómina, asistencia, reportes y productos dañados; no se envían nombres, teléfonos, importes individuales ni textos de reportes. Las ventas individuales no tienen una lista propia disponible en SeneAdmin, por lo que no se deben inventar.
+
+## 6. Pruebas
+
+`npm run typecheck` y `npm test` comprueban tipos y rutas del Worker. Las pruebas automatizadas ya pasaron en CI antes del último ajuste del exportador Android; vuelve a ejecutarlas antes del despliegue final. No se ha desplegado este código en Cloudflare.
