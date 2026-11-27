@@ -22,6 +22,7 @@ type Category = {
 };
 type Product = { code: string; name: string; price: number; stock: number; aisle: string; shelf: string; category: "INVENTARIO_MAESTRO" | "INVENTARIO_SENE" };
 type ApprovedMovement = { id: string; type: "CASH_DISBURSEMENT" | "INVENTORY_CONSUMPTION"; date: string; productCode: string; quantity: number };
+type SalesSummary = { dailyTotals: { date: string; amountCents: number }[]; totalAmountCents: number; source: "reports" };
 type Snapshot = {
   schema: 1 | 2;
   installationId: string;
@@ -30,6 +31,7 @@ type Snapshot = {
   inventory: { categories: Category[] };
   products?: Product[];
   approvedMovements?: ApprovedMovement[];
+  sales?: SalesSummary;
   operations: {
     employees: { profileCount: number };
     payroll: { recordCount: number; paidCount: number; pendingCount: number };
@@ -97,6 +99,10 @@ function validSnapshot(value: unknown): value is Snapshot {
       v.operations.reports.orderCount > v.operations.reports.totalCount) return false;
   if (v.schema === 2) {
     if (!Array.isArray(v.products) || v.products.length > 5000 || !Array.isArray(v.approvedMovements) || v.approvedMovements.length > 1000) return false;
+    if (!v.sales || v.sales.source !== "reports" || !Array.isArray(v.sales.dailyTotals) ||
+      !v.sales.dailyTotals.every(day => typeof day.date === "string" && Number.isFinite(Date.parse(day.date)) &&
+        Number.isSafeInteger(day.amountCents) && day.amountCents >= 0) ||
+      !Number.isSafeInteger(v.sales.totalAmountCents) || v.sales.totalAmountCents < 0) return false;
     if (!v.products.every(p => typeof p.code === "string" && p.code.length > 0 && p.code.length <= 128 &&
       typeof p.name === "string" && p.name.length > 0 && p.name.length <= 256 &&
       Number.isFinite(p.price) && p.price >= 0 && Number.isInteger(p.stock) &&
@@ -313,6 +319,7 @@ export default {
           operations: snapshot.operations,
           products: snapshot.products ?? [],
           approvedMovements: snapshot.approvedMovements ?? [],
+          sales: snapshot.sales ?? { dailyTotals: [], totalAmountCents: 0, source: "reports" },
           dataAgeSeconds: Math.max(0, Math.floor((Date.now() - Date.parse(snapshot.capturedAt)) / 1000)),
         };
       });
