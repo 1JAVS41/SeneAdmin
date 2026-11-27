@@ -20,9 +20,11 @@ const token = "muse-installation-token-longer-than-forty-characters";
 const sha256 = async (value: string) => Buffer.from(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value))).toString("hex");
 const id = "abcdef12-3456-7890-abcd-ef1234567890";
 const snapshot = {
-  schema: 1, installationId: id, capturedAt: new Date().toISOString(),
+  schema: 2, installationId: id, capturedAt: new Date().toISOString(),
   business: { status: "active" },
   inventory: { categories: [{ category: "INVENTARIO_MAESTRO", itemCount: 12, unitsInStock: 30, lowStockCount: 2, outOfStockCount: 1, updatedAt: new Date().toISOString() }] },
+  products: [{ code: "ABC-01", name: "Producto de prueba", price: 25.5, stock: 7, aisle: "A", shelf: "2", category: "INVENTARIO_MAESTRO" }],
+  approvedMovements: [{ id: "move-1", type: "INVENTORY_CONSUMPTION", date: new Date().toISOString(), productCode: "ABC-01", quantity: 2 }],
   operations: {
     employees: { profileCount: 3 },
     payroll: { recordCount: 6, paidCount: 4, pendingCount: 2 },
@@ -50,14 +52,18 @@ const post = (body: unknown, auth = token, origin?: string) => new Request("http
   method: "POST", headers: { "content-type": "application/json", authorization: "Bearer " + auth, ...(origin ? { origin } : {}) }, body: JSON.stringify(body)
 });
 
-test("Muse MCP initializes and exposes only one read-only administrative tool", async () => {
+test("Muse MCP initializes and exposes read-only customer tools", async () => {
   const env = await envFor();
   const init = await worker.fetch(post({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-03-26", capabilities: {}, clientInfo: { name: "test", version: "1" } } }), env);
   assert.equal(init.status, 200);
   const list = await worker.fetch(post({ jsonrpc: "2.0", id: 2, method: "tools/list" }), env);
   const body = await list.json() as any;
-  assert.deepEqual(body.result.tools.map((t: any) => t.name), ["get_business_overview"]);
-  assert.equal(body.result.tools[0].annotations.readOnlyHint, true);
+  assert.deepEqual(body.result.tools.map((t: any) => t.name), [
+    "get_business_overview", "get_inventory_summary", "get_reports_summary", "get_workers_summary",
+    "get_attendance_summary", "get_payroll_summary", "get_damaged_products_summary",
+    "get_product_by_code", "search_products", "list_approved_movements"
+  ]);
+  assert.ok(body.result.tools.every((t: any) => t.annotations.readOnlyHint === true));
 });
 
 test("Muse tool returns only its own installation overview and never central license events", async () => {
@@ -70,6 +76,25 @@ test("Muse tool returns only its own installation overview and never central lic
   assert.equal(result.operations.damagedProducts.recordCount, 1);
   assert.equal(result.installationId, undefined);
   assert.equal(JSON.stringify(result).includes("activation"), false);
+});
+
+test("Muse product lookup and approved movements return scoped snapshot data", async () => {
+  const env = await envFor();
+  const productResponse = await worker.fetch(post({
+    jsonrpc: "2.0", id: 31, method: "tools/call",
+    params: { name: "get_product_by_code", arguments: { code: "ABC-01" } }
+  }), env);
+  const productBody = await productResponse.json() as any;
+  const product = JSON.parse(productBody.result.content[0].text);
+  assert.equal(product.product.name, "Producto de prueba");
+  const movementsResponse = await worker.fetch(post({
+    jsonrpc: "2.0", id: 32, method: "tools/call",
+    params: { name: "list_approved_movements", arguments: { type: "INVENTORY" } }
+  }), env);
+  const movementsBody = await movementsResponse.json() as any;
+  const movements = JSON.parse(movementsBody.result.content[0].text);
+  assert.equal(movements.inventoryMovements.length, 1);
+  assert.equal(movements.sales.available, false);
 });
 
 test("Muse MCP rejects wrong tokens and revoked installations", async () => {
