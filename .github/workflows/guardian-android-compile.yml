@@ -2,7 +2,7 @@ name: SENE GUARDIAN Android Kotlin compile check
 
 on:
   push:
-    branches: [feature/sene-guardian-muse-readonly]
+    branches: [feature/sene-guardian-muse-readonly, feature/muse-license-gate]
     paths:
       - "app/**"
       - "build.gradle.kts"
