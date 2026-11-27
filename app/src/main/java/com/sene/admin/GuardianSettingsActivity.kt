@@ -34,7 +34,7 @@ class GuardianSettingsActivity : Activity() {
             setTypeface(null, android.graphics.Typeface.BOLD)
         })
         root.addView(TextView(this).apply {
-            text = "Conexión de solo lectura. La captura se envía únicamente cuando el propietario lo solicita."
+            text = "Conexión con SENE VENTAS: copia aquí el IDENTIFICADOR DE INSTALACIÓN y el TOKEN PARA SENEADMIN que aparecen en la pantalla CONECTA TU MUSE. La captura agregada se envía únicamente cuando el propietario lo solicita."
             textSize = 14f
             setPadding(0, dp(8), 0, dp(16))
         })
