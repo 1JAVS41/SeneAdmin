@@ -1,6 +1,7 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
 import worker from "../src/index";
+import { handleOwnerMuseMcp } from "../src/owner-muse-mcp";
 
 class MemoryKV {
   values = new Map<string, string>();
@@ -38,9 +39,11 @@ test("only the central owner credential can open the owner MUSE connector", asyn
   }), env);
   assert.equal(allowed.status, 200);
   const result = await allowed.json() as any;
-  assert.equal(result.result.tools.length, 1);
-  assert.equal(result.result.tools[0].name, "list_owner_license_requests");
-  assert.equal(result.result.tools[0].annotations.readOnlyHint, true);
+  assert.equal(result.result.tools.length, 2);
+  assert.deepEqual(result.result.tools.map((tool: any) => tool.name).sort(), [
+    "list_owner_license_inventory", "list_owner_license_requests"
+  ]);
+  assert.ok(result.result.tools.every((tool: any) => tool.annotations.readOnlyHint === true));
 });
 
 test("owner MUSE returns an empty safe result when no license requests exist", async () => {
@@ -57,4 +60,30 @@ test("owner MUSE returns an empty safe result when no license requests exist", a
   assert.equal(response.status, 200);
   const body = await response.json() as any;
   assert.match(body.result.content[0].text, /no están disponibles|\[\]/);
+});
+
+
+test("owner MUSE exposes central inventory only through its dedicated read-only tool", async () => {
+  const inventory = {
+    ok: true,
+    totals: { businesses: 2, active: 1, expired: 1, blocked: 0, requests: 3, pending_requests: 1 },
+    businesses: [{ business_name: "Negocio A", status: "active", expires_at: "2026-12-01T00:00:00.000Z" }],
+    requests: [{ folio: "SENE-20261127-ABC123", request_type: "renewal", status: "pending" }]
+  };
+  const response = await handleOwnerMuseMcp(
+    new Request("https://guardian.test/v1/muse/owner/mcp", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        jsonrpc: "2.0", id: 4, method: "tools/call",
+        params: { name: "list_owner_license_inventory", arguments: {} }
+      })
+    }),
+    async () => [],
+    async () => inventory
+  );
+  assert.equal(response.status, 200);
+  const body = await response.json() as any;
+  assert.equal(body.result.structuredContent.totals.active, 1);
+  assert.equal(body.result.structuredContent.totals.expired, 1);
 });
