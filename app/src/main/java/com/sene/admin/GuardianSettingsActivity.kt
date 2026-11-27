@@ -34,7 +34,7 @@ class GuardianSettingsActivity : Activity() {
             setTypeface(null, android.graphics.Typeface.BOLD)
         })
         root.addView(TextView(this).apply {
-            text = "Conexión con SENE VENTAS: copia aquí el IDENTIFICADOR DE INSTALACIÓN y el TOKEN PARA SENEADMIN que aparecen en la pantalla CONECTA TU MUSE. La captura agregada se envía únicamente cuando el propietario lo solicita."
+            text = "Conexión con SENE VENTAS: copia aquí el IDENTIFICADOR DE INSTALACIÓN y el TOKEN PARA SENEADMIN que aparecen en la pantalla CONECTA TU MUSE. Con tu autorización, SeneAdmin enviará automáticamente una captura agregada a GUARDIÁN cada dos horas. También puedes enviarla ahora."
             textSize = 14f
             setPadding(0, dp(8), 0, dp(16))
         })
@@ -69,8 +69,8 @@ class GuardianSettingsActivity : Activity() {
                 } else {
                     GuardianConfigStore.updateConsent(this, consent.isChecked)
                 }
-                status.text = if (consent.isChecked) "Configuración protegida. El envío manual está autorizado." else
-                    "Configuración protegida. El envío está desactivado porque no hay consentimiento."
+                status.text = if (consent.isChecked) "Configuración protegida. El envío automático cada dos horas está autorizado." else
+                    "Configuración protegida. El envío automático está desactivado porque no hay consentimiento."
                 Toast.makeText(this, "Configuración guardada de forma cifrada.", Toast.LENGTH_SHORT).show()
             } catch (e: Exception) {
                 status.text = e.message ?: "No se pudo guardar la configuración."
@@ -86,7 +86,7 @@ class GuardianSettingsActivity : Activity() {
                 return@setOnClickListener
             }
             if (!config.consent || !consent.isChecked) {
-                status.text = "El envío está desactivado. Marca el consentimiento y guarda la configuración."
+                status.text = "El envío está desactivado. Marca el consentimiento y guarda la configuración para activar la sincronización automática."
                 return@setOnClickListener
             }
             send.isEnabled = false
@@ -123,7 +123,7 @@ class GuardianSettingsActivity : Activity() {
         GuardianConfigStore.read(this)?.let {
             installation.setText(it.installationId)
             consent.isChecked = it.consent
-            status.text = if (it.consent) "Configuración protegida y consentimiento activo." else "Configuración protegida; consentimiento desactivado."
+            status.text = if (it.consent) "Configuración protegida y sincronización automática autorizada." else "Configuración protegida; sincronización automática desactivada."
         }
         setContentView(ScrollView(this).apply {
             addView(root, ViewGroup.LayoutParams(-1, -2))
