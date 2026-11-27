@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - feature/seneadmin-animated-thanks-20261125
+      - feature/muse-license-gate
   workflow_dispatch:
 
 permissions:
