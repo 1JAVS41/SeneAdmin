@@ -319,7 +319,7 @@ export default {
           operations: snapshot.operations,
           products: snapshot.products ?? [],
           approvedMovements: snapshot.approvedMovements ?? [],
-          sales: snapshot.sales ?? { dailyTotals: [], totalAmountCents: 0, source: "reports" },
+          sales: snapshot.sales ?? null,
           dataAgeSeconds: Math.max(0, Math.floor((Date.now() - Date.parse(snapshot.capturedAt)) / 1000)),
         };
       });
