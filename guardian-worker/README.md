@@ -12,8 +12,9 @@ El MUSE propietario conserva sus credenciales y conexión actuales. No se debe v
 - El almacenamiento propio de GUARDIÁN es el binding KV `GUARDIAN_DATA`.
 - No se conecta a D1 de SENE VENTAS ni consulta su tabla de negocios para construir el inventario de licencias.
 - No llama a `/redeem`, no administra licencias y no ejecuta aprobaciones, activaciones, renovaciones ni cancelaciones.
-- El conector de clientes solo entrega indicadores de su propia instalación: inventario, personal, totales de nómina, asistencia, reportes y productos dañados.
+- El conector de clientes solo entrega datos de su propia instalación: resumen, inventario, catálogo consultable por código/nombre, movimientos aprobados de inventario y caja, personal agregado, totales de nómina, asistencia, reportes y productos dañados. El exportador móvil envía un snapshot cifrado en tránsito con productos y movimientos aprobados; no incluye nombres, teléfonos, identificadores de trabajadores, descripciones ni importes individuales.
 - El conector de clientes no publica licencias, folios, códigos, solicitudes ni información de otros negocios.
+- Las ventas no tienen un registro propio en SeneAdmin; la consulta no inventa ventas ni cantidades y señala que esa fuente no está disponible.
 - La verificación de vigencia que ya existe para el MUSE cliente consulta únicamente el estado de suscripción mediante la ruta `/subscription/status`; si no puede comprobarlo, deniega la consulta. Esto no convierte a SERVER-SENE en el servidor de GUARDIÁN.
 
 ## Herramientas del MUSE propietario
@@ -45,7 +46,7 @@ npm run typecheck
 npm test
 ```
 
-Las pruebas automatizadas del Worker pasaron en CI para el último cambio registrado en la rama de trabajo. El APK se compila en un flujo separado y no demuestra que GUARDIÁN esté desplegado ni que el inventario central esté sincronizado.
+El flujo de APK y las comprobaciones del Worker son verificaciones de compilación. No demuestran que GUARDIÁN esté desplegado ni que un cliente ya haya sincronizado datos reales.
 
 ## Límites de esta rama
 
