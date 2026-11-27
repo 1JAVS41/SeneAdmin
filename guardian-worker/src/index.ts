@@ -253,7 +253,7 @@ export default {
         // GUARDIAN_ADMIN_TOKEN is a server-to-server secret and is never exposed to any MUSE client.
         const adminToken = env.GUARDIAN_ADMIN_TOKEN ?? "";
         if (adminToken.length < 40) return null;
-        const base = (env.SENE_API_URL ?? "https://server-sene-api.nagavs28.workers.dev").replace(/\\/+$/, "");
+        const base = (env.SENE_API_URL ?? "https://server-sene-api.nagavs28.workers.dev").replace(/\/+$/, "");
         try {
           const inventoryResponse = await fetch(base + "/admin/owner/license-inventory", {
             method: "GET",
