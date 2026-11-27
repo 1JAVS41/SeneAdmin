@@ -26,13 +26,13 @@ export async function handleOwnerMuseMcp(request: Request, loadEvents: OwnerEven
   if (message.method === "initialize") return response(message.id, {
     protocolVersion: PROTOCOL, capabilities: { tools: { listChanged: false } },
     serverInfo: { name: "sene-guardian-owner", version: "1.0.0" },
-    instructions: "Conector exclusivo del MUSE del propietario asociado al WhatsApp 3325142147. Puede consultar el inventario central de licencias de todos los negocios y las solicitudes de activación/renovación con sus códigos. No comparte estos datos con MUSE de clientes y no ejecuta acciones."
+    instructions: "Conector exclusivo del MUSE del propietario asociado al WhatsApp 3325142147. Puede consultar las solicitudes de licencia recibidas. La herramienta de inventario central está reservada al propietario, pero informa cuando todavía no existe sincronización autenticada de licencias activas. No comparte estos datos con MUSE de clientes y no ejecuta acciones."
   });
   if (message.method === "ping") return response(message.id, {});
   if (message.method === "tools/list") return response(message.id, { tools: [
   {
     name: "list_owner_license_inventory",
-    description: "Consulta el registro central de todos los negocios: licencias activas, vencidas y bloqueadas, fechas de vencimiento, renovaciones y estado de solicitudes. Exclusivo del MUSE propietario.",
+    description: "Consulta el inventario central de licencias cuando GUARDIÁN dispone de una fuente autenticada y sincronizada. Si no hay sincronización, informa que el inventario no está disponible; nunca inventa un total de cero. Exclusivo del MUSE propietario.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false }
   },
