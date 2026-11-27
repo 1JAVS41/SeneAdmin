@@ -248,7 +248,7 @@ export default {
         if (!response.ok) return null;
         const payload = await response.json() as { events?: unknown[] };
         return Array.isArray(payload.events) ? payload.events : [];
-      }, async () => null);;
+      }, async () => null);
     }
 
     const museMatch = url.pathname.match(/^\/v1\/muse\/([a-f0-9-]{16,64})\/mcp$/i);
