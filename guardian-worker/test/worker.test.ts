@@ -42,6 +42,13 @@ const snapshot = (installationId: string, capturedAt = "2026-11-26T12:00:00.000Z
     outOfStockCount: 1,
     updatedAt: capturedAt,
   }] },
+  operations: {
+    employees: { profileCount: 0 },
+    payroll: { recordCount: 0, paidCount: 0, pendingCount: 0 },
+    attendance: { workersTracked: 0, trackedDaysThisWeek: 0, absenceDaysThisWeek: 0, earlyExitsThisWeek: 0 },
+    reports: { totalCount: 0, orderCount: 0 },
+    damagedProducts: { recordCount: 0 },
+  },
 });
 
 test("health endpoint is public and contains no business data", async () => {
