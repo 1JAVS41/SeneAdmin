@@ -97,6 +97,39 @@ object GuardianSnapshotExporter {
 
         val reports = SeneAdminStore.reports(app)
         val orderReports = reports.count { it.body.startsWith("SENE-ORDER|1") }
+        fun normalizeSalesKey(value: String) = value.uppercase(Locale.ROOT)
+            .replace("Á", "A").replace("É", "E").replace("Í", "I")
+            .replace("Ó", "O").replace("Ú", "U").replace(Regex("\\s+"), " ").trim()
+        fun moneyCents(raw: String): Long? {
+            var value = raw.trim().replace("$", "").replace(" ", "").replace("\u00A0", "")
+            if (value.isBlank()) return null
+            val comma = value.lastIndexOf(',')
+            val dot = value.lastIndexOf('.')
+            value = when {
+                comma >= 0 && dot >= 0 && comma > dot -> value.replace(".", "").replace(',', '.')
+                comma >= 0 && dot >= 0 -> value.replace(",", "")
+                comma >= 0 -> if (value.length - comma - 1 in 1..2) value.replace(',', '.') else value.replace(",", "")
+                else -> value
+            }
+            return value.toBigDecimalOrNull()?.movePointRight(2)?.toLong()
+        }
+        val salesByDay = sortedMapOf<String, Long>()
+        reports.sortedWith(compareBy<SeneReport> { it.date }.thenBy { it.time }.thenBy { it.number }).forEach { report ->
+            report.body.replace("\\r", "").lines().forEach lineLoop@{ raw ->
+                val separator = raw.indexOf(':')
+                if (separator <= 0) return@lineLoop
+                val key = normalizeSalesKey(raw.substring(0, separator))
+                if (key !in setOf("VENTAS DEL DIA", "VENTA DEL DIA", "TOTAL DE VENTAS", "VENTAS TOTALES",
+                        "VENTA NETA DEL DIA", "VENTAS NETAS") && !key.startsWith("VENTAS NETAS ")) return@lineLoop
+                val cents = moneyCents(raw.substring(separator + 1)) ?: return@lineLoop
+                if (report.date.isNotBlank()) salesByDay[report.date] = cents
+            }
+        }
+        val salesDays = JSONArray()
+        salesByDay.forEach { (date, cents) ->
+            salesDays.put(JSONObject().put("date", date).put("amountCents", cents))
+        }
+        val salesTotalCents = salesByDay.values.sum()
         val damaged = linkedSetOf<String>()
         reports.forEach { report ->
             val lines = report.body.replace("\r", "").lines()
@@ -129,6 +162,8 @@ object GuardianSnapshotExporter {
             .put("inventory", JSONObject().put("categories", categories))
             .put("products", products)
             .put("approvedMovements", approvedMovements)
+            .put("sales", JSONObject().put("dailyTotals", salesDays)
+                .put("totalAmountCents", salesTotalCents).put("source", "reports"))
             .put("operations", operations)
 
         val connection = URL(SNAPSHOT_URL).openConnection() as HttpURLConnection
