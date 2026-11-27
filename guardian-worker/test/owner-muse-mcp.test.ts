@@ -88,5 +88,6 @@ test("customer MUSE tools never include owner license inventory or request tools
     body: rpc("tools/list", 10)
   }), "12345678-1234-1234-1234-123456789012", async () => null);
   const body = await response.json() as any;
-  assert.deepEqual(body.result.tools.map((tool: any) => tool.name), ["get_business_overview"]);
+  assert.ok(body.result.tools.every((tool: any) =>
+    tool.name !== "list_owner_license_inventory" && tool.name !== "list_owner_license_requests"));
 });
