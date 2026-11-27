@@ -50,7 +50,7 @@ class GuardianSettingsActivity : Activity() {
         }
         root.addView(token)
         consent = CheckBox(this).apply {
-            text = "Autorizo a SENE GUARDIÁN a enviar el resumen agregado de inventario de este dispositivo."
+            text = "Autorizo a SENE GUARDIÁN a enviar el indicadores agregados de inventario, personal, nómina, asistencia, reportes y productos dañados de este dispositivo."
             textSize = 14f
             setPadding(0, dp(12), 0, dp(12))
         }
@@ -90,7 +90,7 @@ class GuardianSettingsActivity : Activity() {
                 return@setOnClickListener
             }
             send.isEnabled = false
-            status.text = "Preparando captura agregada..."
+            status.text = "Preparando captura administrativa agregada..."
             Thread {
                 val result = try {
                     GuardianSnapshotExporter.export(applicationContext, config.installationId, config.ingestToken)
