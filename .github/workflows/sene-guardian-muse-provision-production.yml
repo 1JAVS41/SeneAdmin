@@ -1,0 +1,126 @@
+# SENE GUARDIAN - Crear conexión MUSE de producción
+#
+# Manual, lo corre el propietario, una instalación por corrida. Modelado
+# exactamente sobre .github/workflows/sene-guardian-muse-provision.yml
+# (provisión de prueba), pero contra producción:
+#   - NO genera un installationId nuevo: usa el UUID de Sene Ventas del
+#     cliente (entrada installationId; es el mismo valor que
+#     businesses.installation_id en D1 y que se escribe en SeneAdmin).
+#   - NO despliega ningún Worker ni cambia secretos: usa el secreto de
+#     GitHub GUARDIAN_ADMIN_TOKEN (ya existe; el deploy de producción lo
+#     pone en el Worker) como Bearer para POST /v1/admin/installations en
+#     https://sene-guardian-api.nagavs28.workers.dev.
+#   - Publica el mismo paquete cifrado que el workflow de pruebas
+#     (muse-connection.json.enc, AES-256-CBC con MUSE_SETUP_PASSPHRASE,
+#     artefacto 1 día) con {installationId, mcpUrl, museReadToken,
+#     ingestToken}. Los tokens se muestran UNA sola vez: si se pierde el
+#     paquete hay que revocar y recrear la instalación.
+#
+# El propietario descifra el paquete y entrega los dos tokens al cliente
+# por un canal seguro (no por chat con registros). El cliente pega
+# museReadToken en SENE VENTAS ("Conectar mi Muse") e ingestToken en
+# SeneAdmin (Ajustes de GUARDIÁN), con el mismo installationId.
+# NUNCA se imprime ningún token en los registros.
+#
+# Si la instalación ya existe el servidor responde 409 already_exists y
+# el workflow falla sin publicar nada (los tokens no se pueden recuperar).
+
+name: SENE GUARDIAN - Crear conexión MUSE de producción
+
+on:
+  workflow_dispatch:
+    inputs:
+      installationId:
+        description: "UUID de Sene Ventas del cliente (businesses.installation_id en D1)"
+        required: true
+        type: string
+      business:
+        description: "Etiqueta del negocio (solo para identificar el paquete, p. ej. SENE)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: write
+
+concurrency:
+  group: sene-guardian-muse-provision-production
+  cancel-in-progress: false
+
+jobs:
+  provision:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Validar entradas y secretos necesarios
+        env:
+          ADMIN_TOKEN: ${{ secrets.GUARDIAN_ADMIN_TOKEN }}
+          BUNDLE_PASSWORD: ${{ secrets.MUSE_SETUP_PASSPHRASE }}
+          INSTALLATION_ID: ${{ inputs.installationId }}
+        run: |
+          set -euo pipefail
+          test -n "$ADMIN_TOKEN" && test "${#ADMIN_TOKEN}" -ge 40 || { echo "::error::Falta GUARDIAN_ADMIN_TOKEN (al menos 40 caracteres)."; exit 1; }
+          test -n "$BUNDLE_PASSWORD" && test "${#BUNDLE_PASSWORD}" -ge 20 || { echo "::error::Configura MUSE_SETUP_PASSPHRASE con al menos 20 caracteres."; exit 1; }
+          case "$INSTALLATION_ID" in
+            *[!a-fA-F0-9-]*) echo "::error::installationId no es un UUID válido."; exit 1 ;;
+          esac
+          test "${#INSTALLATION_ID}" -ge 16 && test "${#INSTALLATION_ID}" -le 64 || { echo "::error::installationId debe tener entre 16 y 64 caracteres."; exit 1; }
+          echo "Entradas válidas para el negocio: ${{ inputs.business }} (ningún token se imprime)."
+
+      - name: Crear credenciales exclusivas y aprovisionar instalación en producción
+        env:
+          ADMIN_TOKEN: ${{ secrets.GUARDIAN_ADMIN_TOKEN }}
+          BUNDLE_PASSWORD: ${{ secrets.MUSE_SETUP_PASSPHRASE }}
+          INSTALLATION_ID: ${{ inputs.installationId }}
+        run: |
+          set -euo pipefail
+          set +x
+          BASE_URL="https://sene-guardian-api.nagavs28.workers.dev"
+          umask 077
+          mkdir -p secure-output
+
+          curl --fail --silent "$BASE_URL/v1/health" >/dev/null
+
+          HTTP_CODE="$(curl --silent --show-error -o /tmp/sene-muse-provision-production.json -w '%{http_code}' \
+            -X POST "$BASE_URL/v1/admin/installations" \
+            -H "Authorization: Bearer $ADMIN_TOKEN" \
+            -H "Content-Type: application/json" \
+            --data "$(jq -nc --arg id "$INSTALLATION_ID" '{installationId:$id}')")"
+          if test "$HTTP_CODE" = "409"; then
+            echo "::error::La instalación ya existe en producción (409 already_exists). Los tokens no se pueden recuperar: revoca y vuelve a crear si se perdieron."
+            exit 1
+          fi
+          test "$HTTP_CODE" = "201" || { echo "::error::No se pudo crear la instalación (HTTP $HTTP_CODE)."; exit 1; }
+
+          INGEST_TOKEN="$(jq -er '.ingestToken' /tmp/sene-muse-provision-production.json)"
+          MUSE_TOKEN="$(jq -er '.museReadToken' /tmp/sene-muse-provision-production.json)"
+          echo "::add-mask::$INGEST_TOKEN"
+          echo "::add-mask::$MUSE_TOKEN"
+          jq -n --arg installationId "$INSTALLATION_ID" \
+                --arg mcpUrl "$BASE_URL/v1/muse/$INSTALLATION_ID/mcp" \
+                --arg museReadToken "$MUSE_TOKEN" \
+                --arg ingestToken "$INGEST_TOKEN" \
+                '{installationId:$installationId,mcpUrl:$mcpUrl,authentication:"Bearer",museReadToken:$museReadToken,ingestToken:$ingestToken,environment:"production"}' \
+                > secure-output/muse-connection.json
+
+          openssl enc -aes-256-cbc -pbkdf2 -salt -iter 200000 \
+            -pass env:BUNDLE_PASSWORD \
+            -in secure-output/muse-connection.json \
+            -out secure-output/muse-connection.json.enc
+          rm -f secure-output/muse-connection.json /tmp/sene-muse-provision-production.json
+          unset ADMIN_TOKEN INGEST_TOKEN MUSE_TOKEN BUNDLE_PASSWORD
+          echo "Instalación de producción creada para ${{ inputs.business }}. El paquete de credenciales se publica cifrado y no se imprime ningún token."
+
+      - name: Publicar paquete cifrado por tiempo limitado
+        uses: actions/upload-artifact@v4
+        with:
+          name: sene-muse-connection-production-encrypted
+          path: secure-output/muse-connection.json.enc
+          if-no-files-found: error
+          retention-days: 1
