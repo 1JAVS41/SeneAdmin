@@ -1,3 +1,4 @@
+successfully downloaded text file (SHA: 45be0316832fcdd190112d1bf301d8fe6e41ae1c)
 package com.sene.admin
 
 import android.app.Activity
@@ -34,7 +35,7 @@ class GuardianSettingsActivity : Activity() {
             setTypeface(null, android.graphics.Typeface.BOLD)
         })
         root.addView(TextView(this).apply {
-            text = "Conexión de solo lectura. La captura se envía únicamente cuando el propietario lo solicita."
+            text = "Conexión de solo lectura. Con el consentimiento activo, la captura se envía sola cada 2 horas; también puedes enviarla ahora manualmente."
             textSize = 14f
             setPadding(0, dp(8), 0, dp(16))
         })
@@ -69,7 +70,9 @@ class GuardianSettingsActivity : Activity() {
                 } else {
                     GuardianConfigStore.updateConsent(this, consent.isChecked)
                 }
-                status.text = if (consent.isChecked) "Configuración protegida. El envío manual está autorizado." else
+                if (consent.isChecked) GuardianAutoSyncScheduler.ensureScheduled(this)
+                else GuardianAutoSyncScheduler.cancel(this)
+                status.text = if (consent.isChecked) "Configuración protegida. El envío automático cada 2 horas está autorizado." else
                     "Configuración protegida. El envío está desactivado porque no hay consentimiento."
                 Toast.makeText(this, "Configuración guardada de forma cifrada.", Toast.LENGTH_SHORT).show()
             } catch (e: Exception) {
@@ -113,6 +116,7 @@ class GuardianSettingsActivity : Activity() {
                 .setNegativeButton("CANCELAR", null)
                 .setPositiveButton("DESACTIVAR") { _, _ ->
                     GuardianConfigStore.clear(this)
+                    GuardianAutoSyncScheduler.cancel(this)
                     installation.text?.clear()
                     token.text?.clear()
                     consent.isChecked = false
