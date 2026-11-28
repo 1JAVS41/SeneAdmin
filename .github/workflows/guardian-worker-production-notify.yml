@@ -1,0 +1,135 @@
+name: SENE GUARDIAN production deploy
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sene-guardian-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Validate and deploy sene-guardian-api (manual only)
+    if: github.ref == 'refs/heads/feature/guardian-damaged-products-readonly'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: guardian-worker
+    steps:
+      - name: Checkout authorized feature branch
+        uses: actions/checkout@v4
+        with:
+          ref: feature/guardian-damaged-products-readonly
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install project dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Run automated tests
+        run: npm test
+
+      - name: TypeScript type check
+        run: npm run typecheck
+
+      - name: Validate production configuration
+        env:
+          CF_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CF_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          KV_NAMESPACE_ID: ${{ secrets.GUARDIAN_KV_NAMESPACE_ID }}
+          ADMIN_TOKEN: ${{ secrets.GUARDIAN_ADMIN_TOKEN }}
+          DELIVERY_ENC_KEY: ${{ secrets.GUARDIAN_DELIVERY_ENC_KEY }}
+          DELIVERY_HMAC_KEY: ${{ secrets.GUARDIAN_DELIVERY_HMAC_KEY }}
+          OWNER_TOKEN_HASH: ${{ secrets.GUARDIAN_OWNER_CENTRAL_TOKEN_HASH }}
+          NOTIFY_BREVO_KEY: ${{ secrets.GUARDIAN_NOTIFY_BREVO_KEY }}
+          NOTIFY_FROM: ${{ secrets.GUARDIAN_NOTIFY_FROM }}
+          NOTIFY_TO: ${{ secrets.GUARDIAN_NOTIFY_TO }}
+        run: |
+          set -euo pipefail
+          for name in CF_ACCOUNT_ID CF_API_TOKEN KV_NAMESPACE_ID ADMIN_TOKEN DELIVERY_ENC_KEY DELIVERY_HMAC_KEY OWNER_TOKEN_HASH NOTIFY_BREVO_KEY NOTIFY_FROM NOTIFY_TO; do
+            if [ -z "${!name:-}" ]; then
+              echo "::error::Falta el secreto requerido: $name (configura el secreto correspondiente en GitHub)."
+              exit 1
+            fi
+          done
+          if [ "$KV_NAMESPACE_ID" = "REPLACE_WITH_KV_NAMESPACE_ID" ]; then
+            echo "::error::El ID de KV sigue siendo un marcador de posición."
+            exit 1
+          fi
+          if [ "${#ADMIN_TOKEN}" -lt 40 ] || [ "${#DELIVERY_ENC_KEY}" -lt 40 ] || [ "${#DELIVERY_HMAC_KEY}" -lt 40 ] || [ "${#OWNER_TOKEN_HASH}" -ne 64 ]; then
+            echo "::error::La longitud de uno o más secretos de GUARDIÁN no cumple los requisitos."
+            exit 1
+          fi
+          case "$OWNER_TOKEN_HASH" in
+            *[!0-9a-fA-F]*)
+              echo "::error::GUARDIAN_OWNER_CENTRAL_TOKEN_HASH debe ser hexadecimal SHA-256 de 64 caracteres."
+              exit 1
+              ;;
+          esac
+
+      - name: Install Wrangler
+        run: npm install --no-save --no-audit --no-fund wrangler@4
+
+      - name: Build temporary production config
+        env:
+          KV_NAMESPACE_ID: ${{ secrets.GUARDIAN_KV_NAMESPACE_ID }}
+        run: |
+          set -euo pipefail
+          node --input-type=module -e '
+            import fs from "node:fs";
+            const source = fs.readFileSync("wrangler.toml", "utf8");
+            const id = process.env.KV_NAMESPACE_ID;
+            if (!id || !/^[a-f0-9]{32}$/i.test(id)) throw new Error("El ID de KV no tiene el formato esperado.");
+            if (!source.includes("REPLACE_WITH_KV_NAMESPACE_ID")) throw new Error("No se encontró el marcador KV esperado; se cancela para evitar desplegar una configuración distinta.");
+            fs.writeFileSync("wrangler.production.toml", source.replace("REPLACE_WITH_KV_NAMESPACE_ID", id));
+          '
+
+      - name: Deploy Worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: npx wrangler deploy --config wrangler.production.toml
+
+      - name: Set runtime secrets
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          ADMIN_TOKEN: ${{ secrets.GUARDIAN_ADMIN_TOKEN }}
+          DELIVERY_ENC_KEY: ${{ secrets.GUARDIAN_DELIVERY_ENC_KEY }}
+          DELIVERY_HMAC_KEY: ${{ secrets.GUARDIAN_DELIVERY_HMAC_KEY }}
+          OWNER_TOKEN_HASH: ${{ secrets.GUARDIAN_OWNER_CENTRAL_TOKEN_HASH }}
+          NOTIFY_BREVO_KEY: ${{ secrets.GUARDIAN_NOTIFY_BREVO_KEY }}
+          NOTIFY_FROM: ${{ secrets.GUARDIAN_NOTIFY_FROM }}
+          NOTIFY_TO: ${{ secrets.GUARDIAN_NOTIFY_TO }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$ADMIN_TOKEN" | npx wrangler secret put GUARDIAN_ADMIN_TOKEN --config wrangler.production.toml
+          printf '%s' "$DELIVERY_ENC_KEY" | npx wrangler secret put GUARDIAN_DELIVERY_ENC_KEY --config wrangler.production.toml
+          printf '%s' "$DELIVERY_HMAC_KEY" | npx wrangler secret put GUARDIAN_DELIVERY_HMAC_KEY --config wrangler.production.toml
+          printf '%s' "$OWNER_TOKEN_HASH" | npx wrangler secret put GUARDIAN_OWNER_CENTRAL_TOKEN_HASH --config wrangler.production.toml
+          printf '%s' "$NOTIFY_BREVO_KEY" | npx wrangler secret put GUARDIAN_NOTIFY_BREVO_KEY --config wrangler.production.toml
+          printf '%s' "$NOTIFY_FROM" | npx wrangler secret put GUARDIAN_NOTIFY_FROM --config wrangler.production.toml
+          printf '%s' "$NOTIFY_TO" | npx wrangler secret put GUARDIAN_NOTIFY_TO --config wrangler.production.toml
+
+      - name: Verify health endpoint
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3 4 5; do
+            if curl --fail --silent --show-error https://sene-guardian-api.nagavs28.workers.dev/v1/health; then
+              echo
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "::error::El Worker se desplegó, pero no respondió correctamente en /v1/health."
+          exit 1
+
+      - name: Remove temporary production config
+        if: always()
+        run: rm -f wrangler.production.toml
