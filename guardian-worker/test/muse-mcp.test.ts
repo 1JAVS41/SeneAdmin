@@ -26,6 +26,10 @@ const snapshot = {
   damagedProducts: { itemCount: 2, updatedAt: new Date().toISOString() },
   approvedMovements: { periods: [{ period: "2026-11", cashDisbursementCount: 1, inventoryConsumptionCount: 2, inventoryConsumptionUnits: 5 }] },
   sales: { periods: [{ period: "2026-11", workerCount: 1, reportCount: 1, salesNetCents: 50000, providerPaymentsCents: 1000, loansDisbursedCents: 0 }] },
+  payroll: { periods: [
+    { period: "2026-11-07", employeeCount: 2, payrollCount: 2, grossCents: 200000, absenceCents: 1000, earlyExitCents: 0, loanCents: 5000, consumptionCents: 2000, netCents: 192000, deliveredCents: 192000 },
+    { period: "2026-10-31", employeeCount: 2, payrollCount: 2, grossCents: 190000, absenceCents: 0, earlyExitCents: 0, loanCents: 0, consumptionCents: 0, netCents: 190000, deliveredCents: 190000 },
+  ] },
   workers: { employees: [{ name: "Ana", salaryCents: 100000 }, { name: "Luis", salaryCents: 90000 }] }
 };
 const envFor = async () => {
@@ -40,25 +44,34 @@ const envFor = async () => {
 const post = (body: unknown, auth = token, origin?: string) => new Request("https://guardian.test/v1/muse/" + id + "/mcp", {
   method: "POST", headers: { "content-type": "application/json", authorization: "Bearer " + auth, ...(origin ? { origin } : {}) }, body: JSON.stringify(body)
 });
-const callTool = async (env: any, toolId: number, name: string) => {
-  const response = await worker.fetch(post({ jsonrpc: "2.0", id: toolId, method: "tools/call", params: { name, arguments: {} } }), env);
+const callTool = async (env: any, toolId: number, name: string, args: Record<string, unknown> = {}) => {
+  const response = await worker.fetch(post({ jsonrpc: "2.0", id: toolId, method: "tools/call", params: { name, arguments: args } }), env);
   const body = await response.json() as any;
   return body.result;
 };
+const callToolRaw = async (env: any, toolId: number, name: string, args: Record<string, unknown> = {}) => {
+  const response = await worker.fetch(post({ jsonrpc: "2.0", id: toolId, method: "tools/call", params: { name, arguments: args } }), env);
+  return await response.json() as any;
+};
 
-test("Muse MCP initializes and exposes only four read-only administrative tools", async () => {
+test("Muse MCP initializes and exposes only six read-only administrative tools", async () => {
   const env = await envFor();
   const init = await worker.fetch(post({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-03-26", capabilities: {}, clientInfo: { name: "test", version: "1" } } }), env);
   assert.equal(init.status, 200);
   const list = await worker.fetch(post({ jsonrpc: "2.0", id: 2, method: "tools/list" }), env);
   const body = await list.json() as any;
-  assert.deepEqual(body.result.tools.map((t: any) => t.name), ["get_business_overview", "list_workers", "get_inventory_summary", "get_sales_summary"]);
+  assert.deepEqual(body.result.tools.map((t: any) => t.name), ["get_business_overview", "list_workers", "get_inventory_summary", "get_sales_summary", "list_payrolls", "get_payroll"]);
   assert.equal(body.result.tools.every((t: any) => t.annotations.readOnlyHint === true), true);
   assert.equal(body.result.tools.every((t: any) => t.annotations.destructiveHint === false), true);
   assert.equal(body.result.tools[0].description.includes("trabajadores"), true);
-  // No hay herramientas de lista de artículos ni de movimientos individuales:
-  // el snapshot solo tiene conteos y totales, no listas.
-  assert.equal(body.result.tools.some((t: any) => ["list_out_of_stock_items", "get_inventory_item", "list_sales_movements"].includes(t.name)), false);
+  // No hay herramientas de lista de artículos, de movimientos individuales,
+  // de reportes, de solicitudes de nómina ni de asistencia: el snapshot no
+  // tiene los datos para responderlas sin inventar campos.
+  assert.equal(body.result.tools.some((t: any) => ["list_inventory_items", "get_inventory_item", "list_out_of_stock_items", "list_sales_movements", "list_admin_reports", "get_admin_report", "get_worker", "list_payroll_requests", "list_attendance", "get_attendance_summary"].includes(t.name)), false);
+  // Solo get_payroll acepta un argumento (period); las demás no aceptan ninguno.
+  const getPayroll = body.result.tools.find((t: any) => t.name === "get_payroll");
+  assert.deepEqual(getPayroll.inputSchema.required, ["period"]);
+  assert.equal(body.result.tools.filter((t: any) => t.name !== "get_payroll").every((t: any) => Object.keys(t.inputSchema.properties).length === 0), true);
 });
 
 test("Muse tool returns only its own installation overview and never central license events", async () => {
@@ -110,6 +123,50 @@ test("get_sales_summary returns sales periods and approved movement periods from
   assert.deepEqual(parsed.sales.periods, [{ period: "2026-11", workerCount: 1, reportCount: 1, salesNetCents: 50000, providerPaymentsCents: 1000, loansDisbursedCents: 0 }]);
   assert.deepEqual(parsed.approvedMovements.periods, [{ period: "2026-11", cashDisbursementCount: 1, inventoryConsumptionCount: 2, inventoryConsumptionUnits: 5 }]);
   assert.equal(result.isError, false);
+});
+
+test("list_payrolls returns payroll periods with totals from the same overview", async () => {
+  const env = await envFor();
+  const result = await callTool(env, 8, "list_payrolls");
+  const parsed = JSON.parse(result.content[0].text);
+  assert.equal(parsed.total, 2);
+  assert.deepEqual(parsed.periods, (snapshot as any).payroll.periods);
+  assert.deepEqual(result.structuredContent, { total: 2, periods: (snapshot as any).payroll.periods });
+  assert.equal(result.isError, false);
+});
+
+test("list_payrolls says so when the installation has no payroll periods", async () => {
+  const env = await envFor();
+  const withoutPayroll: any = { ...snapshot };
+  delete withoutPayroll.payroll;
+  await env.GUARDIAN_DATA.put("snapshot:v1:" + id, JSON.stringify(withoutPayroll));
+  const result = await callTool(env, 9, "list_payrolls");
+  assert.equal(result.content[0].text, "Todavía no hay periodos de nómina registrados para esta instalación.");
+  assert.equal(result.isError, false);
+});
+
+test("get_payroll returns the requested period by its date", async () => {
+  const env = await envFor();
+  const result = await callTool(env, 10, "get_payroll", { period: "2026-11-07" });
+  const parsed = JSON.parse(result.content[0].text);
+  assert.deepEqual(parsed, (snapshot as any).payroll.periods[0]);
+  assert.deepEqual(result.structuredContent, (snapshot as any).payroll.periods[0]);
+  assert.equal(result.isError, false);
+});
+
+test("get_payroll says so when the requested period is not in the snapshot", async () => {
+  const env = await envFor();
+  const result = await callTool(env, 11, "get_payroll", { period: "2026-01-01" });
+  assert.equal(result.content[0].text, "No hay nómina registrada para el periodo 2026-01-01 en esta instalación.");
+  assert.equal(result.isError, false);
+});
+
+test("get_payroll rejects a missing, malformed or extra argument", async () => {
+  const env = await envFor();
+  assert.equal((await callToolRaw(env, 12, "get_payroll", {})).error.code, -32602);
+  assert.equal((await callToolRaw(env, 13, "get_payroll", { period: "2026-11" })).error.code, -32602);
+  assert.equal((await callToolRaw(env, 14, "get_payroll", { period: "2026-13-40" })).error.code, -32602);
+  assert.equal((await callToolRaw(env, 15, "get_payroll", { period: "2026-11-07", installationId: "ffffffff-ffff-ffff-ffff-ffffffffffff" })).error.code, -32602);
 });
 
 test("Muse MCP rejects wrong tokens and revoked installations", async () => {
