@@ -3,6 +3,8 @@ package com.sene.admin
 import android.app.Activity
 import android.app.AlertDialog
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.text.InputType
 import android.view.ViewGroup
 import android.widget.Button
@@ -15,6 +17,21 @@ import java.util.Locale
 
 class PayrollActivity : Activity() {
     private lateinit var root: LinearLayout
+    // Ahorro (A2): juntar decisiones. Cada autorizacion o rechazo ya no dispara
+    // su propia sincronizacion: se espera 30 s desde la ultima decision y se
+    // mandan todas las pendientes en una sola llamada. La decision ya quedo
+    // guardada en local, asi que si se cierra la pantalla antes, se envia en
+    // la proxima apertura o en el ciclo automatico.
+    private val decisionSyncHandler = Handler(Looper.getMainLooper())
+    private val decisionSyncRunnable = Runnable { AdminPayrollRequestSync.sync(this, true) }
+    private fun scheduleDecisionSync() {
+        decisionSyncHandler.removeCallbacks(decisionSyncRunnable)
+        decisionSyncHandler.postDelayed(decisionSyncRunnable, 30_000L)
+    }
+    override fun onDestroy() {
+        decisionSyncHandler.removeCallbacks(decisionSyncRunnable)
+        super.onDestroy()
+    }
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val profileId = intent.getStringExtra("profile_id")
@@ -252,8 +269,8 @@ class PayrollActivity : Activity() {
                             .setPositiveButton("CONFIRMAR") { _, _ ->
                                 requireOwnerPin {
                                     if(OwnerPayrollStore.queueRequestDecision(this@PayrollActivity,request.id,true)) {
-                                        Toast.makeText(this@PayrollActivity,"Autorización guardada. Enviando decisión al servidor...",Toast.LENGTH_LONG).show()
-                                        AdminPayrollRequestSync.sync(this@PayrollActivity,true)
+                                        Toast.makeText(this@PayrollActivity,"Autorización guardada. Se enviará al servidor en unos segundos, junto con otras decisiones pendientes.",Toast.LENGTH_LONG).show()
+                                        scheduleDecisionSync()
                                     }
                                     showRequests(profileId)
                                 }
@@ -268,8 +285,8 @@ class PayrollActivity : Activity() {
                             .setPositiveButton("CONFIRMAR") { _, _ ->
                                 requireOwnerPin {
                                     if(OwnerPayrollStore.queueRequestDecision(this@PayrollActivity,request.id,false,reason.text.toString())) {
-                                        Toast.makeText(this@PayrollActivity,"Rechazo guardado. Enviando decisión al servidor...",Toast.LENGTH_LONG).show()
-                                        AdminPayrollRequestSync.sync(this@PayrollActivity,true)
+                                        Toast.makeText(this@PayrollActivity,"Rechazo guardado. Se enviará al servidor en unos segundos, junto con otras decisiones pendientes.",Toast.LENGTH_LONG).show()
+                                        scheduleDecisionSync()
                                     }
                                     showRequests(profileId)
                                 }
