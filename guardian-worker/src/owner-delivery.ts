@@ -62,6 +62,13 @@ export function isCompletedLicenseEvent(value: any): boolean {
 export function isSyncedLicenseEvent(value: any): boolean {
   return !!value && value.event_type === "license.synced";
 }
+/** A device transfer (transfer.completed): the license moves from
+ * old_installation_id to installation_id. It carries no request_type,
+ * amount, currency, code or payment_status, and valid_until is null when
+ * the business has not activated yet. */
+export function isTransferEvent(value: any): boolean {
+  return !!value && value.event_type === "transfer.completed";
+}
 /** A completed activation/renewal, or a one-time sync of an already-active
  * license (license.synced, design section 3): both count as active. The
  * synced event carries no activation code — the plain code of an
@@ -129,6 +136,31 @@ export function activeLicensesFromEvents(events: unknown[], now = Date.now()): {
   return { total: licenses.length, licenses };
 }
 
+/** Keep only device transfers, in a safe public shape (no code, no
+ * whatsapp, no holder name, no amount). Sorted newest first. */
+export type DeviceTransfer = {
+  folio: string;
+  businessName: string;
+  oldInstallationId: string;
+  installationId: string;
+  validUntil: string | null;
+  transferredAt: string;
+};
+export function deviceTransfersFromEvents(events: unknown[]): { total: number; transfers: DeviceTransfer[] } {
+  const transfers = (events as any[])
+    .filter((event) => isTransferEvent(event))
+    .map((event) => ({
+      folio: event.folio as string,
+      businessName: event.business_name as string,
+      oldInstallationId: event.old_installation_id as string,
+      installationId: event.installation_id as string,
+      validUntil: (event.valid_until ?? null) as string | null,
+      transferredAt: event.created_at as string,
+    }))
+    .sort((a, b) => Date.parse(b.transferredAt) - Date.parse(a.transferredAt) || a.folio.localeCompare(b.folio));
+  return { total: transfers.length, transfers };
+}
+
 // Retención del historial de licencias (regla del usuario, 2026-11-27): el
 // historial de licencias se conserva SIEMPRE y nunca se borra por la
 // limpieza, por si un cliente regresa a SENE-VENTAS. Por eso un evento
@@ -137,14 +169,30 @@ export function activeLicensesFromEvents(events: unknown[], now = Date.now()): {
 // licencia no cambia: valid_until se conserva intacto y solo
 // activeLicensesFromEvents decide qué sigue activo según esa fecha.
 // Una solicitud pendiente sí se guarda solo un día, como antes.
+// Un traspaso de dispositivo también se guarda sin caducidad: es
+// historial de licencias, igual que un evento completado.
 export function ownerEventRetention(event: any): { expirationTtl?: number } {
-  return isActiveLicenseEvent(event) ? {} : { expirationTtl: 86400 };
+  return isActiveLicenseEvent(event) || isTransferEvent(event) ? {} : { expirationTtl: 86400 };
 }
 function validEvent(value: any, eventId: string): boolean {
   if (!value || value.event_id !== eventId ||
       !validInstallationId(value.installation_id) ||
-      typeof value.folio !== "string" || !/^SENE-[A-Z0-9-]{8,40}$/.test(value.folio) ||
-      !["activation", "renewal"].includes(value.request_type) ||
+      typeof value.folio !== "string" || !/^SENE-[A-Z0-9-]{8,40}$/.test(value.folio)) return false;
+  if (isTransferEvent(value)) {
+    // A device transfer (transfer.completed): the license moves to a new
+    // device. It carries no request_type, amount, currency, code or
+    // payment_status, and valid_until is null when the business has not
+    // activated yet. A stray `code` field, if present, is ignored: it is
+    // never used and never returned.
+    return validUuid(value.installation_id) &&
+      validUuid(value.old_installation_id) &&
+      typeof value.business_name === "string" && value.business_name.length >= 2 && value.business_name.length <= 80 &&
+      typeof value.holder_name === "string" && value.holder_name.length >= 2 && value.holder_name.length <= 100 &&
+      typeof value.whatsapp === "string" && /^\d{10,15}$/.test(value.whatsapp) &&
+      validDate(value.created_at) &&
+      (value.valid_until === null || validDate(value.valid_until));
+  }
+  if (!["activation", "renewal"].includes(value.request_type) ||
       !validDate(value.created_at) ||
       !Number.isSafeInteger(value.amount_cents) || value.amount_cents <= 0 ||
       value.currency !== "MXN" ||
@@ -223,6 +271,23 @@ export async function handleOwnerDelivery(request: Request, env: OwnerDeliveryEn
     if (isActiveLicenseEvent(event)) {
       await env.GUARDIAN_DATA.put(licenseRecordKey(event.installation_id), JSON.stringify(licenseRecordFromEvent(event)));
     }
+    // License rebind on device transfer (transfer.completed): move the
+    // license record from the old device to the new one so the license
+    // gate follows the new phone. Folio, type and validity dates are
+    // kept; only installationId and updatedAt change. If the business
+    // never activated there is no record to move and nothing happens.
+    // A record already stored under the new device is overwritten by
+    // the moved one. No expirationTtl: license history is kept.
+    if (isTransferEvent(event)) {
+      const oldKey = licenseRecordKey(event.old_installation_id);
+      const newKey = licenseRecordKey(event.installation_id);
+      const oldRecord = await env.GUARDIAN_DATA.get<LicenseRecord>(oldKey, "json");
+      if (oldRecord) {
+        const moved: LicenseRecord = { ...oldRecord, installationId: event.installation_id, updatedAt: new Date().toISOString() };
+        await env.GUARDIAN_DATA.put(newKey, JSON.stringify(moved));
+        if (oldKey !== newKey) await env.GUARDIAN_DATA.delete(oldKey);
+      }
+    }
     // Owner notification (push, best-effort): after the event is stored,
     // notify the owner Muse by email (Brevo). Only .requested and
     // .completed events notify; license.synced stays silent inside
@@ -242,7 +307,9 @@ export async function handleOwnerDelivery(request: Request, env: OwnerDeliveryEn
     // credential. It deliberately does not accept installationId as a filter:
     // all license events belong to the central owner channel.
     // ?kind=active returns only active licenses (total + safe list, no code);
-    // the default returns only pending requests, never completed events.
+    // ?kind=transfers returns only device transfers (total + safe list, no
+    // whatsapp, no holder name, no code); the default returns only pending
+    // requests, never completed events or transfers.
     const kind = new URL(request.url).searchParams.get("kind");
     const all: unknown[] = [];
     let cursor: string | undefined;
@@ -262,6 +329,7 @@ export async function handleOwnerDelivery(request: Request, env: OwnerDeliveryEn
       cursor = page.list_complete ? undefined : page.cursor;
     } while (cursor);
     if (kind === "active") return json(activeLicensesFromEvents(all));
+    if (kind === "transfers") return json(deviceTransfersFromEvents(all));
     const events = all.filter((event: any) => ["activation.requested", "renewal.requested"].includes(event.event_type));
     return json({ events });
   }

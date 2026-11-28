@@ -210,3 +210,82 @@ test("a network failure returns false and does not throw", async () => {
   }
   assert.equal(sent, false);
 });
+
+const transferEvent = (overrides: Record<string, unknown> = {}): OwnerNotifyEvent => ({
+  event_id: "123e4567-e89b-42d3-a456-426614174202",
+  event_type: "transfer.completed",
+  folio: "SENE-20261127-ABC202",
+  business_name: "Negocio de prueba",
+  created_at: new Date().toISOString(),
+  valid_until: new Date(Date.now() + 30 * 86400000).toISOString(),
+  ...overrides,
+});
+
+test("transfer event sends one email with folio, business and expiry, and never code, phone, holder or device ids", async () => {
+  const kv = new MemoryKV();
+  const calls: SentEmail[] = [];
+  const originalFetch = globalThis.fetch;
+  (globalThis as any).fetch = mockFetch(201, calls);
+  // The stored event carries code/whatsapp/holder_name/device ids, but the
+  // email must never include them.
+  const event = {
+    ...transferEvent(),
+    code: "ABCDEFG234",
+    whatsapp: "3312345678",
+    holder_name: "Titular de prueba",
+    old_installation_id: "abcdef12-3456-7890-abcd-ef1234567890",
+    installation_id: "bbbbbbbb-2222-4222-9222-222222222222",
+  } as unknown as OwnerNotifyEvent;
+  let sent: boolean;
+  try {
+    sent = await notifyOwnerMuse(notifyEnv(kv), event);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  assert.equal(sent, true);
+  assert.equal(calls.length, 1);
+  const body = calls[0].body;
+  assert.equal(body.subject, "[SENE GUARDIÁN] Cambio de dispositivo (SENE-20261127-ABC202)");
+  assert.match(body.textContent, /Se cambió el dispositivo vinculado a la licencia\./);
+  assert.match(body.textContent, /SENE-20261127-ABC202/);
+  assert.match(body.textContent, /Negocio de prueba/);
+  assert.match(body.textContent, new RegExp(`Vence: ${String(event.valid_until).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
+  assert.match(body.textContent, /Verifica con tus herramientas de propietario antes de avisar\./);
+  const whole = JSON.stringify(body);
+  assert.equal(whole.includes("ABCDEFG234"), false);
+  assert.equal(whole.includes("3312345678"), false);
+  assert.equal(whole.includes("Titular de prueba"), false);
+  assert.equal(whole.includes("abcdef12-3456-7890-abcd-ef1234567890"), false);
+  assert.equal(whole.includes("bbbbbbbb-2222-4222-9222-222222222222"), false);
+});
+
+test("transfer event without a validity date says 'sin fecha'", async () => {
+  const kv = new MemoryKV();
+  const calls: SentEmail[] = [];
+  const originalFetch = globalThis.fetch;
+  (globalThis as any).fetch = mockFetch(200, calls);
+  let sent: boolean;
+  try {
+    sent = await notifyOwnerMuse(notifyEnv(kv), transferEvent({ valid_until: null }));
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  assert.equal(sent, true);
+  assert.equal(calls.length, 1);
+  assert.match(calls[0].body.textContent, /Vence: sin fecha/);
+});
+
+test("second transfer call with the same event_id does not send again", async () => {
+  const kv = new MemoryKV();
+  const calls: SentEmail[] = [];
+  const originalFetch = globalThis.fetch;
+  (globalThis as any).fetch = mockFetch(200, calls);
+  try {
+    assert.equal(await notifyOwnerMuse(notifyEnv(kv), transferEvent()), true);
+    assert.equal(await notifyOwnerMuse(notifyEnv(kv), transferEvent()), false);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  assert.equal(calls.length, 1);
+  assert.equal(await kv.get("notify:v1:123e4567-e89b-42d3-a456-426614174202"), "sent");
+});

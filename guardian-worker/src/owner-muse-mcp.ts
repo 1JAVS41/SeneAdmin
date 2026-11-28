@@ -6,6 +6,7 @@
  */
 type OwnerEventsLoader = () => Promise<unknown[] | null>;
 type OwnerActiveLicensesLoader = () => Promise<{ total: number; licenses: unknown[] } | null>;
+type OwnerDeviceTransfersLoader = () => Promise<{ total: number; transfers: unknown[] } | null>;
 const PROTOCOL = "2025-03-26";
 const READ_ONLY = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false };
 const NO_ARGS = { type: "object", properties: {}, additionalProperties: false };
@@ -22,6 +23,12 @@ const TOOLS = [
     inputSchema: NO_ARGS,
     annotations: READ_ONLY,
   },
+  {
+    name: "list_owner_device_transfers",
+    description: "Consulta los traspasos recientes de licencia a otro dispositivo: folio, negocio, dispositivo viejo y nuevo, vigencia y fecha. Exclusivo del MUSE del propietario.",
+    inputSchema: NO_ARGS,
+    annotations: READ_ONLY,
+  },
 ];
 function response(id: unknown, result: unknown): Response {
   return new Response(JSON.stringify({ jsonrpc: "2.0", id, result }), {
@@ -31,7 +38,7 @@ function response(id: unknown, result: unknown): Response {
 function error(id: unknown, code: number, message: string): Response {
   return response(id, { error: { code, message } });
 }
-export async function handleOwnerMuseMcp(request: Request, loadEvents: OwnerEventsLoader, loadActiveLicenses?: OwnerActiveLicensesLoader): Promise<Response> {
+export async function handleOwnerMuseMcp(request: Request, loadEvents: OwnerEventsLoader, loadActiveLicenses?: OwnerActiveLicensesLoader, loadDeviceTransfers?: OwnerDeviceTransfersLoader): Promise<Response> {
   let message: any;
   try {
     if (!(request.headers.get("content-type") ?? "").toLowerCase().includes("application/json")) return new Response(null, {status:400});
@@ -44,19 +51,25 @@ export async function handleOwnerMuseMcp(request: Request, loadEvents: OwnerEven
   if (message.method === "initialize") return response(message.id, {
     protocolVersion: PROTOCOL, capabilities: { tools: { listChanged: false } },
     serverInfo: { name: "sene-guardian-owner", version: "1.0.0" },
-    instructions: "Conector exclusivo del MUSE del propietario asociado al WhatsApp 3325142147. Puede consultar solicitudes de licencias nuevas y renovaciones, incluidos sus códigos, y la lista de licencias activas. No comparte estos datos con MUSE de clientes, no ve datos de clientes y no ejecuta acciones."
+    instructions: "Conector exclusivo del MUSE del propietario asociado al WhatsApp 3325142147. Puede consultar solicitudes de licencias nuevas y renovaciones, incluidos sus códigos, y la lista de licencias activas, y los traspasos de licencia a otro dispositivo. No comparte estos datos con MUSE de clientes, no ve datos de clientes y no ejecuta acciones."
   });
   if (message.method === "ping") return response(message.id, {});
   if (message.method === "tools/list") return response(message.id, { tools: TOOLS });
   if (message.method === "tools/call") {
     const params = message.params ?? {};
     if ((params.arguments && Object.keys(params.arguments).length) ||
-        !["list_owner_license_requests", "list_owner_active_licenses"].includes(params.name))
+        !["list_owner_license_requests", "list_owner_active_licenses", "list_owner_device_transfers"].includes(params.name))
       return error(message.id, -32602, "Unknown tool or invalid arguments");
     if (params.name === "list_owner_active_licenses") {
       if (!loadActiveLicenses) return response(message.id, { content: [{type:"text", text:"Las licencias activas no están disponibles."}], isError:true });
       const result = await loadActiveLicenses();
       if (!result) return response(message.id, { content: [{type:"text", text:"Las licencias activas no están disponibles."}], isError:true });
+      return response(message.id, { content: [{type:"text", text:JSON.stringify(result)}], structuredContent: result, isError:false });
+    }
+    if (params.name === "list_owner_device_transfers") {
+      if (!loadDeviceTransfers) return response(message.id, { content: [{type:"text", text:"Los traspasos de dispositivo no están disponibles."}], isError:true });
+      const result = await loadDeviceTransfers();
+      if (!result) return response(message.id, { content: [{type:"text", text:"Los traspasos de dispositivo no están disponibles."}], isError:true });
       return response(message.id, { content: [{type:"text", text:JSON.stringify(result)}], structuredContent: result, isError:false });
     }
     const events = await loadEvents();

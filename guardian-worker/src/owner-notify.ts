@@ -7,7 +7,7 @@
  *
  * Rules (design diseno-aviso-guardian-2026-11-27.md, sections 3-4):
  * - Only activation.requested / renewal.requested / activation.completed /
- *   renewal.completed notify. license.synced is silent.
+ *   renewal.completed / transfer.completed notify. license.synced is silent.
  * - One email per event: KV key notify:v1:{event_id} is checked first and
  *   written (TTL 7 days) only after a successful send.
  * - Best-effort: this function NEVER throws. A Brevo failure, a timeout
@@ -25,19 +25,22 @@ export interface OwnerNotifyEnv {
 
 /** The license-event fields validated by validEvent() in owner-delivery.ts.
  * Only these fields are used. The activation code, whatsapp and holder_name
- * are deliberately NOT part of this type: they must never reach the email. */
+ * are deliberately NOT part of this type: they must never reach the email.
+ * request_type, amount_cents and currency are optional: a device transfer
+ * (transfer.completed) carries none of them, and its valid_until is null
+ * when the business has not activated yet. */
 export type OwnerNotifyEvent = {
   event_id: string;
   event_type: string;
   folio: string;
   business_name: string;
-  request_type: "activation" | "renewal";
-  amount_cents: number;
-  currency: string;
+  request_type?: "activation" | "renewal";
+  amount_cents?: number;
+  currency?: string;
   created_at: string;
   expires_at?: string;
   valid_from?: string;
-  valid_until?: string;
+  valid_until?: string | null;
 };
 
 const BREVO_SEND_URL = "https://api.brevo.com/v3/smtp/email";
@@ -50,21 +53,39 @@ const NOTIFIABLE_EVENT_TYPES = [
   "renewal.requested",
   "activation.completed",
   "renewal.completed",
+  "transfer.completed",
 ];
 
 function isCompletedEvent(eventType: string): boolean {
   return eventType === "activation.completed" || eventType === "renewal.completed";
 }
 
-function typeLabel(requestType: "activation" | "renewal"): string {
+function typeLabel(requestType: "activation" | "renewal" | undefined): string {
   return requestType === "renewal" ? "renovación" : "nueva";
 }
 
 function amountLabel(event: OwnerNotifyEvent): string {
-  return `$${(event.amount_cents / 100).toFixed(2)} ${event.currency}`;
+  return `$${((event.amount_cents ?? 0) / 100).toFixed(2)} ${event.currency ?? "MXN"}`;
 }
 
 function buildEmail(event: OwnerNotifyEvent): { subject: string; textContent: string } {
+  if (event.event_type === "transfer.completed") {
+    // A device transfer: no code, no phone number, no holder name and no
+    // installation ids ever reach the email — only folio, business and
+    // the validity date (or "sin fecha" when not activated yet).
+    return {
+      subject: `[SENE GUARDIÁN] Cambio de dispositivo (${event.folio})`,
+      textContent: [
+        "Se cambió el dispositivo vinculado a la licencia.",
+        "",
+        `Folio: ${event.folio}`,
+        `Negocio: ${event.business_name}`,
+        `Vence: ${event.valid_until ?? "sin fecha"}`,
+        "",
+        "Verifica con tus herramientas de propietario antes de avisar.",
+      ].join("\n"),
+    };
+  }
   const type = typeLabel(event.request_type);
   if (isCompletedEvent(event.event_type)) {
     return {
