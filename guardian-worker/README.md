@@ -34,6 +34,20 @@ Contrato del productor (evento cifrado a `POST /v1/guardian/owner-events`, mismo
 
 **Pendiente:** el productor de SENE VENTAS todavía no envía eventos completados (tampoco envía las solicitudes). Hasta que lo haga, `list_owner_active_licenses` devuelve total 0, lo cual no es un error ni significa que no haya licencias: significa que el servidor no ha recibido ninguna.
 
+## Aviso al MUSE del propietario (push por correo)
+
+Cuando se guarda un evento de licencia, el Worker avisa por sí solo al MUSE del propietario con un correo (Brevo, API v3). Nada consulta nada: el aviso sale en el mismo momento en que se guarda el evento.
+
+- Solo avisan `activation.requested`, `renewal.requested`, `activation.completed` y `renewal.completed`. `license.synced` (pase único de las licencias ya activas) no avisa.
+- El correo lleva folio, negocio, tipo (nueva o renovación), monto (solicitud nueva) o fechas de vigencia (licencia activa). **Nunca** lleva el código de activación, el teléfono ni el nombre del titular.
+- Un solo aviso por evento: antes de enviar se revisa la llave KV `notify:v1:{event_id}`; después de enviar bien se guarda con TTL de 7 días.
+- Mejor esfuerzo: si Brevo falla o no responde en 5 segundos, el evento ya quedó guardado y la respuesta al productor sigue siendo `accepted`. El aviso nunca rompe el flujo comercial.
+- Claves opcionales (secretos del Worker, nunca en Git):
+  - `GUARDIAN_NOTIFY_BREVO_KEY`: clave API v3 de Brevo (`xkeysib-...`) para enviar el correo.
+  - `GUARDIAN_NOTIFY_FROM`: dirección de envío verificada en Brevo (se recomienda una dirección dedicada, no el correo personal del usuario).
+  - `GUARDIAN_NOTIFY_TO`: buzón de Muse del propietario (`<handle>@muse.ai`).
+- Si falta alguna de las tres, no se envía nada y solo queda un aviso en el registro; los eventos se guardan igual.
+
 ## Datos agregados
 
 El exportador Android construye una lista permitida de datos y no envía filas personales:
@@ -87,7 +101,7 @@ El snapshot solo guarda agregados por periodo, no filas individuales: no existen
 ## Configuración y estado
 
 - `wrangler.toml` conserva un ID de KV placeholder. No sustituirlo ni desplegar hasta revisar la configuración y el plan gratuito.
-- El Worker requiere secretos para administración, cifrado, HMAC y autenticación central del propietario. Los secretos no se guardan en Git ni se solicitan por chat.
+- El Worker requiere secretos para administración, cifrado, HMAC y autenticación central del propietario. Los secretos no se guardan en Git ni se solicitan por chat. Las tres claves de aviso al propietario son opcionales (ver [Aviso al MUSE del propietario](#aviso-al-muse-del-propietario-push-por-correo)).
 - El productor de SENE VENTAS todavía no envía los eventos cifrados al canal del propietario. Por tanto, el MCP propietario está preparado en código, pero aún no recibe solicitudes reales.
 - El exportador Android está implementado como llamada explícita desde hilo de fondo; no se ha integrado un envío automático ni se ha generado una APK nueva.
 - La URL del exportador sigue apuntando al Worker de pruebas. No es configuración de producción.
