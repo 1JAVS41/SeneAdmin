@@ -5,3 +5,10 @@ compatibility_date = "2026-11-26"
 [[kv_namespaces]]
 binding = "GUARDIAN_DATA"
 id = "REPLACE_WITH_KV_NAMESPACE_ID"
+
+# Optional secrets for owner notifications (push email via Brevo, see
+# src/owner-notify.ts). Set with `wrangler secret put` only; never commit values:
+#   GUARDIAN_NOTIFY_BREVO_KEY - Brevo API v3 key (xkeysib-...) used to send the email.
+#   GUARDIAN_NOTIFY_FROM - verified Brevo sender address for the notification emails.
+#   GUARDIAN_NOTIFY_TO - owner Muse mailbox (<handle>@muse.ai) that receives the notifications.
+# If any of the three is missing, license events are still stored; no email is sent.
