@@ -76,6 +76,18 @@ export function activeLicensesFromEvents(events: unknown[], now = Date.now()): {
     .sort((a, b) => Date.parse(a.validUntil) - Date.parse(b.validUntil) || a.folio.localeCompare(b.folio));
   return { total: licenses.length, licenses };
 }
+
+// Retención del historial de licencias (regla del usuario, 2026-11-27): el
+// historial de licencias se conserva SIEMPRE y nunca se borra por la
+// limpieza, por si un cliente regresa a SENE-VENTAS. Por eso un evento
+// completado se guarda SIN fecha de caducidad en KV (sin expirationTtl):
+// sigue guardado aunque la licencia ya haya vencido. La caducidad de la
+// licencia no cambia: valid_until se conserva intacto y solo
+// activeLicensesFromEvents decide qué sigue activo según esa fecha.
+// Una solicitud pendiente sí se guarda solo un día, como antes.
+export function ownerEventRetention(event: any): { expirationTtl?: number } {
+  return isCompletedLicenseEvent(event) ? {} : { expirationTtl: 86400 };
+}
 function validEvent(value: any, eventId: string): boolean {
   if (!value || value.event_id !== eventId ||
       !validInstallationId(value.installation_id) ||
@@ -135,14 +147,12 @@ export async function handleOwnerDelivery(request: Request, env: OwnerDeliveryEn
     if (!validEvent(event, eventId)) return json({ error: "invalid_event" }, 400);
     const key = "owner-event:v1:" + eventId;
     if (await env.GUARDIAN_DATA.get(key)) return json({ accepted: true, duplicate: true });
-    // A completed license is kept until one day after it expires (at most
-    // 90 days); a pending request is kept one day, as before.
-    const ttl = isCompletedLicenseEvent(event)
-      ? Math.min(Math.max(Math.floor((Date.parse(event.valid_until) - Date.now()) / 1000) + 86400, 86400), 90 * 86400)
-      : 86400;
+    // Historial de licencias permanente: un evento completado se guarda sin
+    // expirationTtl (nunca se borra por limpieza); una solicitud pendiente se
+    // guarda un día, como antes. Ver ownerEventRetention.
     await env.GUARDIAN_DATA.put(key, JSON.stringify({
       eventId, installationId: event.installation_id, timestamp, iv: body.iv, ciphertext: body.ciphertext
-    }), { expirationTtl: ttl });
+    }), ownerEventRetention(event));
     return json({ accepted: true }, 202);
   }
   if (request.method === "GET") {
