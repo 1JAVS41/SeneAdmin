@@ -3,10 +3,15 @@
  * KV stores ciphertext only. Plaintext is returned only through the centrally
  * authenticated owner route in index.ts, never through an installation/Muse token.
  */
+import { notifyOwnerMuse } from "./owner-notify";
+
 export interface OwnerDeliveryEnv {
   GUARDIAN_DATA: KVNamespace;
   GUARDIAN_DELIVERY_ENC_KEY: string;
   GUARDIAN_DELIVERY_HMAC_KEY: string;
+  GUARDIAN_NOTIFY_BREVO_KEY?: string;
+  GUARDIAN_NOTIFY_FROM?: string;
+  GUARDIAN_NOTIFY_TO?: string;
 }
 const enc = new TextEncoder();
 const dec = new TextDecoder();
@@ -217,6 +222,18 @@ export async function handleOwnerDelivery(request: Request, env: OwnerDeliveryEn
     // history is kept; expiry is decided by comparing validUntil with now.
     if (isActiveLicenseEvent(event)) {
       await env.GUARDIAN_DATA.put(licenseRecordKey(event.installation_id), JSON.stringify(licenseRecordFromEvent(event)));
+    }
+    // Owner notification (push, best-effort): after the event is stored,
+    // notify the owner Muse by email (Brevo). Only .requested and
+    // .completed events notify; license.synced stays silent inside
+    // notifyOwnerMuse. A notify failure can never change this response:
+    // the event is already stored and the answer stays { accepted: true }.
+    try {
+      await notifyOwnerMuse(env, event);
+    } catch {
+      // notifyOwnerMuse never throws by contract; this guard keeps a
+      // notify failure from ever breaking the commercial flow.
+      console.warn("owner notify failed after delivery");
     }
     return json({ accepted: true }, 202);
   }
