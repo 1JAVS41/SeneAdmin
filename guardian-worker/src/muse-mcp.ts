@@ -8,6 +8,12 @@
  * the payroll period date); the other four tools accept no arguments.
  */
 type OverviewLoader = () => Promise<Record<string, unknown> | null>;
+type LicenseLoader = () => Promise<boolean>;
+
+/** Exact message a client Muse returns when the installation license is not
+ * active (design section 2, user decision 2026-11-27). It is returned as
+ * plain text, never as an error, and as `instructions` on initialize. */
+export const LICENSE_EXPIRED_MESSAGE = "tu licencia esta vencida realiza el pago para seguir usando los servicios de SENE-VENTAS";
 
 const MCP_PROTOCOL = "2025-03-26";
 const MCP_SERVER = { name: "sene-guardian", version: "1.0.0" };
@@ -94,7 +100,7 @@ async function parseBody(request: Request): Promise<any> {
   if (text.length > 16_384) throw new Error("too_large");
   return JSON.parse(text);
 }
-export async function handleMuseMcp(request: Request, installationId: string, loadOverview: OverviewLoader): Promise<Response> {
+export async function handleMuseMcp(request: Request, installationId: string, loadOverview: OverviewLoader, loadLicenseActive: LicenseLoader = async () => true): Promise<Response> {
   let message: any;
   try { message = await parseBody(request); }
   catch (error) {
@@ -112,11 +118,17 @@ export async function handleMuseMcp(request: Request, installationId: string, lo
   }
 
   if (message.method === "initialize") {
+    // tools/list, ping and initialize are never blocked, but initialize
+    // carries the expiry message as instructions when the license is not
+    // active, so the Muse answers correctly even before calling a tool.
+    const licenseActive = await loadLicenseActive();
     return rpc(message.id, {
       protocolVersion: MCP_PROTOCOL,
       capabilities: { tools: { listChanged: false } },
       serverInfo: MCP_SERVER,
-      instructions: "SENE GUARDIAN ofrece consultas administrativas de solo lectura para una única instalación. No expone licencias, códigos comerciales, pagos ni acciones de escritura.",
+      instructions: licenseActive
+        ? "SENE GUARDIAN ofrece consultas administrativas de solo lectura para una única instalación. No expone licencias, códigos comerciales, pagos ni acciones de escritura."
+        : LICENSE_EXPIRED_MESSAGE,
     });
   }
   if (message.method === "ping") return rpc(message.id, {});
@@ -124,6 +136,10 @@ export async function handleMuseMcp(request: Request, installationId: string, lo
     return rpc(message.id, { tools: TOOLS });
   }
   if (message.method === "tools/call") {
+    // License gate (design section 2): with no active license, every tool
+    // call returns the exact expiry message as plain text, not an error,
+    // and no business data is served.
+    if (!await loadLicenseActive()) return rpcText(message.id, LICENSE_EXPIRED_MESSAGE);
     const params = message.params ?? {};
     const toolNames = TOOLS.map((tool) => tool.name);
     if (!toolNames.includes(params.name))

@@ -1,6 +1,7 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
 import worker from "../src/index";
+import { isActiveLicense, isSyncedLicenseEvent, ownerEventRetention } from "../src/owner-delivery";
 
 class MemoryKV {
   values = new Map<string, string>();
@@ -126,4 +127,145 @@ test("completed license events are active licenses, without code, and are not mi
   assert.equal(activeBody.licenses[0].businessName, "Negocio de prueba");
   assert.equal("code" in activeBody.licenses[0], false);
   assert.equal("whatsapp" in activeBody.licenses[0], false);
+});
+
+// --- License gate: license.synced + license:v1 record (design section 2) ---
+
+const centralToken = "central-owner-test-token-with-more-than-forty-characters";
+const installationId = "abcdef12-3456-7890-abcd-ef1234567890";
+const deliveryEnv = async () => {
+  const kv = new MemoryKV();
+  const encryptionBytes = crypto.getRandomValues(new Uint8Array(32));
+  const hmacBytes = crypto.getRandomValues(new Uint8Array(32));
+  const encryptionKey = await crypto.subtle.importKey("raw", encryptionBytes as unknown as BufferSource, "AES-GCM", false, ["encrypt"]);
+  const env = {
+    GUARDIAN_DATA: kv, GUARDIAN_ADMIN_TOKEN: "unused",
+    GUARDIAN_DELIVERY_ENC_KEY: b64url(encryptionBytes),
+    GUARDIAN_DELIVERY_HMAC_KEY: b64url(hmacBytes),
+    GUARDIAN_OWNER_CENTRAL_TOKEN_HASH: await sha256(centralToken)
+  } as any;
+  return { kv, env, encryptionKey, hmacBytes };
+};
+// Deliver one owner event exactly as the SENE VENTAS producer would
+// (AES-GCM + HMAC envelope, POST /v1/guardian/owner-events).
+async function deliverEvent(ctx: Awaited<ReturnType<typeof deliveryEnv>>, event: any) {
+  const eventId = event.event_id;
+  const timestamp = String(Math.floor(Date.now() / 1000));
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ciphertext = new Uint8Array(await crypto.subtle.encrypt(
+    { name: "AES-GCM", iv: iv as unknown as BufferSource, additionalData: new TextEncoder().encode(eventId) as unknown as BufferSource, tagLength: 128 },
+    ctx.encryptionKey, new TextEncoder().encode(JSON.stringify(event)) as unknown as BufferSource));
+  const hmacKey = await crypto.subtle.importKey("raw", ctx.hmacBytes as unknown as BufferSource, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const canonical = [timestamp, eventId, b64url(iv), b64url(ciphertext)].join(".");
+  const signature = new Uint8Array(await crypto.subtle.sign("HMAC", hmacKey, new TextEncoder().encode(canonical) as unknown as BufferSource));
+  return worker.fetch(new Request("https://guardian.test/v1/guardian/owner-events", {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-sene-timestamp": timestamp, "x-sene-event-id": eventId, "x-sene-signature": b64url(signature) },
+    body: JSON.stringify({ event_id: eventId, iv: b64url(iv), ciphertext: b64url(ciphertext) }),
+  }), ctx.env);
+}
+const licenseEventBase = (overrides: Record<string, unknown> = {}) => ({
+  installation_id: installationId,
+  request_type: "activation", created_at: new Date().toISOString(),
+  amount_cents: 29900, currency: "MXN",
+  business_name: "Negocio de prueba", holder_name: "Titular de prueba",
+  whatsapp: "3312345678",
+  valid_from: new Date().toISOString(),
+  valid_until: new Date(Date.now() + 30 * 86400000).toISOString(),
+  ...overrides,
+});
+const readLicenseRecord = async (kv: any) =>
+  kv.get("license:v1:" + installationId, "json") as Promise<Record<string, unknown> | null>;
+
+test("license.synced without code creates the license record and counts as active", async () => {
+  const ctx = await deliveryEnv();
+  const synced = {
+    ...licenseEventBase(),
+    event_id: "123e4567-e89b-42d3-a456-426614174100", event_type: "license.synced",
+    folio: "SENE-20261126-ABC124", payment_status: "paid",
+  };
+  // No `code` field on purpose: the plain code cannot be recovered from D1.
+  assert.equal("code" in synced, false);
+  const response = await deliverEvent(ctx, synced);
+  assert.equal(response.status, 202);
+  assert.deepEqual(await response.json(), { accepted: true });
+  const record = await readLicenseRecord(ctx.kv);
+  assert.equal(record?.installationId, installationId);
+  assert.equal(record?.folio, "SENE-20261126-ABC124");
+  assert.equal(record?.requestType, "activation");
+  assert.equal(record?.validFrom, synced.valid_from);
+  assert.equal(record?.validUntil, synced.valid_until);
+  assert.equal(typeof record?.updatedAt, "string");
+  // The owner active-licenses list also shows the synced license.
+  const active = await worker.fetch(new Request("https://guardian.test/v1/guardian/owner-events?kind=active", {
+    headers: { authorization: "Bearer " + centralToken }
+  }), ctx.env);
+  const activeBody = await active.json() as { total: number; licenses: Array<Record<string, unknown>> };
+  assert.equal(activeBody.total, 1);
+  assert.equal(activeBody.licenses[0].folio, "SENE-20261126-ABC124");
+  assert.equal("code" in activeBody.licenses[0], false);
+  // Unit checks: synced counts as active, and its retention has no TTL.
+  assert.equal(isSyncedLicenseEvent(synced), true);
+  assert.equal(isActiveLicense(synced), true);
+  assert.deepEqual(ownerEventRetention(synced), {});
+});
+
+test("pending event does NOT create a license record", async () => {
+  const ctx = await deliveryEnv();
+  const requested = {
+    ...licenseEventBase(),
+    event_id: "123e4567-e89b-42d3-a456-426614174101", event_type: "activation.requested",
+    folio: "SENE-20261126-ABC125", payment_status: "pending",
+    expires_at: new Date(Date.now() + 3600000).toISOString(), code: "ABCDEFG234",
+  };
+  delete (requested as any).valid_from;
+  delete (requested as any).valid_until;
+  const response = await deliverEvent(ctx, requested);
+  assert.equal(response.status, 202);
+  assert.equal(await readLicenseRecord(ctx.kv), null);
+});
+
+test("renewal overwrites validUntil in the license record", async () => {
+  const ctx = await deliveryEnv();
+  const completed = {
+    ...licenseEventBase(),
+    event_id: "123e4567-e89b-42d3-a456-426614174102", event_type: "activation.completed",
+    folio: "SENE-20261126-ABC126", payment_status: "paid", code: "ABCDEFG234",
+  };
+  const renewal = {
+    ...licenseEventBase({ request_type: "renewal" }),
+    event_id: "123e4567-e89b-42d3-a456-426614174103", event_type: "renewal.completed",
+    folio: "SENE-20261126-ABC127", payment_status: "paid", code: "ABCDEFG234",
+    valid_from: new Date(Date.now() + 30 * 86400000).toISOString(),
+    valid_until: new Date(Date.now() + 60 * 86400000).toISOString(),
+  };
+  assert.equal((await deliverEvent(ctx, completed)).status, 202);
+  assert.equal((await readLicenseRecord(ctx.kv))?.validUntil, completed.valid_until);
+  assert.equal((await deliverEvent(ctx, renewal)).status, 202);
+  const record = await readLicenseRecord(ctx.kv);
+  assert.equal(record?.validUntil, renewal.valid_until);
+  assert.equal(record?.folio, "SENE-20261126-ABC127");
+  assert.equal(record?.requestType, "renewal");
+});
+
+test("license.synced without code is valid, activation.completed without code stays invalid", async () => {
+  const ctx = await deliveryEnv();
+  const synced = {
+    ...licenseEventBase(),
+    event_id: "123e4567-e89b-42d3-a456-426614174104", event_type: "license.synced",
+    folio: "SENE-20261126-ABC128", payment_status: "paid",
+  };
+  assert.equal("code" in synced, false);
+  assert.equal((await deliverEvent(ctx, synced)).status, 202);
+  const completedNoCode = {
+    ...licenseEventBase(),
+    event_id: "123e4567-e89b-42d3-a456-426614174105", event_type: "activation.completed",
+    folio: "SENE-20261126-ABC129", payment_status: "paid",
+  };
+  assert.equal("code" in completedNoCode, false);
+  const rejected = await deliverEvent(ctx, completedNoCode);
+  assert.equal(rejected.status, 400);
+  assert.deepEqual(await rejected.json(), { error: "invalid_event" });
+  // The rejected event did not overwrite the record written by the synced one.
+  assert.equal((await readLicenseRecord(ctx.kv))?.folio, "SENE-20261126-ABC128");
 });

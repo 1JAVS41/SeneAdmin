@@ -54,10 +54,57 @@ export type ActiveLicense = {
 export function isCompletedLicenseEvent(value: any): boolean {
   return !!value && ["activation.completed", "renewal.completed"].includes(value.event_type);
 }
+export function isSyncedLicenseEvent(value: any): boolean {
+  return !!value && value.event_type === "license.synced";
+}
+/** A completed activation/renewal, or a one-time sync of an already-active
+ * license (license.synced, design section 3): both count as active. The
+ * synced event carries no activation code — the plain code of an
+ * already-active license cannot be recovered from D1 (only code_hash
+ * remains) — so it is valid without a `code` field. */
+export function isActiveLicenseEvent(value: any): boolean {
+  return isCompletedLicenseEvent(value) || isSyncedLicenseEvent(value);
+}
 export function isActiveLicense(value: any, now = Date.now()): boolean {
-  return isCompletedLicenseEvent(value) &&
+  return isActiveLicenseEvent(value) &&
     validDate(value.valid_from) && validDate(value.valid_until) &&
     Date.parse(value.valid_until) >= now;
+}
+
+/** Per-installation license record used by the client-Muse license gate
+ * (design section 2): one KV read per call decides active vs expired. It
+ * is written when a completed or synced license event is stored, never for
+ * a pending request, and it has no expirationTtl: license history is never
+ * deleted; expiry is decided by comparing validUntil with now. */
+export type LicenseRecord = {
+  installationId: string;
+  folio: string;
+  requestType: "activation" | "renewal";
+  validFrom: string;
+  validUntil: string;
+  updatedAt: string;
+};
+export const LICENSE_RECORD_PREFIX = "license:v1:";
+export function licenseRecordKey(installationId: string): string {
+  return LICENSE_RECORD_PREFIX + installationId;
+}
+export function isLicenseRecordActive(record: unknown, now = Date.now()): boolean {
+  if (!record || typeof record !== "object") return false;
+  const r = record as Partial<LicenseRecord>;
+  return typeof r.installationId === "string" && typeof r.folio === "string" &&
+    (r.requestType === "activation" || r.requestType === "renewal") &&
+    validDate(r.validFrom) && validDate(r.validUntil) &&
+    Date.parse(r.validUntil as string) >= now;
+}
+export function licenseRecordFromEvent(event: any): LicenseRecord {
+  return {
+    installationId: event.installation_id as string,
+    folio: event.folio as string,
+    requestType: event.request_type as "activation" | "renewal",
+    validFrom: event.valid_from as string,
+    validUntil: event.valid_until as string,
+    updatedAt: new Date().toISOString(),
+  };
 }
 /** Keep only active licenses, in a safe public shape (no code, no whatsapp,
  * no holder name, no amount). Sorted by expiry, soonest first. */
@@ -86,7 +133,7 @@ export function activeLicensesFromEvents(events: unknown[], now = Date.now()): {
 // activeLicensesFromEvents decide qué sigue activo según esa fecha.
 // Una solicitud pendiente sí se guarda solo un día, como antes.
 export function ownerEventRetention(event: any): { expirationTtl?: number } {
-  return isCompletedLicenseEvent(event) ? {} : { expirationTtl: 86400 };
+  return isActiveLicenseEvent(event) ? {} : { expirationTtl: 86400 };
 }
 function validEvent(value: any, eventId: string): boolean {
   if (!value || value.event_id !== eventId ||
@@ -98,14 +145,24 @@ function validEvent(value: any, eventId: string): boolean {
       value.currency !== "MXN" ||
       typeof value.business_name !== "string" || value.business_name.length < 2 || value.business_name.length > 80 ||
       typeof value.holder_name !== "string" || value.holder_name.length < 2 || value.holder_name.length > 100 ||
-      typeof value.whatsapp !== "string" || !/^\d{10,15}$/.test(value.whatsapp) ||
-      typeof value.code !== "string" || !/^[A-HJ-NP-Z2-9]{10}$/.test(value.code)) return false;
+      typeof value.whatsapp !== "string" || !/^\d{10,15}$/.test(value.whatsapp)) return false;
+  // The activation code is required for requested and completed events, but
+  // never for a synced event: the plain code of an already-active license
+  // cannot be recovered from D1 (only code_hash remains).
+  const hasCode = typeof value.code === "string" && /^[A-HJ-NP-Z2-9]{10}$/.test(value.code);
   if (["activation.requested", "renewal.requested"].includes(value.event_type)) {
-    return value.payment_status === "pending" && validDate(value.expires_at);
+    return hasCode && value.payment_status === "pending" && validDate(value.expires_at);
   }
   if (isCompletedLicenseEvent(value)) {
     // A completed activation/renewal: paid, with a validity window. It has
     // no request expiry; valid_until must be after valid_from.
+    return hasCode && value.payment_status === "paid" &&
+      validDate(value.valid_from) && validDate(value.valid_until) &&
+      Date.parse(value.valid_until) > Date.parse(value.valid_from);
+  }
+  if (isSyncedLicenseEvent(value)) {
+    // A one-time sync of an already-active license (design section 3):
+    // paid, with a validity window, no code.
     return value.payment_status === "paid" &&
       validDate(value.valid_from) && validDate(value.valid_until) &&
       Date.parse(value.valid_until) > Date.parse(value.valid_from);
@@ -153,6 +210,14 @@ export async function handleOwnerDelivery(request: Request, env: OwnerDeliveryEn
     await env.GUARDIAN_DATA.put(key, JSON.stringify({
       eventId, installationId: event.installation_id, timestamp, iv: body.iv, ciphertext: body.ciphertext
     }), ownerEventRetention(event));
+    // License gate record (design section 2): a completed or synced event
+    // writes license:v1:{installation_id} so the client Muse gate is one KV
+    // read per call. A renewal overwrites validUntil with the new date. A
+    // pending request never touches the record. No expirationTtl: license
+    // history is kept; expiry is decided by comparing validUntil with now.
+    if (isActiveLicenseEvent(event)) {
+      await env.GUARDIAN_DATA.put(licenseRecordKey(event.installation_id), JSON.stringify(licenseRecordFromEvent(event)));
+    }
     return json({ accepted: true }, 202);
   }
   if (request.method === "GET") {
