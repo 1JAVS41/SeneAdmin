@@ -89,6 +89,12 @@ object AdminPayrollRequestSync {
     private const val ATTENDANCE_ACKS="attendance_acks"
     private const val INVENTORY_ACKS="inventory_acks"
     private const val ADMIN_DECISION_ACKS="admin_decision_acks"
+    // Ahorro (A3): si la proxima sincronizacion programada falta menos de
+    // 30 minutos, la confirmacion de ACKs espera a esa sincronizacion en vez
+    // de pedir otra llamada inmediata. La fecha la guarda
+    // SeneAdminAutoSyncScheduler cada vez que programa el siguiente ciclo.
+    private const val NEXT_SCHEDULED_SYNC_AT="next_scheduled_sync_at"
+    private const val ACK_FLUSH_DEFER_WINDOW_MS=30L*60L*1000L
     private fun firstBatch(source:JSONArray,limit:Int):JSONArray {
         val out=JSONArray()
         for(i in 0 until minOf(source.length(),limit)) {
@@ -354,12 +360,22 @@ object AdminPayrollRequestSync {
                 }
                 val callbacks = completion.first
                 val rerun = completion.second
-                if (callbacks.isNotEmpty() || flushAcks || rerun) {
+                // Ahorro (A3): confirmar de inmediato solo si la proxima
+                // sincronizacion programada falta mas de 30 minutos (o no hay
+                // ninguna programada). Si falta menos, los ACK ya quedaron
+                // guardados en local y viajan en esa proxima sincronizacion.
+                val nextScheduledSyncAt = p.getLong(NEXT_SCHEDULED_SYNC_AT, 0L)
+                val flushNow = flushAcks &&
+                    (nextScheduledSyncAt <= 0L ||
+                        nextScheduledSyncAt - System.currentTimeMillis() > ACK_FLUSH_DEFER_WINDOW_MS)
+                if (callbacks.isNotEmpty() || flushNow || rerun) {
                     android.os.Handler(android.os.Looper.getMainLooper()).post {
                         callbacks.forEach { callback -> try { callback.invoke() } catch (_: Exception) { } }
                         // Confirma al servidor lo guardado y atiende cualquier actualización
                         // forzada que se haya solicitado mientras otra consulta estaba activa.
-                        if (flushAcks || rerun) sync(app, true)
+                        // Un rerun forzado siempre se atiende de inmediato; solo la
+                        // confirmacion de ACKs puede esperar a la proxima programada.
+                        if (flushNow || rerun) sync(app, true)
                     }
                 }
             }
