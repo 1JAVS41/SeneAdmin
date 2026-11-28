@@ -1,7 +1,7 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
 import worker from "../src/index";
-import { isActiveLicense, isSyncedLicenseEvent, ownerEventRetention } from "../src/owner-delivery";
+import { isActiveLicense, isSyncedLicenseEvent, isTransferEvent, deviceTransfersFromEvents, ownerEventRetention } from "../src/owner-delivery";
 
 class MemoryKV {
   values = new Map<string, string>();
@@ -268,4 +268,199 @@ test("license.synced without code is valid, activation.completed without code st
   assert.deepEqual(await rejected.json(), { error: "invalid_event" });
   // The rejected event did not overwrite the record written by the synced one.
   assert.equal((await readLicenseRecord(ctx.kv))?.folio, "SENE-20261126-ABC128");
+});
+
+// --- Device transfer: transfer.completed (Parte B) ---
+
+const newInstallationId = "bbbbbbbb-2222-4222-9222-222222222222";
+const transferEventBase = (overrides: Record<string, unknown> = {}) => ({
+  installation_id: newInstallationId,
+  old_installation_id: installationId,
+  folio: "SENE-20261126-ABC124",
+  business_name: "Negocio de prueba",
+  holder_name: "Titular de prueba",
+  whatsapp: "3312345678",
+  created_at: new Date().toISOString(),
+  valid_until: new Date(Date.now() + 30 * 86400000).toISOString(),
+  ...overrides,
+});
+const readLicenseRecordAt = async (kv: any, id: string) =>
+  kv.get("license:v1:" + id, "json") as Promise<Record<string, unknown> | null>;
+
+test("transfer.completed válido se acepta sin request_type, monto ni código, con valid_until null", async () => {
+  const ctx = await deliveryEnv();
+  const pending = {
+    ...transferEventBase({ valid_until: null }),
+    event_id: "123e4567-e89b-42d3-a456-426614174110", event_type: "transfer.completed",
+  };
+  // No request_type, no amount_cents, no currency, no code, no payment_status.
+  assert.equal("request_type" in pending, false);
+  assert.equal("code" in pending, false);
+  const response = await deliverEvent(ctx, pending);
+  assert.equal(response.status, 202);
+  assert.deepEqual(await response.json(), { accepted: true });
+  // A stray code field, if present, is ignored: the transfer is still valid.
+  const withCode = {
+    ...transferEventBase(),
+    event_id: "123e4567-e89b-42d3-a456-426614174111", event_type: "transfer.completed",
+    code: "ABCDEFG234",
+  };
+  assert.equal((await deliverEvent(ctx, withCode)).status, 202);
+  // Unit checks: it is a transfer event and its retention has no TTL.
+  assert.equal(isTransferEvent(pending), true);
+  assert.equal(isTransferEvent(withCode), true);
+  assert.deepEqual(ownerEventRetention(pending), {});
+  assert.deepEqual(deviceTransfersFromEvents([pending, withCode]).total, 2);
+});
+
+test("transfer.completed inválido se rechaza", async () => {
+  const ctx = await deliveryEnv();
+  const badFolio = {
+    ...transferEventBase({ folio: "MALO" }),
+    event_id: "123e4567-e89b-42d3-a456-426614174112", event_type: "transfer.completed",
+  };
+  const badOldId = {
+    ...transferEventBase({ old_installation_id: "no-es-uuid" }),
+    event_id: "123e4567-e89b-42d3-a456-426614174113", event_type: "transfer.completed",
+  };
+  const badValidUntil = {
+    ...transferEventBase({ valid_until: "no-es-fecha" }),
+    event_id: "123e4567-e89b-42d3-a456-426614174114", event_type: "transfer.completed",
+  };
+  const missingOldId = {
+    ...transferEventBase(),
+    event_id: "123e4567-e89b-42d3-a456-426614174115", event_type: "transfer.completed",
+  };
+  delete (missingOldId as any).old_installation_id;
+  for (const event of [badFolio, badOldId, badValidUntil, missingOldId]) {
+    const rejected = await deliverEvent(ctx, event);
+    assert.equal(rejected.status, 400);
+    assert.deepEqual(await rejected.json(), { error: "invalid_event" });
+  }
+  assert.equal(await readLicenseRecordAt(ctx.kv, newInstallationId), null);
+});
+
+test("el traspaso mueve el registro de licencia al dispositivo nuevo y borra el viejo", async () => {
+  const ctx = await deliveryEnv();
+  const completed = {
+    ...licenseEventBase(),
+    event_id: "123e4567-e89b-42d3-a456-426614174116", event_type: "activation.completed",
+    folio: "SENE-20261126-ABC126", payment_status: "paid", code: "ABCDEFG234",
+  };
+  assert.equal((await deliverEvent(ctx, completed)).status, 202);
+  assert.equal((await readLicenseRecordAt(ctx.kv, installationId))?.folio, "SENE-20261126-ABC126");
+  const transfer = {
+    ...transferEventBase(),
+    event_id: "123e4567-e89b-42d3-a456-426614174117", event_type: "transfer.completed",
+    folio: "SENE-20261126-ABC126",
+  };
+  assert.equal((await deliverEvent(ctx, transfer)).status, 202);
+  assert.equal(await readLicenseRecordAt(ctx.kv, installationId), null);
+  const moved = await readLicenseRecordAt(ctx.kv, newInstallationId);
+  assert.equal(moved?.installationId, newInstallationId);
+  assert.equal(moved?.folio, "SENE-20261126-ABC126");
+  assert.equal(moved?.requestType, "activation");
+  assert.equal(moved?.validFrom, completed.valid_from);
+  assert.equal(moved?.validUntil, completed.valid_until);
+  assert.equal(typeof moved?.updatedAt, "string");
+});
+
+test("el traspaso sin registro viejo no crea nada", async () => {
+  const ctx = await deliveryEnv();
+  const transfer = {
+    ...transferEventBase({ valid_until: null }),
+    event_id: "123e4567-e89b-42d3-a456-426614174118", event_type: "transfer.completed",
+  };
+  assert.equal((await deliverEvent(ctx, transfer)).status, 202);
+  assert.equal(await readLicenseRecordAt(ctx.kv, installationId), null);
+  assert.equal(await readLicenseRecordAt(ctx.kv, newInstallationId), null);
+});
+
+test("el traspaso sobrescribe un registro ya existente en el dispositivo nuevo", async () => {
+  const ctx = await deliveryEnv();
+  const oldCompleted = {
+    ...licenseEventBase(),
+    event_id: "123e4567-e89b-42d3-a456-426614174119", event_type: "activation.completed",
+    folio: "SENE-20261126-ABC126", payment_status: "paid", code: "ABCDEFG234",
+  };
+  const newCompleted = {
+    ...licenseEventBase({ installation_id: newInstallationId }),
+    event_id: "123e4567-e89b-42d3-a456-426614174120", event_type: "activation.completed",
+    folio: "SENE-20261126-ABC127", payment_status: "paid", code: "ABCDEFG234",
+  };
+  assert.equal((await deliverEvent(ctx, oldCompleted)).status, 202);
+  assert.equal((await deliverEvent(ctx, newCompleted)).status, 202);
+  assert.equal((await readLicenseRecordAt(ctx.kv, newInstallationId))?.folio, "SENE-20261126-ABC127");
+  const transfer = {
+    ...transferEventBase(),
+    event_id: "123e4567-e89b-42d3-a456-426614174121", event_type: "transfer.completed",
+    folio: "SENE-20261126-ABC126",
+  };
+  assert.equal((await deliverEvent(ctx, transfer)).status, 202);
+  const moved = await readLicenseRecordAt(ctx.kv, newInstallationId);
+  assert.equal(moved?.folio, "SENE-20261126-ABC126");
+  assert.equal(moved?.validUntil, oldCompleted.valid_until);
+});
+
+test("GET ?kind=transfers devuelve los traspasos en forma segura, del más reciente al más antiguo", async () => {
+  const kv = new MemoryKV();
+  const centralToken2 = "central-owner-test-token-with-more-than-forty-characters";
+  const encryptionBytes = crypto.getRandomValues(new Uint8Array(32));
+  const encryptionKey = await crypto.subtle.importKey("raw", encryptionBytes as unknown as BufferSource, "AES-GCM", false, ["encrypt"]);
+  const older = {
+    ...transferEventBase({ created_at: new Date(Date.now() - 3600000).toISOString() }),
+    event_id: "123e4567-e89b-42d3-a456-426614174122", event_type: "transfer.completed",
+    folio: "SENE-20261126-ABC124",
+  };
+  const newer = {
+    ...transferEventBase({ valid_until: null }),
+    event_id: "123e4567-e89b-42d3-a456-426614174123", event_type: "transfer.completed",
+    folio: "SENE-20261126-ABC125",
+  };
+  const requested = {
+    installation_id: installationId, request_type: "activation", created_at: new Date().toISOString(),
+    amount_cents: 29900, currency: "MXN", business_name: "Negocio de prueba",
+    holder_name: "Titular de prueba", whatsapp: "3312345678", code: "ABCDEFG234",
+    event_id: "123e4567-e89b-42d3-a456-426614174124", event_type: "activation.requested",
+    folio: "SENE-20261126-ABC126", expires_at: new Date(Date.now() + 3600000).toISOString(), payment_status: "pending",
+  };
+  await seedOwnerEvent(kv, encryptionBytes, encryptionKey, older);
+  await seedOwnerEvent(kv, encryptionBytes, encryptionKey, newer);
+  await seedOwnerEvent(kv, encryptionBytes, encryptionKey, requested);
+  const env = {
+    GUARDIAN_DATA: kv, GUARDIAN_ADMIN_TOKEN: "unused",
+    GUARDIAN_DELIVERY_ENC_KEY: b64url(encryptionBytes),
+    GUARDIAN_DELIVERY_HMAC_KEY: b64url(crypto.getRandomValues(new Uint8Array(32))),
+    GUARDIAN_OWNER_CENTRAL_TOKEN_HASH: await sha256(centralToken2)
+  } as any;
+  const headers = { authorization: "Bearer " + centralToken2 };
+
+  const transfersResponse = await worker.fetch(new Request("https://guardian.test/v1/guardian/owner-events?kind=transfers", { headers }), env);
+  const transfersBody = await transfersResponse.json() as { total: number; transfers: Array<Record<string, unknown>> };
+  assert.equal(transfersBody.total, 2);
+  assert.equal(transfersBody.transfers.length, 2);
+  // Newest first.
+  assert.equal(transfersBody.transfers[0].folio, "SENE-20261126-ABC125");
+  assert.equal(transfersBody.transfers[1].folio, "SENE-20261126-ABC124");
+  for (const listed of transfersBody.transfers) {
+    assert.deepEqual(Object.keys(listed).sort(), ["businessName", "folio", "installationId", "oldInstallationId", "transferredAt", "validUntil"]);
+    assert.equal(listed.businessName, "Negocio de prueba");
+    assert.equal(listed.oldInstallationId, installationId);
+    assert.equal(listed.installationId, newInstallationId);
+  }
+  assert.equal(transfersBody.transfers[0].validUntil, null);
+  assert.equal(transfersBody.transfers[0].transferredAt, newer.created_at);
+  const whole = JSON.stringify(transfersBody);
+  assert.equal(whole.includes("3312345678"), false);
+  assert.equal(whole.includes("Titular de prueba"), false);
+  assert.equal(whole.includes("ABCDEFG234"), false);
+
+  // Transfers are not mixed into pending requests or active licenses.
+  const pending = await worker.fetch(new Request("https://guardian.test/v1/guardian/owner-events", { headers }), env);
+  const pendingBody = await pending.json() as { events: Array<{ event_id: string }> };
+  assert.equal(pendingBody.events.length, 1);
+  assert.equal(pendingBody.events[0].event_id, requested.event_id);
+  const active = await worker.fetch(new Request("https://guardian.test/v1/guardian/owner-events?kind=active", { headers }), env);
+  const activeBody = await active.json() as { total: number };
+  assert.equal(activeBody.total, 0);
 });
