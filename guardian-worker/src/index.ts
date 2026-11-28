@@ -1,5 +1,5 @@
-import { handleOwnerDelivery } from "./owner-delivery";
-import { handleMuseMcp } from "./muse-mcp";
+import { handleOwnerDelivery, isLicenseRecordActive, licenseRecordKey, type LicenseRecord } from "./owner-delivery";
+import { handleMuseMcp, LICENSE_EXPIRED_MESSAGE } from "./muse-mcp";
 import { handleOwnerMuseMcp } from "./owner-muse-mcp";
 
 export interface Env {
@@ -192,6 +192,14 @@ function sanitizeSnapshot(value: Snapshot): Snapshot {
 async function installation(env: Env, id: string): Promise<Installation | null> {
   return env.GUARDIAN_DATA.get<Installation>(`installation:v1:${id}`, "json");
 }
+
+// License gate (design section 2): one KV read per call. Active only when
+// a license:v1:{id} record exists and its validUntil has not passed. No
+// record, or an expired one, means blocked.
+async function loadLicenseActive(env: Env, id: string): Promise<boolean> {
+  const record = await env.GUARDIAN_DATA.get<LicenseRecord>(licenseRecordKey(id), "json");
+  return isLicenseRecordActive(record);
+}
 async function authorizedFor(env: Env, id: string, token: string, scope: "ingest" | "muse"): Promise<boolean> {
   if (!token || token.length < 40 || !validId(id)) return false;
   const record = await installation(env, id);
@@ -335,7 +343,7 @@ export default {
           ...(snapshot.workers ? { workers: snapshot.workers } : {}),
           dataAgeSeconds: Math.max(0, Math.floor((Date.now() - Date.parse(snapshot.capturedAt)) / 1000)),
         };
-      });
+      }, async () => loadLicenseActive(env, id));
     }
 
     if (request.method === "POST" && url.pathname === "/v1/snapshot") {
@@ -357,6 +365,8 @@ export default {
     if (request.method === "GET" && url.pathname === "/v1/guardian/business-overview") {
       const id = url.searchParams.get("installationId") ?? "";
       if (!await authorizedFor(env, id, bearer(request), "muse")) return json({ error: "unauthorized" }, 401);
+      // License gate (design section 2): no business data without an active license.
+      if (!await loadLicenseActive(env, id)) return json({ error: "license_expired", message: LICENSE_EXPIRED_MESSAGE }, 403);
       const snapshot = await env.GUARDIAN_DATA.get<Snapshot>(`snapshot:v1:${id}`, "json");
       if (!snapshot) return json({ error: "not_found" }, 404);
       return json({

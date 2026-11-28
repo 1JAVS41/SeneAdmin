@@ -32,6 +32,18 @@ const snapshot = {
   ] },
   workers: { employees: [{ name: "Ana", salaryCents: 100000 }, { name: "Luis", salaryCents: 90000 }] }
 };
+// License gate record (design section 2): the default test env seeds an
+// active license, so the pre-existing tool tests keep exercising the tools.
+// Gate tests below delete it or set validUntil in the past.
+const EXPIRED_MESSAGE = "tu licencia esta vencida realiza el pago para seguir usando los servicios de SENE-VENTAS";
+const licenseRecord = (validUntil: string) => ({
+  installationId: id, folio: "SENE-20261126-ABC124", requestType: "activation",
+  validFrom: new Date(Date.now() - 86400000).toISOString(), validUntil,
+  updatedAt: new Date().toISOString()
+});
+const seedLicense = async (env: any, validUntil: string) => {
+  await env.GUARDIAN_DATA.put("license:v1:" + id, JSON.stringify(licenseRecord(validUntil)));
+};
 const envFor = async () => {
   const kv = new MemoryKV();
   await kv.put("installation:v1:" + id, JSON.stringify({
@@ -39,8 +51,17 @@ const envFor = async () => {
     museTokenHash: await sha256(token), createdAt: new Date().toISOString()
   }));
   await kv.put("snapshot:v1:" + id, JSON.stringify(snapshot));
-  return { GUARDIAN_DATA: kv, GUARDIAN_ADMIN_TOKEN: "unused", GUARDIAN_DELIVERY_ENC_KEY: "", GUARDIAN_DELIVERY_HMAC_KEY: "", GUARDIAN_OWNER_CENTRAL_TOKEN_HASH: "" } as any;
+  const env = { GUARDIAN_DATA: kv, GUARDIAN_ADMIN_TOKEN: "unused", GUARDIAN_DELIVERY_ENC_KEY: "", GUARDIAN_DELIVERY_HMAC_KEY: "", GUARDIAN_OWNER_CENTRAL_TOKEN_HASH: "" } as any;
+  await seedLicense(env, new Date(Date.now() + 30 * 86400000).toISOString());
+  return env;
 };
+const initialize = async (env: any, reqId: number | string) => {
+  const response = await worker.fetch(post({ jsonrpc: "2.0", id: reqId, method: "initialize", params: { protocolVersion: "2025-03-26", capabilities: {}, clientInfo: { name: "test", version: "1" } } }), env);
+  return (await response.json() as any).result;
+};
+const businessOverview = async (env: any) => worker.fetch(new Request("https://guardian.test/v1/guardian/business-overview?installationId=" + id, {
+  headers: { authorization: "Bearer " + token }
+}), env);
 const post = (body: unknown, auth = token, origin?: string) => new Request("https://guardian.test/v1/muse/" + id + "/mcp", {
   method: "POST", headers: { "content-type": "application/json", authorization: "Bearer " + auth, ...(origin ? { origin } : {}) }, body: JSON.stringify(body)
 });
@@ -229,4 +250,53 @@ test("Muse MCP rejects arguments that could attempt to change installation scope
   }), env);
   const body = await response.json() as any;
   assert.equal(body.error.code, -32602);
+});
+
+test("license gate: no license record blocks tools/call with the exact expiry message, not an error", async () => {
+  const env = await envFor();
+  await env.GUARDIAN_DATA.delete("license:v1:" + id);
+  const result = await callTool(env, 100, "get_business_overview");
+  assert.equal(result.content[0].text, EXPIRED_MESSAGE);
+  assert.equal(result.isError, false);
+  // initialize, tools/list and ping are not blocked: initialize carries the
+  // expiry message as instructions instead.
+  assert.equal((await initialize(env, 101)).instructions, EXPIRED_MESSAGE);
+  const list = await worker.fetch(post({ jsonrpc: "2.0", id: 102, method: "tools/list" }), env);
+  assert.equal((await list.json() as any).result.tools.length, 6);
+  const ping = await worker.fetch(post({ jsonrpc: "2.0", id: 103, method: "ping" }), env);
+  assert.deepEqual((await ping.json() as any).result, {});
+});
+
+test("license gate: active license lets tools work and initialize keeps the normal instructions", async () => {
+  const env = await envFor();
+  const result = await callTool(env, 104, "list_workers");
+  const parsed = JSON.parse(result.content[0].text);
+  assert.equal(parsed.total, 2);
+  assert.equal(result.isError, false);
+  assert.equal((await initialize(env, 105)).instructions,
+    "SENE GUARDIAN ofrece consultas administrativas de solo lectura para una única instalación. No expone licencias, códigos comerciales, pagos ni acciones de escritura.");
+});
+
+test("license gate: expired license (validUntil in the past) blocks tools/call with the exact expiry message", async () => {
+  const env = await envFor();
+  await seedLicense(env, new Date(Date.now() - 86400000).toISOString());
+  const result = await callTool(env, 106, "get_business_overview");
+  assert.equal(result.content[0].text, EXPIRED_MESSAGE);
+  assert.equal(result.isError, false);
+  assert.equal((await initialize(env, 107)).instructions, EXPIRED_MESSAGE);
+});
+
+test("business-overview requires an active license", async () => {
+  const env = await envFor();
+  const ok = await businessOverview(env);
+  assert.equal(ok.status, 200);
+  assert.equal(((await ok.json()) as any).business.status, "active");
+  await env.GUARDIAN_DATA.delete("license:v1:" + id);
+  const blocked = await businessOverview(env);
+  assert.equal(blocked.status, 403);
+  assert.equal(((await blocked.json()) as any).message, EXPIRED_MESSAGE);
+  await seedLicense(env, new Date(Date.now() - 86400000).toISOString());
+  const expired = await businessOverview(env);
+  assert.equal(expired.status, 403);
+  assert.equal(((await expired.json()) as any).message, EXPIRED_MESSAGE);
 });
