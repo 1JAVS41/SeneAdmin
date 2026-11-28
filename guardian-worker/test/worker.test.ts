@@ -29,6 +29,23 @@ async function provision(id: string) {
   assert.equal(response.status, 201);
   return await response.json() as { ingestToken: string; museReadToken: string };
 }
+// License gate (design section 2, PR #20): reading business-overview (and
+// the client Muse tools) requires an active license record. The tests below
+// provision installations and then read them, so each installation they read
+// is seeded with an active license first — the same convention as
+// muse-mcp.test.ts. Ingestion is never gated: a snapshot can always be
+// stored, with or without a license record (see the "ingestion works
+// without a license record" test below).
+const seedLicense = async (id: string) => {
+  await env.GUARDIAN_DATA.put("license:v1:" + id, JSON.stringify({
+    installationId: id,
+    folio: "SENE-20261127-TEST01",
+    requestType: "activation",
+    validFrom: new Date(Date.now() - 86400000).toISOString(),
+    validUntil: new Date(Date.now() + 30 * 86400000).toISOString(),
+    updatedAt: new Date().toISOString(),
+  }));
+};
 const snapshot = (installationId: string, capturedAt = "2026-11-26T12:00:00.000Z") => ({
   schema: 1,
   installationId,
@@ -60,6 +77,7 @@ test("installation credentials are isolated, revocable and snapshots are read-on
   const idB = "22222222-2222-4222-8222-222222222222";
   const a = await provision(idA);
   const b = await provision(idB);
+  await seedLicense(idA);
 
   const ingest = await call("POST", "/v1/snapshot", snapshot(idA), a.ingestToken);
   assert.equal(ingest.status, 200);
@@ -100,6 +118,7 @@ test("invalid payload and unauthenticated admin are rejected", async () => {
 test("snapshot accepts payroll for a single employee with a workers list", async () => {
   const id = "66666666-6666-4666-8666-666666666666";
   const credentials = await provision(id);
+  await seedLicense(id);
   const body = snapshot(id);
   body.payroll.periods[0].employeeCount = 1;
   body.payroll.periods[0].payrollCount = 1;
@@ -117,6 +136,7 @@ test("snapshot strips extra fields and workers stay in their own installation", 
   const idB = "88888888-8888-4888-8888-888888888888";
   const a = await provision(idA);
   const b = await provision(idB);
+  await seedLicense(idA);
   const body: any = snapshot(idA);
   body.workers.employees[0].phone = "555-0000";
   body.extraField = "must-not-be-stored";
@@ -143,6 +163,7 @@ test("snapshot rejects invalid damaged-product aggregate", async () => {
 test("snapshot accepts unknown low-stock metric without inventing a threshold", async () => {
   const id = "44444444-4444-4444-8444-444444444444";
   const credentials = await provision(id);
+  await seedLicense(id);
   const body = snapshot(id);
   body.inventory.categories[0].lowStockCount = null as any;
   const response = await call("POST", "/v1/snapshot", body, credentials.ingestToken);
@@ -151,4 +172,25 @@ test("snapshot accepts unknown low-stock metric without inventing a threshold", 
   assert.equal(read.status, 200);
   const result = await read.json() as any;
   assert.equal(result.inventory.categories[0].lowStockCount, null);
+});
+
+test("snapshot ingestion works without a license record, but reading it requires one", async () => {
+  // The license gate (PR #20) must ONLY block the Muse's answers. The app's
+  // data upload must always be accepted, even before any license event has
+  // ever arrived for the installation — otherwise a new business could never
+  // send its first snapshot.
+  const id = "99999999-9999-4999-8999-999999999999";
+  const credentials = await provision(id);
+  const response = await call("POST", "/v1/snapshot", snapshot(id), credentials.ingestToken);
+  assert.equal(response.status, 200);
+  // No license record seeded: the read is blocked with the exact expiry
+  // message path (403), while the stored snapshot stays intact.
+  const blocked = await call("GET", "/v1/guardian/business-overview?installationId=" + id, undefined, credentials.museReadToken);
+  assert.equal(blocked.status, 403);
+  // Once the license record exists, the same snapshot reads fine.
+  await seedLicense(id);
+  const read = await call("GET", "/v1/guardian/business-overview?installationId=" + id, undefined, credentials.museReadToken);
+  assert.equal(read.status, 200);
+  const result = await read.json() as any;
+  assert.equal(result.inventory.categories[0].itemCount, 8);
 });
