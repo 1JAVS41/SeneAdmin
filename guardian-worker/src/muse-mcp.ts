@@ -15,6 +15,45 @@ type LicenseLoader = () => Promise<boolean>;
  * plain text, never as an error, and as `instructions` on initialize. */
 export const LICENSE_EXPIRED_MESSAGE = "tu licencia esta vencida realiza el pago para seguir usando los servicios de SENE-VENTAS";
 
+/** Daily request quota for each client Muse (user decision 2026-11-28):
+ * 30 tool calls per installation per day, to protect traffic and server
+ * requests. The day runs midnight to midnight in America/Mexico_City
+ * (UTC-6, fixed, no DST since 2022). The owner Muse is NOT limited:
+ * this quota only applies to the client MCP endpoint. */
+export const QUOTA_DAILY_LIMIT = 30;
+export const QUOTA_EXCEEDED_MESSAGE = "Ya usaste tus 30 solicitudes de hoy. Se renuevan a medianoche, vuelve mañana.";
+const QUOTA_TTL_SECONDS = 48 * 3600;
+
+export function quotaDay(now = new Date()): string {
+  return new Date(now.getTime() - 6 * 3600 * 1000).toISOString().slice(0, 10);
+}
+export function quotaKey(installationId: string, day: string): string {
+  return `quota:v1:${installationId}:${day}`;
+}
+export type QuotaStore = {
+  get(key: string): Promise<string | null>;
+  put(key: string, value: string, options?: { expirationTtl?: number }): Promise<void>;
+};
+/** Check and use one daily request for an installation. Returns whether
+ * the call is allowed and how many requests remain today (after this one).
+ * The counter lives in KV with a 2-day TTL, so it cleans itself and at
+ * most two keys exist per installation. Two calls at the exact same
+ * instant can both read the same count (KV has no atomic increment), so
+ * a client could rarely get one extra call; that is acceptable for a
+ * per-client quota. */
+export async function useQuota(store: QuotaStore, installationId: string, now = new Date()): Promise<{ allowed: boolean; remaining: number }> {
+  const key = quotaKey(installationId, quotaDay(now));
+  const raw = await store.get(key);
+  const used = raw === null ? 0 : Number(raw);
+  const usedSafe = Number.isSafeInteger(used) && used >= 0 ? used : 0;
+  if (usedSafe >= QUOTA_DAILY_LIMIT) return { allowed: false, remaining: 0 };
+  const next = usedSafe + 1;
+  await store.put(key, String(next), { expirationTtl: QUOTA_TTL_SECONDS });
+  return { allowed: true, remaining: QUOTA_DAILY_LIMIT - next };
+}
+export type QuotaChecker = (installationId: string) => Promise<{ allowed: boolean; remaining: number }>;
+const quotaFooter = (remaining: number): string => `Solicitudes restantes hoy: ${remaining} de ${QUOTA_DAILY_LIMIT}.`;
+
 const MCP_PROTOCOL = "2025-03-26";
 const MCP_SERVER = { name: "sene-guardian", version: "1.0.0" };
 
@@ -83,12 +122,16 @@ function rpcError(id: unknown, code: number, message: string): Response {
     headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store", "mcp-protocol-version": MCP_PROTOCOL },
   });
 }
-function rpcText(id: unknown, text: string): Response {
-  return rpc(id, { content: [{ type: "text", text }], isError: false });
+function rpcText(id: unknown, text: string, remaining?: number): Response {
+  const content: { type: string; text: string }[] = [{ type: "text", text }];
+  if (remaining !== undefined) content.push({ type: "text", text: quotaFooter(remaining) });
+  return rpc(id, { content, isError: false });
 }
-function rpcStructured(id: unknown, value: Record<string, unknown>): Response {
+function rpcStructured(id: unknown, value: Record<string, unknown>, remaining?: number): Response {
+  const content: { type: string; text: string }[] = [{ type: "text", text: JSON.stringify(value) }];
+  if (remaining !== undefined) content.push({ type: "text", text: quotaFooter(remaining) });
   return rpc(id, {
-    content: [{ type: "text", text: JSON.stringify(value) }],
+    content,
     structuredContent: value,
     isError: false,
   });
@@ -100,7 +143,7 @@ async function parseBody(request: Request): Promise<any> {
   if (text.length > 16_384) throw new Error("too_large");
   return JSON.parse(text);
 }
-export async function handleMuseMcp(request: Request, installationId: string, loadOverview: OverviewLoader, loadLicenseActive: LicenseLoader = async () => true): Promise<Response> {
+export async function handleMuseMcp(request: Request, installationId: string, loadOverview: OverviewLoader, loadLicenseActive: LicenseLoader = async () => true, checkQuota?: QuotaChecker): Promise<Response> {
   let message: any;
   try { message = await parseBody(request); }
   catch (error) {
@@ -127,7 +170,7 @@ export async function handleMuseMcp(request: Request, installationId: string, lo
       capabilities: { tools: { listChanged: false } },
       serverInfo: MCP_SERVER,
       instructions: licenseActive
-        ? "SENE GUARDIAN ofrece consultas administrativas de solo lectura para una única instalación. No expone licencias, códigos comerciales, pagos ni acciones de escritura."
+        ? "SENE GUARDIAN ofrece consultas administrativas de solo lectura para una única instalación. No expone licencias, códigos comerciales, pagos ni acciones de escritura. Cada instalación tiene 30 solicitudes diarias; cada consulta cuenta como una y el resultado indica cuántas quedan."
         : LICENSE_EXPIRED_MESSAGE,
     });
   }
@@ -159,41 +202,47 @@ export async function handleMuseMcp(request: Request, installationId: string, lo
     } else if (Object.keys(args).length > 0) {
       return rpcError(message.id, -32602, "This read-only tool accepts no arguments");
     }
+    let remaining: number | undefined;
+    if (checkQuota) {
+      const quota = await checkQuota(installationId);
+      if (!quota.allowed) return rpcText(message.id, QUOTA_EXCEEDED_MESSAGE);
+      remaining = quota.remaining;
+    }
     const overview = await loadOverview();
-    if (!overview) return rpcText(message.id, "Todavía no hay una captura administrativa disponible para esta instalación.");
+    if (!overview) return rpcText(message.id, "Todavía no hay una captura administrativa disponible para esta instalación.", remaining);
     // Installation identity is included only as correlation metadata, never as a selector.
     if (overview.installationId !== installationId)
       return rpcError(message.id, -32603, "Installation scope mismatch");
     const { installationId: _installationId, ...safeOverview } = overview;
-    if (params.name === "get_business_overview") return rpcStructured(message.id, safeOverview);
+    if (params.name === "get_business_overview") return rpcStructured(message.id, safeOverview, remaining);
     if (params.name === "list_workers") {
       const employees = Array.isArray((safeOverview.workers as any)?.employees)
         ? (safeOverview.workers as any).employees
         : [];
       if (employees.length === 0)
-        return rpcText(message.id, "Todavía no hay trabajadores registrados para esta instalación.");
-      return rpcStructured(message.id, { total: employees.length, employees });
+        return rpcText(message.id, "Todavía no hay trabajadores registrados para esta instalación.", remaining);
+      return rpcStructured(message.id, { total: employees.length, employees }, remaining);
     }
     if (params.name === "get_inventory_summary") {
       const inventory = (safeOverview.inventory as any) ?? {};
       return rpcStructured(message.id, {
         categories: inventory.categories ?? [],
         damagedProducts: (safeOverview as any).damagedProducts ?? null,
-      });
+      }, remaining);
     }
     if (params.name === "get_sales_summary") {
       return rpcStructured(message.id, {
         sales: { periods: (safeOverview.sales as any)?.periods ?? [] },
         approvedMovements: { periods: (safeOverview.approvedMovements as any)?.periods ?? [] },
-      });
+      }, remaining);
     }
     if (params.name === "list_payrolls") {
       const periods = Array.isArray((safeOverview.payroll as any)?.periods)
         ? (safeOverview.payroll as any).periods
         : [];
       if (periods.length === 0)
-        return rpcText(message.id, "Todavía no hay periodos de nómina registrados para esta instalación.");
-      return rpcStructured(message.id, { total: periods.length, periods });
+        return rpcText(message.id, "Todavía no hay periodos de nómina registrados para esta instalación.", remaining);
+      return rpcStructured(message.id, { total: periods.length, periods }, remaining);
     }
     if (params.name === "get_payroll") {
       const periods = Array.isArray((safeOverview.payroll as any)?.periods)
@@ -201,8 +250,8 @@ export async function handleMuseMcp(request: Request, installationId: string, lo
         : [];
       const found = periods.find((p: any) => p?.period === args.period);
       if (!found)
-        return rpcText(message.id, `No hay nómina registrada para el periodo ${args.period} en esta instalación.`);
-      return rpcStructured(message.id, found);
+        return rpcText(message.id, `No hay nómina registrada para el periodo ${args.period} en esta instalación.`, remaining);
+      return rpcStructured(message.id, found, remaining);
     }
     return rpcError(message.id, -32602, "Unknown tool");
   }
