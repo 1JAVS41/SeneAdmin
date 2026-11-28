@@ -274,7 +274,7 @@ test("license gate: active license lets tools work and initialize keeps the norm
   assert.equal(parsed.total, 2);
   assert.equal(result.isError, false);
   assert.equal((await initialize(env, 105)).instructions,
-    "SENE GUARDIAN ofrece consultas administrativas de solo lectura para una única instalación. No expone licencias, códigos comerciales, pagos ni acciones de escritura.");
+    "SENE GUARDIAN ofrece consultas administrativas de solo lectura para una única instalación. No expone licencias, códigos comerciales, pagos ni acciones de escritura. Cada instalación tiene 30 solicitudes diarias; cada consulta cuenta como una y el resultado indica cuántas quedan.");
 });
 
 test("license gate: expired license (validUntil in the past) blocks tools/call with the exact expiry message", async () => {

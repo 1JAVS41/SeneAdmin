@@ -1,5 +1,5 @@
 import { handleOwnerDelivery, isLicenseRecordActive, licenseRecordKey, type LicenseRecord } from "./owner-delivery";
-import { handleMuseMcp, LICENSE_EXPIRED_MESSAGE } from "./muse-mcp";
+import { handleMuseMcp, LICENSE_EXPIRED_MESSAGE, useQuota } from "./muse-mcp";
 import { handleOwnerMuseMcp } from "./owner-muse-mcp";
 
 export interface Env {
@@ -351,7 +351,7 @@ export default {
           ...(snapshot.workers ? { workers: snapshot.workers } : {}),
           dataAgeSeconds: Math.max(0, Math.floor((Date.now() - Date.parse(snapshot.capturedAt)) / 1000)),
         };
-      }, async () => loadLicenseActive(env, id));
+      }, async () => loadLicenseActive(env, id), async (quotaId: string) => useQuota(env.GUARDIAN_DATA, quotaId));
     }
 
     if (request.method === "POST" && url.pathname === "/v1/snapshot") {
