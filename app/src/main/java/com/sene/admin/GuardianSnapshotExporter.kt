@@ -1,4 +1,3 @@
-successfully downloaded text file (SHA: e0146604408d1125737ec2ba27529ccb82f63823)
 package com.sene.admin
 
 import android.content.Context

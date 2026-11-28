@@ -1,4 +1,3 @@
-successfully downloaded text file (SHA: 4df0ae1b061eae20b14543607f734a4ddd24e95e)
 package com.sene.admin
 
 import androidx.appcompat.app.AppCompatActivity
