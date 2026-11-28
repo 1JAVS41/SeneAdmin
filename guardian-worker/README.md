@@ -14,7 +14,7 @@ Código de desarrollo de SENE GUARDIÁN. Esta rama no se ha desplegado en produc
 
 ## Conectores MUSE
 
-- Cliente: `POST /v1/muse/{installationId}/mcp`. Expone únicamente cuatro herramientas de solo lectura y limitadas a una instalación, todas sin argumentos y recortadas del mismo resumen administrativo ya cargado (`get_business_overview`): `get_business_overview` (resumen completo), `list_workers` (devuelve `{ total, employees }` de `workers`; si no hay trabajadores, responde "Todavía no hay trabajadores registrados para esta instalación."), `get_inventory_summary` (devuelve `inventory.categories` y `damagedProducts`) y `get_sales_summary` (devuelve `sales.periods` y `approvedMovements.periods`).
+- Cliente: `POST /v1/muse/{installationId}/mcp`. Expone únicamente seis herramientas de solo lectura y limitadas a una instalación, todas recortadas del mismo resumen administrativo ya cargado (`get_business_overview`): `get_business_overview` (resumen completo), `list_workers` (devuelve `{ total, employees }` de `workers`; si no hay trabajadores, responde "Todavía no hay trabajadores registrados para esta instalación."), `get_inventory_summary` (devuelve `inventory.categories` y `damagedProducts`), `get_sales_summary` (devuelve `sales.periods` y `approvedMovements.periods`), `list_payrolls` (devuelve `{ total, periods }` de `payroll.periods`, los totales de nómina por periodo; si no hay periodos, responde "Todavía no hay periodos de nómina registrados para esta instalación.") y `get_payroll` (devuelve el periodo de nómina de la fecha pedida en el argumento `period`, formato `YYYY-MM-DD`; si esa fecha no está en el resumen, responde "No hay nómina registrada para el periodo … en esta instalación."). Solo `get_payroll` acepta un argumento (`period`); las otras cinco no aceptan ninguno.
 - Propietario: `POST /v1/muse/owner/mcp`. Expone `list_owner_license_requests` (solicitudes pendientes, con folio y código) y `list_owner_active_licenses` (total y lista de licencias activas, sin código), autenticado con la credencial central del propietario. No acepta tokens de instalación.
 - Las solicitudes de licencia nueva y renovación pertenecen exclusivamente al MUSE del propietario. No se exponen en el MCP de clientes ni se ejecutan acciones de aprobación, activación o envío.
 
@@ -47,9 +47,26 @@ El exportador Android construye una lista permitida de datos y no envía filas p
 
 No se exportan teléfonos, identificadores de trabajadores, productos, códigos comerciales, credenciales ni PIN. Los nombres y sueldos individuales sí se exportan, solo a la instalación a la que pertenecen: el servidor guarda el resumen solo con los campos permitidos y descarta cualquier otro dato que llegue por accidente.
 
-### Por qué no existen herramientas de lista de artículos ni de movimientos individuales
+### Herramientas de nómina implementadas (el snapshot sí las sostiene)
 
-El snapshot no contiene lista de artículos ni movimientos individuales, solo conteos y totales: inventario trae conteos por categoría, productos dañados trae solo un conteo, ventas y movimientos aprobados traen solo totales por mes. Por eso no existen `list_out_of_stock_items`, `get_inventory_item` ni `list_sales_movements`: no hay datos en el resumen para responderlas sin inventar campos. `get_inventory_summary` devuelve los conteos por categoría y el conteo de dañados, y `get_sales_summary` devuelve los totales mensuales de ventas y de movimientos aprobados.
+El snapshot trae nómina por periodo (`payroll.periods`, con `period` en formato `YYYY-MM-DD` y totales: `employeeCount`, `payrollCount`, `grossCents`, `absenceCents`, `earlyExitCents`, `loanCents`, `consumptionCents`, `netCents`, `deliveredCents`). Por eso existen `list_payrolls` (todos los periodos guardados, como máximo los últimos 10 por la retención) y `get_payroll` (un periodo por su fecha, argumento `period`). Son totales agregados por periodo, no sueldos individuales: el sueldo individual de cada trabajador vive en `workers.employees` y se consulta con `list_workers`.
+
+### Herramientas no implementadas (el snapshot no tiene los datos)
+
+De la lista aceptada, estas diez herramientas **no** se implementan porque el snapshot actual no trae los datos para responderlas sin inventar campos, datos ni identificadores. Para implementar cualquiera de ellas, primero el exportador Android y el tipo `Snapshot` de `src/index.ts` tendrían que incluir esa categoría de datos:
+
+- `list_inventory_items`: el inventario trae solo conteos por categoría (`itemCount`, `unitsInStock`, `lowStockCount`, `outOfStockCount`); no hay lista de artículos (sin código, nombre ni existencias por artículo).
+- `get_inventory_item`: no existe ningún identificador de artículo en el snapshot (sin código de producto), así que no hay por qué buscar un artículo.
+- `list_out_of_stock_items`: solo existe el conteo `outOfStockCount` por categoría; no hay lista de qué artículos están agotados.
+- `list_sales_movements`: ventas (`sales.periods`) y movimientos aprobados (`approvedMovements.periods`) traen solo totales y conteos por mes; no hay movimientos ni ventas individuales (sin fecha, importe ni identificador por movimiento).
+- `list_admin_reports`: el snapshot no trae reportes individuales; de ventas solo trae `reportCount` por mes, sin identificador, título ni contenido de reporte.
+- `get_admin_report`: igual que la anterior: no hay reportes individuales ni identificador de reporte en el snapshot.
+- `get_worker`: `workers.employees` trae solo nombre y sueldo (`name`, `salaryCents`), sin identificador estable de trabajador; el nombre no es una clave única ni estable (puede repetirse o cambiar), así que no se inventa una búsqueda por nombre.
+- `list_payroll_requests`: el snapshot no trae solicitudes de nómina (sin lista de solicitudes, estados ni folios).
+- `list_attendance`: el snapshot no trae ningún dato de asistencia.
+- `get_attendance_summary`: igual que la anterior: no hay registros de asistencia ni de jornada en el snapshot.
+
+`get_inventory_summary` devuelve los conteos por categoría y el conteo de dañados, y `get_sales_summary` devuelve los totales mensuales de ventas y de movimientos aprobados.
 
 ## Retención y limpieza cada 30 días
 
@@ -65,7 +82,7 @@ Regla del usuario (2026-11-27): todo el proyecto debe ser ahorrativo en solicitu
 
 ### Limitación documentada (sin inventar datos)
 
-El snapshot solo guarda agregados por periodo, no filas individuales: no existen reportes individuales, movimientos individuales ni registros de asistencia en el servidor (ver "Por qué no existen herramientas de lista de artículos ni de movimientos individuales"). Por eso la regla de "últimos 10 reportes / movimientos / asistencias individuales" **no se puede cumplir en el servidor con el modelo actual**: no hay nada que recortar. Cuando el exportador y el snapshot lleguen a incluir esas categorías individuales, la misma poda en la ingesta (últimos 10 al guardar) deberá aplicarse a cada una. Tampoco se poda el inventario por categoría (son conteos actuales, no historial) ni los productos dañados (un solo conteo).
+El snapshot solo guarda agregados por periodo, no filas individuales: no existen reportes individuales, movimientos individuales ni registros de asistencia en el servidor (ver "Herramientas no implementadas (el snapshot no tiene los datos)"). Por eso la regla de "últimos 10 reportes / movimientos / asistencias individuales" **no se puede cumplir en el servidor con el modelo actual**: no hay nada que recortar. Cuando el exportador y el snapshot lleguen a incluir esas categorías individuales, la misma poda en la ingesta (últimos 10 al guardar) deberá aplicarse a cada una. Tampoco se poda el inventario por categoría (son conteos actuales, no historial) ni los productos dañados (un solo conteo).
 
 ## Configuración y estado
 
@@ -77,7 +94,7 @@ El snapshot solo guarda agregados por periodo, no filas individuales: no existen
 
 ## Verificación automatizada
 
-- Worker CI: TypeScript y pruebas automatizadas de aislamiento entre instalaciones, revocación, validación de snapshots, datos agregados y separación del canal del propietario. Incluye pruebas de `list_workers` (con trabajadores y sin trabajadores), `get_inventory_summary` y `get_sales_summary`.
+- Worker CI: TypeScript y pruebas automatizadas de aislamiento entre instalaciones, revocación, validación de snapshots, datos agregados y separación del canal del propietario. Incluye pruebas de `list_workers` (con trabajadores y sin trabajadores), `get_inventory_summary` y `get_sales_summary`, y de `list_payrolls` y `get_payroll` (lista de periodos, periodo por fecha, periodo inexistente, sin nómina, y argumento `period` faltante, mal formado o con campos extra).
 - Retención (`test/retention.test.ts`): poda a los últimos 10 periodos por categoría al guardar el snapshot, TTL de 30 días del snapshot, plantilla de trabajadores completa (no se poda), eventos de licencia completados guardados sin caducidad (historial permanente) frente a solicitudes pendientes con un día, y caducidad de licencias sin cambios (una licencia vencida queda en el historial pero no se lista como activa).
 - Android: workflow de compilación Kotlin; no ensambla APK. El workflow `guardian-android-compile.yml` solo corre en push, no en `pull_request`, así que la compilación Kotlin no corre en los PR de esta rama.
 - Las pruebas no sustituyen la verificación de runtime real en Cloudflare ni la validación con datos de una instalación.

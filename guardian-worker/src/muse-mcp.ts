@@ -1,9 +1,11 @@
 /**
  * Stateless Streamable HTTP MCP endpoint for Meta Muse custom connectors.
- * Exposes four read-only tools scoped to the installation ID in the URL.
+ * Exposes six read-only tools scoped to the installation ID in the URL.
  * Each tool only trims the same administrative overview loaded by
  * loadOverview; no tool invents fields or reaches another installation.
  * License owner events are intentionally not exposed here.
+ * Only list_payrolls and get_payroll take an argument (get_payroll takes
+ * the payroll period date); the other four tools accept no arguments.
  */
 type OverviewLoader = () => Promise<Record<string, unknown> | null>;
 
@@ -36,6 +38,25 @@ const TOOLS = [
     name: "get_sales_summary",
     description: "Resumen de ventas y movimientos de solo lectura de la instalación conectada: totales de ventas por mes y movimientos aprobados agregados por mes. Recorta el mismo resumen administrativo ya cargado. El resumen no contiene movimientos individuales, así que no hay detalle por venta o movimiento.",
     inputSchema: NO_ARGS,
+    annotations: READ_ONLY,
+  },
+  {
+    name: "list_payrolls",
+    description: "Lista de solo lectura de los periodos de nómina de la instalación conectada, con totales por periodo (trabajadores, nóminas, bruto, ausencias, salidas anticipadas, préstamos, consumos, neto y entregado). Recorta el mismo resumen administrativo ya cargado; no incluye sueldos individuales por periodo ni datos de otra instalación o de licencias.",
+    inputSchema: NO_ARGS,
+    annotations: READ_ONLY,
+  },
+  {
+    name: "get_payroll",
+    description: "Nómina de solo lectura de un periodo de la instalación conectada: totales de ese periodo (trabajadores, nóminas, bruto, ausencias, salidas anticipadas, préstamos, consumos, neto y entregado). Requiere el argumento period con la fecha del periodo (YYYY-MM-DD) tal como aparece en payroll.periods. Recorta el mismo resumen administrativo ya cargado; no incluye sueldos individuales por periodo ni datos de otra instalación o de licencias.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        period: { type: "string", description: "Fecha del periodo de nómina (YYYY-MM-DD), tal como aparece en payroll.periods." },
+      },
+      required: ["period"],
+      additionalProperties: false,
+    },
     annotations: READ_ONLY,
   },
 ];
@@ -107,8 +128,21 @@ export async function handleMuseMcp(request: Request, installationId: string, lo
     const toolNames = TOOLS.map((tool) => tool.name);
     if (!toolNames.includes(params.name))
       return rpcError(message.id, -32602, "Unknown tool");
-    if (params.arguments && Object.keys(params.arguments).length > 0)
+    // Argument validation is per tool: only get_payroll takes an argument
+    // (period, a YYYY-MM-DD date already present in the snapshot). Every
+    // other tool accepts no arguments, so any argument there — including an
+    // installationId that could attempt to change scope — is rejected.
+    const args = params.arguments ?? {};
+    if (typeof args !== "object" || args === null || Array.isArray(args))
+      return rpcError(message.id, -32602, "Invalid arguments");
+    if (params.name === "get_payroll") {
+      const keys = Object.keys(args);
+      if (keys.length !== 1 || keys[0] !== "period" || typeof args.period !== "string" ||
+          !/^\d{4}-\d{2}-\d{2}$/.test(args.period) || !Number.isFinite(Date.parse(args.period)))
+        return rpcError(message.id, -32602, "get_payroll requires exactly one argument: period (YYYY-MM-DD)");
+    } else if (Object.keys(args).length > 0) {
       return rpcError(message.id, -32602, "This read-only tool accepts no arguments");
+    }
     const overview = await loadOverview();
     if (!overview) return rpcText(message.id, "Todavía no hay una captura administrativa disponible para esta instalación.");
     // Installation identity is included only as correlation metadata, never as a selector.
@@ -136,6 +170,23 @@ export async function handleMuseMcp(request: Request, installationId: string, lo
         sales: { periods: (safeOverview.sales as any)?.periods ?? [] },
         approvedMovements: { periods: (safeOverview.approvedMovements as any)?.periods ?? [] },
       });
+    }
+    if (params.name === "list_payrolls") {
+      const periods = Array.isArray((safeOverview.payroll as any)?.periods)
+        ? (safeOverview.payroll as any).periods
+        : [];
+      if (periods.length === 0)
+        return rpcText(message.id, "Todavía no hay periodos de nómina registrados para esta instalación.");
+      return rpcStructured(message.id, { total: periods.length, periods });
+    }
+    if (params.name === "get_payroll") {
+      const periods = Array.isArray((safeOverview.payroll as any)?.periods)
+        ? (safeOverview.payroll as any).periods
+        : [];
+      const found = periods.find((p: any) => p?.period === args.period);
+      if (!found)
+        return rpcText(message.id, `No hay nómina registrada para el periodo ${args.period} en esta instalación.`);
+      return rpcStructured(message.id, found);
     }
     return rpcError(message.id, -32602, "Unknown tool");
   }
