@@ -1,3 +1,4 @@
+successfully downloaded text file (SHA: e0146604408d1125737ec2ba27529ccb82f63823)
 package com.sene.admin
 
 import android.content.Context
@@ -14,14 +15,16 @@ import java.util.TimeZone
 /**
  * Exportación EXPLÍCITA de un resumen agregado para SENE GUARDIÁN.
  *
- * No programa tareas, no guarda credenciales y no modifica los almacenes locales.
- * La persona que integre esta clase debe invocarla desde un hilo de fondo y
+ * No programa tareas por sí mismo, no guarda credenciales y no modifica los almacenes locales.
+ * GuardianAutoSyncWorker lo invoca cada 2 horas, solo cuando el propietario guardó
+ * el consentimiento en GuardianConfigStore. Debe invocarse desde un hilo de fondo y
  * suministrar el token de ingestión de esta instalación desde almacenamiento seguro.
  */
 object GuardianSnapshotExporter {
-    // URL del Worker de PRUEBAS. No cambiar a producción en este cambio;
-    // no se despliega nada y la URL sigue apuntando a pruebas.
-    private const val SNAPSHOT_URL = "https://sene-guardian-test.nagavs28.workers.dev/v1/snapshot"
+    // URL del Worker de PRODUCCIÓN (sene-guardian-api). Las capturas de esta
+    // instalación van solo a producción; el Worker de pruebas
+    // (sene-guardian-test) ya no recibe capturas de esta app.
+    private const val SNAPSHOT_URL = "https://sene-guardian-api.nagavs28.workers.dev/v1/snapshot"
     private val ALLOWED_CATEGORIES = setOf("INVENTARIO_MAESTRO", "INVENTARIO_SENE")
 
     data class ExportResult(val accepted: Boolean, val httpStatus: Int, val message: String)

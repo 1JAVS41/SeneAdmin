@@ -1,3 +1,4 @@
+successfully downloaded text file (SHA: 4df0ae1b061eae20b14543607f734a4ddd24e95e)
 package com.sene.admin
 
 import androidx.appcompat.app.AppCompatActivity
@@ -30,6 +31,7 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         SeneAdminAutoSyncScheduler.ensureScheduled(this)
+        GuardianAutoSyncScheduler.ensureScheduled(this)
         // No mostrar la pantalla principal hasta crear el PIN o autenticar al dueño.
         // La limpieza de archivos no debe retrasar el acceso inicial a SeneAdmin.
         val cleanupContext = applicationContext
