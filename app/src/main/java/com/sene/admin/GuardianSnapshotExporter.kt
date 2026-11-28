@@ -1,4 +1,3 @@
-successfully downloaded text file (SHA: e0146604408d1125737ec2ba27529ccb82f63823)
 package com.sene.admin
 
 import android.content.Context
@@ -7,6 +6,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
+import java.security.MessageDigest
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -19,6 +19,14 @@ import java.util.TimeZone
  * GuardianAutoSyncWorker lo invoca cada 2 horas, solo cuando el propietario guardó
  * el consentimiento en GuardianConfigStore. Debe invocarse desde un hilo de fondo y
  * suministrar el token de ingestión de esta instalación desde almacenamiento seguro.
+ *
+ * Ahorro de solicitudes: el resumen que se envía es siempre el mismo formato de
+ * antes; lo único nuevo es [fingerprint], una huella SHA-256 del contenido del
+ * resumen SIN las fechas de captura (para que la huella no cambie solo por la
+ * hora). El Worker compara esa huella con la del último envío aceptado y, si
+ * nada cambió, no envía nada. Cuando un envío es aceptado, el exportador guarda
+ * esa huella en el teléfono (GuardianSyncState), así el envío manual
+ * ("ENVIAR CAPTURA AHORA") también actualiza el último envío conocido.
  */
 object GuardianSnapshotExporter {
     // URL del Worker de PRODUCCIÓN (sene-guardian-api). Las capturas de esta
@@ -28,6 +36,21 @@ object GuardianSnapshotExporter {
     private val ALLOWED_CATEGORIES = setOf("INVENTARIO_MAESTRO", "INVENTARIO_SENE")
 
     data class ExportResult(val accepted: Boolean, val httpStatus: Int, val message: String)
+
+    /**
+     * Huella del resumen actual, sin fechas. Dos resúmenes con los mismos datos
+     * (inventario, movimientos, nómina, trabajadores, ventas, productos dañados)
+     * dan la misma huella aunque se calculen en horas distintas, porque
+     * [snapshotContent] no incluye `capturedAt` ni `updatedAt`.
+     * La huella nunca sale del teléfono: solo se guarda localmente para decidir
+     * si vale la pena volver a enviar; no se envía al servidor ni se registra.
+     */
+    fun fingerprint(context: Context, installationId: String): String {
+        val content = snapshotContent(context.applicationContext, installationId).toString()
+        val digest = MessageDigest.getInstance("SHA-256")
+            .digest(content.toByteArray(Charsets.UTF_8))
+        return digest.joinToString("") { "%02x".format(it) }
+    }
 
     /**
      * Envía una captura agregada. Nunca llamar desde el hilo principal.
@@ -44,7 +67,60 @@ object GuardianSnapshotExporter {
         require(installationId.matches(Regex("^[a-fA-F0-9-]{16,64}$"))) { "Instalación no válida." }
         require(ingestToken.length >= 40) { "Credencial de ingestión no válida." }
 
+        val app = context.applicationContext
         val capturedAt = utcNow()
+        // La huella se calcula sobre el contenido sin fechas, antes de enviar,
+        // para que el envío aceptado pueda guardarse como "último enviado".
+        val content = snapshotContent(app, installationId)
+        val contentFingerprint = MessageDigest.getInstance("SHA-256")
+            .digest(content.toString().toByteArray(Charsets.UTF_8))
+            .joinToString("") { "%02x".format(it) }
+
+        // El formato enviado es el mismo de antes: se añade la fecha de captura
+        // al contenido y la fecha de actualización a cada categoría y a dañados.
+        val payload = content
+            .put("capturedAt", capturedAt)
+        val categories = payload.optJSONObject("inventory")?.optJSONArray("categories")
+        if (categories != null) {
+            for (i in 0 until categories.length()) {
+                categories.optJSONObject(i)?.put("updatedAt", capturedAt)
+            }
+        }
+        payload.optJSONObject("damagedProducts")?.put("updatedAt", capturedAt)
+
+        val connection = (URL(SNAPSHOT_URL).openConnection() as HttpURLConnection)
+        return try {
+            connection.requestMethod = "POST"
+            connection.connectTimeout = 15_000
+            connection.readTimeout = 15_000
+            connection.instanceFollowRedirects = false
+            connection.doOutput = true
+            connection.setRequestProperty("Authorization", "Bearer $ingestToken")
+            connection.setRequestProperty("Content-Type", "application/json; charset=utf-8")
+            connection.setRequestProperty("Accept", "application/json")
+            connection.outputStream.use { it.write(payload.toString().toByteArray(Charsets.UTF_8)) }
+
+            val status = connection.responseCode
+            if (status == HttpURLConnection.HTTP_OK) {
+                // Solo un envío aceptado actualiza el "último enviado": un
+                // rechazo o un fallo de red no debe hacer creer que ya se envió.
+                GuardianSyncState.recordAccepted(app, contentFingerprint)
+                ExportResult(true, status, "Captura agregada aceptada por SENE GUARDIÁN.")
+            } else {
+                // No incluir URL, encabezados ni credenciales en mensajes de error.
+                ExportResult(false, status, "El servidor rechazó la captura (HTTP $status).")
+            }
+        } finally {
+            connection.disconnect()
+        }
+    }
+
+    /**
+     * Contenido del resumen SIN fechas de captura: lo que se compara con la
+     * huella. Las fechas (`capturedAt` / `updatedAt`) se añaden solo en [export],
+     * porque cambian en cada envío aunque los datos sean los mismos.
+     */
+    private fun snapshotContent(context: Context, installationId: String): JSONObject {
         val categories = JSONArray()
         for (category in listOf("INVENTARIO_MAESTRO", "INVENTARIO_SENE")) {
             val local = InventoryLocalStore.snapshot(context.applicationContext, category) ?: continue
@@ -63,52 +139,28 @@ object GuardianSnapshotExporter {
                 // No existe todavía una regla de bajo stock verificada.
                 // null significa desconocido; no inventamos un umbral.
                 .put("lowStockCount", JSONObject.NULL)
-                .put("outOfStockCount", outOfStockCount)
-                .put("updatedAt", capturedAt))
+                .put("outOfStockCount", outOfStockCount))
         }
 
         val damagedProductCount = damagedProductCount(context.applicationContext)
-        val payload = JSONObject()
+        return JSONObject()
             .put("schema", 1)
             .put("installationId", installationId)
-            .put("capturedAt", capturedAt)
             .put("business", JSONObject().put("status", "unknown"))
             .put("inventory", JSONObject().put("categories", categories))
             .put("damagedProducts", JSONObject()
-                .put("itemCount", damagedProductCount)
-                .put("updatedAt", capturedAt))
+                .put("itemCount", damagedProductCount))
             .put("approvedMovements", approvedMovementSummary(context.applicationContext))
             .put("payroll", payrollSummary(context.applicationContext))
             .put("workers", workersSummary(context.applicationContext))
             .put("sales", salesSummary(context.applicationContext))
-
-        val connection = (URL(SNAPSHOT_URL).openConnection() as HttpURLConnection)
-        return try {
-            connection.requestMethod = "POST"
-            connection.connectTimeout = 15_000
-            connection.readTimeout = 15_000
-            connection.instanceFollowRedirects = false
-            connection.doOutput = true
-            connection.setRequestProperty("Authorization", "Bearer $ingestToken")
-            connection.setRequestProperty("Content-Type", "application/json; charset=utf-8")
-            connection.setRequestProperty("Accept", "application/json")
-            connection.outputStream.use { it.write(payload.toString().toByteArray(Charsets.UTF_8)) }
-
-            val status = connection.responseCode
-            if (status == HttpURLConnection.HTTP_OK) {
-                ExportResult(true, status, "Captura agregada aceptada por SENE GUARDIÁN.")
-            } else {
-                // No incluir URL, encabezados ni credenciales en mensajes de error.
-                ExportResult(false, status, "El servidor rechazó la captura (HTTP $status).")
-            }
-        } finally {
-            connection.disconnect()
-        }
     }
 
     /**
      * Solo exporta conteos y unidades por mes; nunca exporta perfiles, descripciones,
      * códigos de producto, importes ni identificadores de movimientos.
+     * Se conservan solo los últimos 10 periodos, como la regla de retención
+     * aprobada (últimos 10 por negocio).
      */
     private fun approvedMovementSummary(context: Context): JSONObject {
         val grouped = OwnerPayrollStore.approvedMovements(context).mapNotNull { movement ->
@@ -117,7 +169,7 @@ object GuardianSnapshotExporter {
             val type = movement.type.uppercase(Locale.ROOT)
             if (type != "CASH_DISBURSEMENT" && type != "INVENTORY_CONSUMPTION") return@mapNotNull null
             Triple(month, type, movement.quantity.coerceAtLeast(0))
-        }.groupBy { it.first }.toSortedMap().toList().takeLast(36)
+        }.groupBy { it.first }.toSortedMap().toList().takeLast(10)
         val periods = JSONArray()
         grouped.forEach { (month, rows) ->
             periods.put(JSONObject()
@@ -133,12 +185,14 @@ object GuardianSnapshotExporter {
      * Totales de nómina por periodo. Se incluyen todos los periodos, también
      * los de menos de tres trabajadores, para coincidir con el servidor, que
      * acepta periodos con un solo trabajador (employeeCount mínimo 1).
+     * Se conservan solo los últimos 10 periodos, como la regla de retención
+     * aprobada (últimos 10 por negocio).
      */
     private fun payrollSummary(context: Context): JSONObject {
         val rows = OwnerPayrollStore.profiles(context).flatMap { profile ->
             OwnerPayrollStore.payrolls(context, profile.id).map { profile.id to it }
         }.filter { it.second.period.matches(Regex("^\\d{4}-\\d{2}-\\d{2}$")) }
-            .groupBy { it.second.period }.toSortedMap().toList().takeLast(36)
+            .groupBy { it.second.period }.toSortedMap().toList().takeLast(10)
         val periods = JSONArray()
         rows.forEach { (period, records) ->
             val employeeCount = records.map { it.first }.distinct().size
@@ -182,6 +236,8 @@ object GuardianSnapshotExporter {
      * Totales mensuales de ventas y salidas de caja desde reportes SENE VENTAS.
      * Usa el último reporte recibido por trabajador y fecha para no sumar varias
      * capturas acumulativas del mismo turno. Nunca exporta trabajador, producto ni detalle.
+     * Se conservan solo los últimos 10 periodos, como la regla de retención
+     * aprobada (últimos 10 por negocio).
      */
     private fun salesSummary(context: Context): JSONObject {
         val latestByShift = linkedMapOf<String, SeneReport>()
@@ -220,7 +276,7 @@ object GuardianSnapshotExporter {
                 }
             }
             if (!values.containsKey("salesNetCents")) null else Triple(month, report.workerId, values)
-        }.groupBy { it.first }.toSortedMap().toList().takeLast(36)
+        }.groupBy { it.first }.toSortedMap().toList().takeLast(10)
         val out = JSONArray()
         periods.forEach { (month, rows) ->
             out.put(JSONObject()

@@ -1,4 +1,3 @@
-successfully downloaded text file (SHA: 45be0316832fcdd190112d1bf301d8fe6e41ae1c)
 package com.sene.admin
 
 import android.app.Activity
@@ -35,7 +34,7 @@ class GuardianSettingsActivity : Activity() {
             setTypeface(null, android.graphics.Typeface.BOLD)
         })
         root.addView(TextView(this).apply {
-            text = "Conexión de solo lectura. Con el consentimiento activo, la captura se envía sola cada 2 horas; también puedes enviarla ahora manualmente."
+            text = "Conexión de solo lectura. Con el consentimiento activo, la captura se revisa cada 2 horas y solo se envía si algo cambió (o una vez al día como señal); también puedes enviarla ahora manualmente."
             textSize = 14f
             setPadding(0, dp(8), 0, dp(16))
         })
@@ -116,6 +115,7 @@ class GuardianSettingsActivity : Activity() {
                 .setNegativeButton("CANCELAR", null)
                 .setPositiveButton("DESACTIVAR") { _, _ ->
                     GuardianConfigStore.clear(this)
+                    GuardianSyncState.clear(this)
                     GuardianAutoSyncScheduler.cancel(this)
                     installation.text?.clear()
                     token.text?.clear()
