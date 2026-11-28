@@ -48,6 +48,26 @@ type Installation = {
   revokedAt?: string;
 };
 
+// Retención y limpieza cada 30 días (regla del usuario, 2026-11-27): por
+// negocio se conservan solo los últimos 10 periodos de cada categoría
+// agregada del snapshot (movimientos aprobados, nómina, ventas). La poda se
+// hace al guardar el snapshot (ingesta), no con un trabajo programado ni con
+// lecturas extra: no gasta solicitudes adicionales al servidor.
+// La lista de trabajadores NO se poda: es la plantilla actual del negocio,
+// no un historial.
+// El snapshot se conserva 30 días sin una ingesta nueva; pasado ese plazo
+// KV lo elimina solo.
+export const RETENTION_PERIODS_PER_CATEGORY = 10;
+export const RETENTION_SNAPSHOT_TTL_SECONDS = 60 * 60 * 24 * 30;
+
+/** Devuelve los últimos 10 periodos, en orden cronológico. El periodo es
+ *  YYYY-MM o YYYY-MM-DD, así que el orden lexicográfico es cronológico. */
+export function prunePeriods<T extends { period: string }>(periods: T[]): T[] {
+  return [...periods]
+    .sort((a, b) => (a.period < b.period ? -1 : a.period > b.period ? 1 : 0))
+    .slice(-RETENTION_PERIODS_PER_CATEGORY);
+}
+
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), {
     status,
@@ -75,6 +95,8 @@ function randomToken(): string {
 function validId(value: string): boolean {
   return /^[a-f0-9-]{16,64}$/i.test(value);
 }
+// Se aceptan hasta 36 periodos por compatibilidad con el exportador;
+// sanitizeSnapshot recorta a los últimos 10 al guardar (retención).
 function validSnapshot(value: unknown): value is Snapshot {
   if (!value || typeof value !== "object") return false;
   const v = value as Partial<Snapshot>;
@@ -144,23 +166,23 @@ function sanitizeSnapshot(value: Snapshot): Snapshot {
   };
   if (value.damagedProducts) clean.damagedProducts = { itemCount: value.damagedProducts.itemCount, updatedAt: value.damagedProducts.updatedAt };
   if (value.approvedMovements) clean.approvedMovements = {
-    periods: value.approvedMovements.periods.map(p => ({
+    periods: prunePeriods(value.approvedMovements.periods.map(p => ({
       period: p.period, cashDisbursementCount: p.cashDisbursementCount,
       inventoryConsumptionCount: p.inventoryConsumptionCount, inventoryConsumptionUnits: p.inventoryConsumptionUnits,
-    })),
+    }))),
   };
   if (value.payroll) clean.payroll = {
-    periods: value.payroll.periods.map(p => ({
+    periods: prunePeriods(value.payroll.periods.map(p => ({
       period: p.period, employeeCount: p.employeeCount, payrollCount: p.payrollCount,
       grossCents: p.grossCents, absenceCents: p.absenceCents, earlyExitCents: p.earlyExitCents,
       loanCents: p.loanCents, consumptionCents: p.consumptionCents, netCents: p.netCents, deliveredCents: p.deliveredCents,
-    })),
+    }))),
   };
   if (value.sales) clean.sales = {
-    periods: value.sales.periods.map(p => ({
+    periods: prunePeriods(value.sales.periods.map(p => ({
       period: p.period, workerCount: p.workerCount, reportCount: p.reportCount,
       salesNetCents: p.salesNetCents, providerPaymentsCents: p.providerPaymentsCents, loansDisbursedCents: p.loansDisbursedCents,
-    })),
+    }))),
   };
   if (value.workers) clean.workers = {
     employees: value.workers.employees.map(e => ({ name: e.name.trim(), salaryCents: e.salaryCents })),
@@ -328,7 +350,7 @@ export default {
       if (prior && Date.parse(value.capturedAt) < Date.parse(prior.capturedAt))
         return json({ error: "stale_snapshot" }, 409);
       const clean = sanitizeSnapshot(value as Snapshot);
-      await env.GUARDIAN_DATA.put(key, JSON.stringify(clean), { expirationTtl: 60 * 60 * 24 * 35 });
+      await env.GUARDIAN_DATA.put(key, JSON.stringify(clean), { expirationTtl: RETENTION_SNAPSHOT_TTL_SECONDS });
       return json({ accepted: true, capturedAt: clean.capturedAt });
     }
 
